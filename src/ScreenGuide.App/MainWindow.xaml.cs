@@ -18,6 +18,7 @@ public partial class MainWindow : Window
     private readonly WindowsSpeechService _speech = new();
     private readonly OverlayWindow _overlay = new();
     private readonly SherpaVoiceAssistantService _voiceAssistant = new(LocalVoiceModelPaths.Create());
+    private readonly ForegroundWindowContextService _foregroundWindow = new();
 
     private Forms.NotifyIcon? _notifyIcon;
     private Forms.ContextMenuStrip? _trayMenu;
@@ -28,6 +29,7 @@ public partial class MainWindow : Window
     private bool _hotkeysReady;
     private bool _allowExit;
     private bool _initialized;
+    private ForegroundWindowContext _windowAtWake = ForegroundWindowContext.Unknown;
 
     public MainWindow()
     {
@@ -162,6 +164,7 @@ public partial class MainWindow : Window
 
     private void VoiceAssistant_WakeWordDetected(object? sender, EventArgs e)
     {
+        _windowAtWake = _foregroundWindow.GetCurrent();
         Dispatcher.BeginInvoke(() =>
         {
             SystemSounds.Asterisk.Play();
@@ -189,11 +192,11 @@ public partial class MainWindow : Window
         LastVoiceStatusText.Text = $"刚刚听到：{recognizedText}";
         StatusLight.Fill = ActiveBrush;
         StatusTitle.Text = "已经听清";
-        StatusDescription.Text = "回答结束后会自动继续等待唤醒词。";
+        StatusDescription.Text = "正在判断是否能在本机直接回答。";
 
         try
         {
-            var spokenReply = $"我听到了。你说的是，{recognizedText}。目前语音唤醒和识别已经工作，下一步接入画面理解和真正的人工智能回答。";
+            var spokenReply = BuildCurrentReply(recognizedText);
             await _speech.SpeakChineseAsync(spokenReply, _backgroundCancellation.Token);
         }
         catch (OperationCanceledException)
@@ -210,6 +213,20 @@ public partial class MainWindow : Window
             _voiceAssistant.ResumeWakeWordListening();
             _overlay.ShowWaitingForWakeWord();
         }
+    }
+
+    private string BuildCurrentReply(string recognizedText)
+    {
+        if (recognizedText.Contains("哪个界面", StringComparison.Ordinal)
+            || recognizedText.Contains("什么界面", StringComparison.Ordinal)
+            || recognizedText.Contains("哪个窗口", StringComparison.Ordinal))
+        {
+            return _windowAtWake == ForegroundWindowContext.Unknown
+                ? "我已经听清问题，但这次没有取得前台窗口名称。"
+                : $"你现在位于，{_windowAtWake.Title}，窗口。";
+        }
+
+        return $"我已经听清，你说的是，{recognizedText}。但真正的人工智能回答服务目前还没有接通，所以我现在不能假装已经分析并回答。";
     }
 
     private void VoiceAssistant_StatusChanged(object? sender, VoiceStatusEventArgs e)

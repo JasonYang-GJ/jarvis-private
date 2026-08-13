@@ -54,7 +54,7 @@ internal sealed class WindowsSpeechService
         }
 
         synthesizer.SetOutputToDefaultAudioDevice();
-        synthesizer.Rate = 0;
+        synthesizer.Rate = 3;
         synthesizer.Volume = 100;
 
         var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
