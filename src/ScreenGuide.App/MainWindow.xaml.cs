@@ -28,6 +28,7 @@ public partial class MainWindow : Window
     private readonly SelectedWindowCaptureService _windowCapture = new();
     private readonly BailianConfigurationStore _bailianStore = new();
     private readonly CloudSharingAuthorization _cloudAuthorization = new();
+    private readonly VoiceTurnRecoveryPolicy _turnRecoveryPolicy = VoiceTurnRecoveryPolicy.Default;
 
     private Forms.NotifyIcon? _notifyIcon;
     private Forms.ContextMenuStrip? _trayMenu;
@@ -38,6 +39,7 @@ public partial class MainWindow : Window
     private bool _hotkeysReady;
     private bool _allowExit;
     private bool _initialized;
+    private int _questionTurnInProgress;
     private ForegroundWindowContext _windowAtWake = ForegroundWindowContext.Unknown;
     private BailianConfiguration _bailianConfiguration = BailianConfiguration.Default;
     private string? _bailianApiKey;
@@ -177,8 +179,18 @@ public partial class MainWindow : Window
     {
         if (_backgroundEnabled)
         {
+            if (Volatile.Read(ref _questionTurnInProgress) != 0)
+            {
+                _overlay.ShowProcessing("上一轮还在处理", "最长等待30秒；结束或超时后会自动恢复待命。");
+                return;
+            }
+
             _voiceAssistant.BeginQuestionListening();
+            return;
         }
+
+        _overlay.ShowStopped();
+        ShowTrayMessage("麦克风当前已停止", "请从右下角托盘图标打开设置，然后重新启动后台陪练。");
     }
 
     private async void Hotkeys_StopRequested(object? sender, EventArgs e)
@@ -215,6 +227,17 @@ public partial class MainWindow : Window
             return;
         }
 
+        if (Interlocked.CompareExchange(ref _questionTurnInProgress, 1, 0) != 0)
+        {
+            _overlay.ShowProcessing("上一轮还在处理", "请稍等；本轮结束或超时后会自动恢复待命。");
+            return;
+        }
+
+        var sessionToken = _backgroundCancellation.Token;
+        using var turnCancellation = CancellationTokenSource.CreateLinkedTokenSource(sessionToken);
+        turnCancellation.CancelAfter(_turnRecoveryPolicy.TurnTimeout);
+        var turnToken = turnCancellation.Token;
+
         _overlay.ShowRecognized($"你说：{recognizedText}");
         LastVoiceStatusText.Text = $"刚刚听到：{recognizedText}";
         StatusLight.Fill = ActiveBrush;
@@ -227,16 +250,39 @@ public partial class MainWindow : Window
             if (localReply is not null)
             {
                 _overlay.ShowAnswer(localReply);
-                await _speech.SpeakChineseAsync(localReply, _backgroundCancellation.Token);
+                await _speech.SpeakChineseAsync(localReply, turnToken);
             }
             else
             {
-                await AskBailianAndSpeakAsync(recognizedText, _backgroundCancellation.Token);
+                await AskBailianAndSpeakAsync(recognizedText, turnToken);
+            }
+        }
+        catch (OperationCanceledException) when (_turnRecoveryPolicy.IsTurnTimeout(
+                   sessionToken.IsCancellationRequested,
+                   turnCancellation.IsCancellationRequested))
+        {
+            const string timeoutMessage = "这次回答等待超过30秒，已自动取消并恢复待命。你可以重新说“你好贾维斯”。";
+            _overlay.ShowProblem(timeoutMessage);
+            LastVoiceStatusText.Text = timeoutMessage;
+            StatusLight.Fill = IdleBrush;
+            StatusTitle.Text = "回答超时，正在恢复";
+            StatusDescription.Text = "本轮云端请求和语音播放已取消，不会继续卡住麦克风。";
+            SystemSounds.Exclamation.Play();
+
+            using var recoverySpeechCancellation = CancellationTokenSource.CreateLinkedTokenSource(sessionToken);
+            recoverySpeechCancellation.CancelAfter(TimeSpan.FromSeconds(5));
+            try
+            {
+                await _speech.SpeakChineseAsync("这次等待超时，已经恢复待命。", recoverySpeechCancellation.Token);
+            }
+            catch
+            {
+                // The persistent overlay still explains the timeout.
             }
         }
         catch (OperationCanceledException)
         {
-            return;
+            // The whole background session is stopping.
         }
         catch (Exception exception)
         {
@@ -247,19 +293,41 @@ public partial class MainWindow : Window
             StatusDescription.Text = exception.Message;
             try
             {
-                await _speech.SpeakChineseAsync("这次回答没有完成，请打开设置查看原因。", _backgroundCancellation.Token);
+                using var failureSpeechCancellation = CancellationTokenSource.CreateLinkedTokenSource(sessionToken);
+                failureSpeechCancellation.CancelAfter(TimeSpan.FromSeconds(5));
+                await _speech.SpeakChineseAsync(
+                    "这次回答没有完成，已经恢复待命。",
+                    failureSpeechCancellation.Token);
             }
             catch
             {
                 // The visible overlay still contains the failure reason.
             }
         }
-
-        if (_backgroundEnabled)
+        finally
         {
-            _voiceAssistant.ResumeWakeWordListening();
-            _overlay.ShowWaitingForWakeWord();
+            Interlocked.Exchange(ref _questionTurnInProgress, 0);
+            if (_turnRecoveryPolicy.ShouldResumeListening(
+                    _backgroundEnabled,
+                    sessionToken.IsCancellationRequested))
+            {
+                _voiceAssistant.ResumeWakeWordListening();
+                ShowWaitingState();
+            }
         }
+    }
+
+    private void ShowWaitingState()
+    {
+        StatusLight.Fill = ActiveBrush;
+        StatusTitle.Text = "正在等待语音唤醒";
+        StatusDescription.Text = "直接说“你好贾维斯”；上一轮无论成功或失败都不会阻塞下一轮。";
+        LastVoiceStatusText.Text = "麦克风正在本机等待唤醒词。";
+        if (_notifyIcon is not null)
+        {
+            _notifyIcon.Text = "屏幕陪练老师（正在本机等待唤醒）";
+        }
+        _overlay.ShowWaitingForWakeWord();
     }
 
     private string? TryBuildLocalReply(string recognizedText)
@@ -341,7 +409,7 @@ public partial class MainWindow : Window
 
         try
         {
-            await speechTask;
+            await speechTask.WaitAsync(cancellationToken);
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
@@ -607,7 +675,17 @@ public partial class MainWindow : Window
 
     private void VoiceAssistant_Failed(object? sender, VoiceStatusEventArgs e)
     {
-        Dispatcher.BeginInvoke(() => ShowVoiceProblem(e.Message));
+        Dispatcher.BeginInvoke(async () =>
+        {
+            if (_backgroundEnabled)
+            {
+                await StopBackgroundModeAsync(showSettings: false);
+            }
+
+            var message = $"麦克风意外停止：{e.Message}。请打开设置后重新启动。";
+            ShowVoiceProblem(message);
+            _overlay.ShowProblem(message);
+        });
     }
 
     private void ShowVoiceProblem(string message)
@@ -650,17 +728,7 @@ public partial class MainWindow : Window
         }
         else
         {
-            _ = HideOverlayAfterDelayAsync();
-            ShowTrayMessage("后台陪练已停止", "麦克风已经关闭。可从右下角图标重新打开设置。 ");
-        }
-    }
-
-    private async Task HideOverlayAfterDelayAsync()
-    {
-        await Task.Delay(TimeSpan.FromSeconds(2.5));
-        if (!_backgroundEnabled)
-        {
-            _overlay.Hide();
+            ShowTrayMessage("后台陪练已停止", "麦克风已经关闭；右上角状态条会一直提示，直到重新启动。 ");
         }
     }
 
