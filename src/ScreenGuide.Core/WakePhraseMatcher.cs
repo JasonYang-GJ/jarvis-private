@@ -4,7 +4,7 @@ namespace ScreenGuide.Core;
 
 public static class WakePhraseMatcher
 {
-    private static readonly string[] AcceptedPhrases =
+    public static IReadOnlyList<string> AcceptedPhrases { get; } = new[]
     {
         "你好贾维斯",
         "你好贾维思",

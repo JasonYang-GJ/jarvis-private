@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.IO;
+using System.Speech.Recognition;
 using System.Threading.Channels;
 using NAudio;
 using NAudio.Wave;
@@ -22,6 +23,7 @@ internal sealed class SherpaVoiceAssistantService : IAsyncDisposable
     private Channel<float[]>? _audioChannel;
     private Task? _workerTask;
     private WaveInEvent? _microphone;
+    private SpeechRecognitionEngine? _windowsWakeRecognizer;
     private KeywordSpotter? _keywordSpotter;
     private OnlineRecognizer? _recognizer;
     private OnlineStream? _keywordStream;
@@ -64,6 +66,7 @@ internal sealed class SherpaVoiceAssistantService : IAsyncDisposable
         try
         {
             await Task.Run(InitializeModels, cancellationToken).ConfigureAwait(false);
+            InitializeWindowsWakeRecognizer();
 
             var channel = Channel.CreateBounded<float[]>(new BoundedChannelOptions(80)
             {
@@ -92,6 +95,15 @@ internal sealed class SherpaVoiceAssistantService : IAsyncDisposable
             }
 
             microphone.StartRecording();
+            try
+            {
+                _windowsWakeRecognizer?.RecognizeAsync(RecognizeMode.Multiple);
+            }
+            catch (InvalidOperationException)
+            {
+                DisposeWindowsWakeRecognizer();
+                RaiseStatus("Windows 中文唤醒暂不可用，继续使用 Sherpa 双通道");
+            }
             RaiseStatus("正在本机等待“你好贾维斯”");
         }
         catch
@@ -121,13 +133,18 @@ internal sealed class SherpaVoiceAssistantService : IAsyncDisposable
 
     public void BeginQuestionListening()
     {
-        if (_state is VoiceListeningState.Stopped or VoiceListeningState.Starting)
+        if (_state != VoiceListeningState.WaitingForWakeWord)
         {
             return;
         }
 
         lock (_modelLock)
         {
+            if (_state != VoiceListeningState.WaitingForWakeWord)
+            {
+                return;
+            }
+
             _state = VoiceListeningState.Paused;
             _recognizer?.Reset(_recognitionStream!);
             _questionTimer.Restart();
@@ -187,6 +204,7 @@ internal sealed class SherpaVoiceAssistantService : IAsyncDisposable
 
         _audioChannel = null;
         DisposeModels();
+        DisposeWindowsWakeRecognizer();
         cancellation?.Dispose();
         RaiseStatus("麦克风已停止");
     }
@@ -234,6 +252,64 @@ internal sealed class SherpaVoiceAssistantService : IAsyncDisposable
         _recognizer = new OnlineRecognizer(recognizerConfig);
         _keywordStream = _keywordSpotter.CreateStream();
         _recognitionStream = _recognizer.CreateStream();
+    }
+
+    private void InitializeWindowsWakeRecognizer()
+    {
+        try
+        {
+            var recognizerInfo = SpeechRecognitionEngine.InstalledRecognizers()
+                .FirstOrDefault(candidate => candidate.Culture.Name.Equals(
+                    "zh-CN",
+                    StringComparison.OrdinalIgnoreCase));
+            if (recognizerInfo is null)
+            {
+                return;
+            }
+
+            var choices = new Choices(WakePhraseMatcher.AcceptedPhrases.ToArray());
+            var grammarBuilder = new GrammarBuilder(choices)
+            {
+                Culture = recognizerInfo.Culture
+            };
+            var recognizer = new SpeechRecognitionEngine(recognizerInfo);
+            recognizer.LoadGrammar(new Grammar(grammarBuilder) { Name = "JarvisWakePhrase" });
+            recognizer.SetInputToDefaultAudioDevice();
+            recognizer.SpeechRecognized += WindowsWakeRecognizer_SpeechRecognized;
+            _windowsWakeRecognizer = recognizer;
+        }
+        catch
+        {
+            DisposeWindowsWakeRecognizer();
+        }
+    }
+
+    private void WindowsWakeRecognizer_SpeechRecognized(object? sender, SpeechRecognizedEventArgs e)
+    {
+        if (e.Result.Confidence >= 0.35F && WakePhraseMatcher.IsMatch(e.Result.Text))
+        {
+            BeginQuestionListening();
+        }
+    }
+
+    private void DisposeWindowsWakeRecognizer()
+    {
+        var recognizer = Interlocked.Exchange(ref _windowsWakeRecognizer, null);
+        if (recognizer is null)
+        {
+            return;
+        }
+
+        recognizer.SpeechRecognized -= WindowsWakeRecognizer_SpeechRecognized;
+        try
+        {
+            recognizer.RecognizeAsyncCancel();
+        }
+        catch (InvalidOperationException)
+        {
+            // Recognition was not running or had already stopped.
+        }
+        recognizer.Dispose();
     }
 
     private void Microphone_DataAvailable(object? sender, WaveInEventArgs e)

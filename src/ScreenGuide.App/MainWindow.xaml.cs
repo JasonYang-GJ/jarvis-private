@@ -459,7 +459,7 @@ public partial class MainWindow : Window
             {
                 StatusLight.Fill = ListeningBrush;
                 StatusTitle.Text = "麦克风输入正常";
-                StatusDescription.Text = "已经收到声音，正在用两种本地方式识别“你好贾维斯”。";
+                StatusDescription.Text = "已经收到声音，正在用 Windows 中文识别和 Sherpa 双通道识别“你好贾维斯”。";
                 _overlay.ShowProcessing("麦克风已经听到声音", "正在识别“你好贾维斯”…");
             }
             else if (e.Message.Contains("没有听清", StringComparison.Ordinal))
