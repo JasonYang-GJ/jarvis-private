@@ -1,11 +1,13 @@
 using System.ComponentModel;
 using System.Diagnostics;
+using System.IO;
 using System.Media;
 using System.Text;
 using System.Threading.Channels;
 using System.Windows;
 using System.Windows.Interop;
 using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using ScreenGuide.App.Services;
 using ScreenGuide.Core;
 using Drawing = System.Drawing;
@@ -31,6 +33,7 @@ public partial class MainWindow : Window
     private readonly VoiceTurnRecoveryPolicy _turnRecoveryPolicy = VoiceTurnRecoveryPolicy.Default;
 
     private Forms.NotifyIcon? _notifyIcon;
+    private Drawing.Icon? _trayIcon;
     private Forms.ContextMenuStrip? _trayMenu;
     private Forms.ToolStripMenuItem? _stopListeningMenuItem;
     private SpeechCapabilityReport? _speechCapabilities;
@@ -60,6 +63,7 @@ public partial class MainWindow : Window
         }
 
         _initialized = true;
+        ApplyLocalBranding();
         InitializeTrayIcon();
 
         _voiceAssistant.WakeWordDetected += VoiceAssistant_WakeWordDetected;
@@ -146,7 +150,7 @@ public partial class MainWindow : Window
         }
         if (_notifyIcon is not null)
         {
-            _notifyIcon.Text = "屏幕陪练老师（正在本机等待唤醒）";
+            _notifyIcon.Text = "贾维斯（正在本机等待唤醒）";
         }
 
         StatusLight.Fill = ActiveBrush;
@@ -325,7 +329,7 @@ public partial class MainWindow : Window
         LastVoiceStatusText.Text = "麦克风正在本机等待唤醒词。";
         if (_notifyIcon is not null)
         {
-            _notifyIcon.Text = "屏幕陪练老师（正在本机等待唤醒）";
+            _notifyIcon.Text = "贾维斯（正在本机等待唤醒）";
         }
         _overlay.ShowWaitingForWakeWord();
     }
@@ -720,7 +724,7 @@ public partial class MainWindow : Window
         }
         if (_notifyIcon is not null)
         {
-            _notifyIcon.Text = "屏幕陪练老师（麦克风已停止）";
+            _notifyIcon.Text = "贾维斯（麦克风已停止）";
         }
 
         StatusLight.Fill = IdleBrush;
@@ -779,17 +783,42 @@ public partial class MainWindow : Window
         _stopListeningMenuItem.Click += (_, _) => Dispatcher.BeginInvoke(async () =>
             await StopBackgroundModeAsync(showSettings: false));
         _trayMenu.Items.Add(_stopListeningMenuItem);
-        _trayMenu.Items.Add("退出屏幕陪练老师", null, (_, _) => Dispatcher.BeginInvoke(async () =>
+        _trayMenu.Items.Add("退出贾维斯", null, (_, _) => Dispatcher.BeginInvoke(async () =>
             await ExitApplicationAsync()));
+
+        _trayIcon = Environment.ProcessPath is { } processPath
+            ? Drawing.Icon.ExtractAssociatedIcon(processPath)
+            : null;
 
         _notifyIcon = new Forms.NotifyIcon
         {
-            Icon = Drawing.SystemIcons.Application,
-            Text = "屏幕陪练老师（麦克风未启动）",
+            Icon = _trayIcon ?? Drawing.SystemIcons.Application,
+            Text = "贾维斯（麦克风未启动）",
             Visible = true,
             ContextMenuStrip = _trayMenu
         };
         _notifyIcon.DoubleClick += (_, _) => Dispatcher.Invoke(OpenSettings);
+    }
+
+    private void ApplyLocalBranding()
+    {
+        var imagePath = Path.Combine(AppContext.BaseDirectory, "jarvis-local.png");
+        if (!File.Exists(imagePath))
+        {
+            return;
+        }
+
+        var image = new BitmapImage();
+        image.BeginInit();
+        image.CacheOption = BitmapCacheOption.OnLoad;
+        image.UriSource = new System.Uri(imagePath);
+        image.EndInit();
+        image.Freeze();
+
+        BrandImage.Source = image;
+        BrandImage.Visibility = Visibility.Visible;
+        BrandFallback.Visibility = Visibility.Collapsed;
+        Icon = image;
     }
 
     private void OpenSettings()
@@ -827,7 +856,7 @@ public partial class MainWindow : Window
             Hide();
             _overlay.ShowWaitingForWakeWord();
             ShowTrayMessage(
-                "屏幕陪练仍在后台",
+                "贾维斯仍在后台",
                 "直接说“你好贾维斯”，或从右下角菜单立即停止麦克风。 ");
         }
     }
@@ -847,6 +876,7 @@ public partial class MainWindow : Window
         _voiceAssistant.StopAsync().GetAwaiter().GetResult();
         _backgroundCancellation?.Dispose();
         _notifyIcon?.Dispose();
+        _trayIcon?.Dispose();
         _trayMenu?.Dispose();
 
         try

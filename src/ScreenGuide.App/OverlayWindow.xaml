@@ -1,7 +1,7 @@
 <Window x:Class="ScreenGuide.App.OverlayWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="屏幕陪练状态"
+        Title="贾维斯状态"
         Width="430"
         Height="126"
         WindowStyle="None"
