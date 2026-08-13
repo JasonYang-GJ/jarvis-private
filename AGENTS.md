@@ -26,4 +26,3 @@ Build a Windows learning assistant that observes one user-selected window and gi
 - Review staged changes before every commit.
 - Keep generated files, local configuration, logs, recordings, and captures ignored.
 - Do not add an open-source license until the owner explicitly chooses one.
-
