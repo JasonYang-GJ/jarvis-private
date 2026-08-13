@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Media;
 using System.Windows;
 using System.Windows.Media;
 using ScreenGuide.App.Services;
@@ -16,13 +17,14 @@ public partial class MainWindow : Window
     private readonly GlobalHotkeyService _hotkeys = new();
     private readonly WindowsSpeechService _speech = new();
     private readonly OverlayWindow _overlay = new();
+    private readonly SherpaVoiceAssistantService _voiceAssistant = new(LocalVoiceModelPaths.Create());
 
     private Forms.NotifyIcon? _notifyIcon;
     private Forms.ContextMenuStrip? _trayMenu;
+    private Forms.ToolStripMenuItem? _stopListeningMenuItem;
     private SpeechCapabilityReport? _speechCapabilities;
-    private CancellationTokenSource? _voiceCancellation;
+    private CancellationTokenSource? _backgroundCancellation;
     private bool _backgroundEnabled;
-    private bool _voiceRequestInProgress;
     private bool _hotkeysReady;
     private bool _allowExit;
     private bool _initialized;
@@ -42,22 +44,25 @@ public partial class MainWindow : Window
         _initialized = true;
         InitializeTrayIcon();
 
+        _voiceAssistant.WakeWordDetected += VoiceAssistant_WakeWordDetected;
+        _voiceAssistant.QuestionRecognized += VoiceAssistant_QuestionRecognized;
+        _voiceAssistant.StatusChanged += VoiceAssistant_StatusChanged;
+        _voiceAssistant.Failed += VoiceAssistant_Failed;
+
         try
         {
             _hotkeys.Register(this);
             _hotkeys.VoiceRequested += Hotkeys_VoiceRequested;
             _hotkeys.StopRequested += Hotkeys_StopRequested;
-            VoiceShortcutText.Text = _hotkeys.VoiceShortcutDisplay;
+            VoiceShortcutText.Text = $"备用：{_hotkeys.VoiceShortcutDisplay}";
             _overlay.ConfigureShortcuts(_hotkeys.VoiceShortcutDisplay, _hotkeys.StopShortcutDisplay);
             _hotkeysReady = true;
         }
-        catch (Win32Exception exception)
+        catch (Win32Exception)
         {
-            StartBackgroundButton.IsEnabled = false;
             _hotkeysReady = false;
-            StatusTitle.Text = "快捷键无法使用";
-            StatusDescription.Text = exception.Message;
-            VoiceShortcutText.Text = "没有找到可用快捷键";
+            VoiceShortcutText.Text = "备用快捷键被占用，不影响语音唤醒";
+            _overlay.ConfigureShortcuts("语音说“你好贾维斯”", "托盘菜单停止");
         }
 
         RefreshSpeechCapabilities();
@@ -70,128 +75,173 @@ public partial class MainWindow : Window
             RefreshSpeechCapabilities();
         }
 
-        if (!_hotkeysReady || _speechCapabilities is not { IsReady: true })
+        if (_speechCapabilities is not { IsReady: true })
         {
             System.Windows.MessageBox.Show(
-                "这台电脑还缺少中文语音识别或中文语音播报组件。请先按照右侧检查结果安装，然后重新打开本程序。",
-                "语音组件尚未准备好",
+                $"本机语音模型或中文播报尚未准备好。模型目录：{LocalVoiceModelPaths.ModelRoot}",
+                "本地语音尚未准备好",
                 MessageBoxButton.OK,
                 MessageBoxImage.Information);
             return;
         }
 
-        _backgroundEnabled = true;
         StartBackgroundButton.IsEnabled = false;
-        StopBackgroundButton.IsEnabled = true;
-        StatusLight.Fill = ActiveBrush;
-        StatusTitle.Text = "后台陪练已启动";
-        StatusDescription.Text = $"可以停留在任何软件里，按 {_hotkeys.VoiceShortcutDisplay} 说话。";
-        LastVoiceStatusText.Text = "尚未使用麦克风。";
+        StatusLight.Fill = ListeningBrush;
+        StatusTitle.Text = "正在加载本地语音模型";
+        StatusDescription.Text = "第一次启动通常需要 10—20 秒，请稍候。";
+        LastVoiceStatusText.Text = "音频只在内存中处理，不保存、不上传。";
 
-        Hide();
-        _overlay.ShowReady();
-        ShowTrayMessage(
-            "后台陪练已启动",
-            $"按 {_hotkeys.VoiceShortcutDisplay} 开始说话。按 {_hotkeys.StopShortcutDisplay} 停止。");
+        _backgroundCancellation?.Dispose();
+        _backgroundCancellation = new CancellationTokenSource();
 
         try
         {
-            await _speech.SpeakChineseAsync(
-                "后台陪练已启动。请按屏幕提示的语音快捷键，然后直接说话。",
-                CancellationToken.None);
+            await _voiceAssistant.StartAsync(_backgroundCancellation.Token);
+        }
+        catch (Exception exception)
+        {
+            _backgroundCancellation.Dispose();
+            _backgroundCancellation = null;
+            ShowVoiceProblem($"本地语音没有启动：{exception.Message}");
+            StartBackgroundButton.IsEnabled = true;
+            return;
+        }
+
+        _backgroundEnabled = true;
+        StopBackgroundButton.IsEnabled = true;
+        if (_stopListeningMenuItem is not null)
+        {
+            _stopListeningMenuItem.Enabled = true;
+        }
+        if (_notifyIcon is not null)
+        {
+            _notifyIcon.Text = "屏幕陪练老师（正在本机等待唤醒）";
+        }
+
+        StatusLight.Fill = ActiveBrush;
+        StatusTitle.Text = "正在等待语音唤醒";
+        StatusDescription.Text = "留在任何软件里，直接说“你好贾维斯”。";
+        LastVoiceStatusText.Text = "麦克风正在本机监听唤醒词；没有保存录音。";
+
+        Hide();
+        _overlay.ShowWaitingForWakeWord();
+        ShowTrayMessage(
+            "贾维斯语音陪练已启动",
+            $"直接说“你好贾维斯”。{(_hotkeysReady ? $"{_hotkeys.StopShortcutDisplay} 可随时停止。" : "可从托盘菜单随时停止。")}");
+
+        try
+        {
+            await _speech.SpeakChineseAsync("后台语音陪练已启动。", _backgroundCancellation.Token);
         }
         catch
         {
-            _overlay.ShowProblem("语音播报没有启动，请从右下角图标打开设置检查。 ");
+            // The tray and overlay still expose the active state.
         }
     }
 
-    private void StopBackgroundButton_Click(object sender, RoutedEventArgs e)
+    private async void StopBackgroundButton_Click(object sender, RoutedEventArgs e)
     {
-        StopBackgroundMode(showSettings: true);
+        await StopBackgroundModeAsync(showSettings: true);
     }
 
     private void Hotkeys_VoiceRequested(object? sender, EventArgs e)
     {
-        if (!_backgroundEnabled || _voiceRequestInProgress)
+        if (_backgroundEnabled)
+        {
+            _voiceAssistant.BeginQuestionListening();
+        }
+    }
+
+    private async void Hotkeys_StopRequested(object? sender, EventArgs e)
+    {
+        if (_backgroundEnabled)
+        {
+            await StopBackgroundModeAsync(showSettings: false);
+        }
+    }
+
+    private void VoiceAssistant_WakeWordDetected(object? sender, EventArgs e)
+    {
+        Dispatcher.BeginInvoke(() =>
+        {
+            SystemSounds.Asterisk.Play();
+            StatusLight.Fill = ListeningBrush;
+            StatusTitle.Text = "我在，请说";
+            StatusDescription.Text = "说完后停顿一下；识别会自动结束。";
+            LastVoiceStatusText.Text = "已听到唤醒词，正在识别这一句话。";
+            _overlay.ShowListening();
+        });
+    }
+
+    private void VoiceAssistant_QuestionRecognized(object? sender, VoiceQuestionEventArgs e)
+    {
+        Dispatcher.BeginInvoke(async () => await HandleRecognizedQuestionAsync(e.Text));
+    }
+
+    private async Task HandleRecognizedQuestionAsync(string recognizedText)
+    {
+        if (!_backgroundEnabled || _backgroundCancellation is null)
         {
             return;
         }
 
-        _ = RunVoiceRequestAsync();
-    }
-
-    private void Hotkeys_StopRequested(object? sender, EventArgs e)
-    {
-        if (_backgroundEnabled)
-        {
-            StopBackgroundMode(showSettings: false);
-        }
-    }
-
-    private async Task RunVoiceRequestAsync()
-    {
-        _voiceRequestInProgress = true;
-        _voiceCancellation = new CancellationTokenSource();
-        var cancellationToken = _voiceCancellation.Token;
-
-        StatusLight.Fill = ListeningBrush;
-        StatusTitle.Text = "正在听";
-        StatusDescription.Text = "说完后停顿一下，本次监听会自动结束。";
-        LastVoiceStatusText.Text = "麦克风只在这一次提问期间开启。";
-        _overlay.ShowListening();
+        _overlay.ShowRecognized($"你说：{recognizedText}");
+        LastVoiceStatusText.Text = $"刚刚听到：{recognizedText}";
+        StatusLight.Fill = ActiveBrush;
+        StatusTitle.Text = "已经听清";
+        StatusDescription.Text = "回答结束后会自动继续等待唤醒词。";
 
         try
         {
-            var recognizedText = await _speech.RecognizeChineseOnceAsync(cancellationToken);
-            if (string.IsNullOrWhiteSpace(recognizedText))
-            {
-                _overlay.ShowProblem("没有识别到清楚的话，请再按一次快捷键重试。 ");
-                LastVoiceStatusText.Text = "这次没有识别到文字。";
-                await _speech.SpeakChineseAsync("这次没有听清，请再说一次。", cancellationToken);
-                return;
-            }
-
-            _overlay.ShowRecognized($"你说：{recognizedText}");
-            LastVoiceStatusText.Text = $"刚刚听到：{recognizedText}";
-            StatusLight.Fill = ActiveBrush;
-            StatusTitle.Text = "已经听清";
-            StatusDescription.Text = "语音通道正常；下一步接入当前窗口画面和 AI 回答。";
-
-            var spokenReply = $"我听到了。你说的是，{recognizedText}。语音陪练通道已经工作。";
-            await _speech.SpeakChineseAsync(spokenReply, cancellationToken);
-
-            await Task.Delay(TimeSpan.FromSeconds(1.5), cancellationToken);
-            if (_backgroundEnabled)
-            {
-                _overlay.ShowReady();
-            }
+            var spokenReply = $"我听到了。你说的是，{recognizedText}。目前语音唤醒和识别已经工作，下一步接入画面理解和真正的人工智能回答。";
+            await _speech.SpeakChineseAsync(spokenReply, _backgroundCancellation.Token);
         }
         catch (OperationCanceledException)
         {
-            // StopBackgroundMode already updates the visible state.
-        }
-        catch (InvalidOperationException)
-        {
-            ShowVoiceProblem("麦克风或中文语音识别不可用。请打开 Windows 设置检查麦克风权限和中文语音组件。");
+            return;
         }
         catch
         {
-            ShowVoiceProblem("语音识别没有正常完成。请确认麦克风已连接，然后再按一次快捷键。");
+            _overlay.ShowProblem("已经识别文字，但系统中文语音播报失败。 ");
         }
-        finally
-        {
-            _voiceCancellation?.Dispose();
-            _voiceCancellation = null;
-            _voiceRequestInProgress = false;
 
-            if (_backgroundEnabled && StatusTitle.Text == "正在听")
-            {
-                StatusLight.Fill = ActiveBrush;
-                StatusTitle.Text = "后台陪练已启动";
-                StatusDescription.Text = $"按 {_hotkeys.VoiceShortcutDisplay} 可以重新说话。";
-            }
+        if (_backgroundEnabled)
+        {
+            _voiceAssistant.ResumeWakeWordListening();
+            _overlay.ShowWaitingForWakeWord();
         }
+    }
+
+    private void VoiceAssistant_StatusChanged(object? sender, VoiceStatusEventArgs e)
+    {
+        Dispatcher.BeginInvoke(() =>
+        {
+            if (!_backgroundEnabled)
+            {
+                return;
+            }
+
+            LastVoiceStatusText.Text = e.Message;
+            if (e.Message.Contains("没有听清", StringComparison.Ordinal))
+            {
+                _overlay.ShowProblem("没有听清问题，已继续等待“你好贾维斯”。");
+                _ = RestoreWaitingOverlayAfterDelayAsync();
+            }
+        });
+    }
+
+    private async Task RestoreWaitingOverlayAfterDelayAsync()
+    {
+        await Task.Delay(TimeSpan.FromSeconds(2));
+        if (_backgroundEnabled)
+        {
+            _overlay.ShowWaitingForWakeWord();
+        }
+    }
+
+    private void VoiceAssistant_Failed(object? sender, VoiceStatusEventArgs e)
+    {
+        Dispatcher.BeginInvoke(() => ShowVoiceProblem(e.Message));
     }
 
     private void ShowVoiceProblem(string message)
@@ -203,15 +253,28 @@ public partial class MainWindow : Window
         LastVoiceStatusText.Text = message;
     }
 
-    private void StopBackgroundMode(bool showSettings)
+    private async Task StopBackgroundModeAsync(bool showSettings)
     {
         _backgroundEnabled = false;
-        _voiceCancellation?.Cancel();
-        StartBackgroundButton.IsEnabled = _hotkeysReady && _speechCapabilities is { IsReady: true };
+        _backgroundCancellation?.Cancel();
+        await _voiceAssistant.StopAsync();
+        _backgroundCancellation?.Dispose();
+        _backgroundCancellation = null;
+
+        StartBackgroundButton.IsEnabled = _speechCapabilities is { IsReady: true };
         StopBackgroundButton.IsEnabled = false;
+        if (_stopListeningMenuItem is not null)
+        {
+            _stopListeningMenuItem.Enabled = false;
+        }
+        if (_notifyIcon is not null)
+        {
+            _notifyIcon.Text = "屏幕陪练老师（麦克风已停止）";
+        }
+
         StatusLight.Fill = IdleBrush;
         StatusTitle.Text = "后台陪练已停止";
-        StatusDescription.Text = "当前没有监听麦克风，也不会在后台响应语音快捷键。";
+        StatusDescription.Text = "当前没有监听麦克风，也不会响应唤醒词。";
         LastVoiceStatusText.Text = "麦克风已停止。";
         _overlay.ShowStopped();
 
@@ -222,7 +285,7 @@ public partial class MainWindow : Window
         else
         {
             _ = HideOverlayAfterDelayAsync();
-            ShowTrayMessage("后台陪练已停止", "从右下角图标可以重新打开设置。");
+            ShowTrayMessage("后台陪练已停止", "麦克风已经关闭。可从右下角图标重新打开设置。 ");
         }
     }
 
@@ -240,8 +303,8 @@ public partial class MainWindow : Window
         _speechCapabilities = _speech.GetCapabilityReport();
 
         RecognitionCapabilityText.Text = _speechCapabilities.HasChineseRecognizer
-            ? $"✓ 中文语音识别：{_speechCapabilities.RecognizerName}"
-            : "✕ 未检测到中文语音识别。请在 Windows 设置的语言选项中安装“语音”。";
+            ? $"✓ 本地唤醒与中文识别：{_speechCapabilities.RecognizerName}"
+            : $"✕ 本地语音模型不完整：{LocalVoiceModelPaths.ModelRoot}";
         RecognitionCapabilityText.Foreground = _speechCapabilities.HasChineseRecognizer
             ? ActiveBrush
             : new SolidColorBrush(System.Windows.Media.Color.FromRgb(160, 79, 20));
@@ -253,22 +316,16 @@ public partial class MainWindow : Window
             ? ActiveBrush
             : new SolidColorBrush(System.Windows.Media.Color.FromRgb(160, 79, 20));
 
-        if (_speechCapabilities.IsReady && _hotkeysReady)
+        if (_speechCapabilities.IsReady)
         {
-            StatusTitle.Text = "语音组件已就绪";
-            StatusDescription.Text = "可以启动后台陪练。启动后主窗口会隐藏。";
+            StatusTitle.Text = "本地语音已就绪";
+            StatusDescription.Text = "启动后可以直接说“你好贾维斯”；备用快捷键仍可用。";
             StartBackgroundButton.IsEnabled = true;
-        }
-        else if (!_hotkeysReady)
-        {
-            StatusTitle.Text = "快捷键无法使用";
-            StatusDescription.Text = "常用的语音快捷键都被其他软件占用，请先关闭冲突软件。";
-            StartBackgroundButton.IsEnabled = false;
         }
         else
         {
-            StatusTitle.Text = "缺少语音组件";
-            StatusDescription.Text = "请先根据右侧提示补齐中文语音组件。";
+            StatusTitle.Text = "本地语音尚未准备好";
+            StatusDescription.Text = "请先补齐本地模型或中文语音播报。";
             StartBackgroundButton.IsEnabled = false;
         }
     }
@@ -277,12 +334,17 @@ public partial class MainWindow : Window
     {
         _trayMenu = new Forms.ContextMenuStrip();
         _trayMenu.Items.Add("打开设置", null, (_, _) => Dispatcher.Invoke(OpenSettings));
-        _trayMenu.Items.Add("退出屏幕陪练老师", null, (_, _) => Dispatcher.Invoke(ExitApplication));
+        _stopListeningMenuItem = new Forms.ToolStripMenuItem("立即停止麦克风") { Enabled = false };
+        _stopListeningMenuItem.Click += (_, _) => Dispatcher.BeginInvoke(async () =>
+            await StopBackgroundModeAsync(showSettings: false));
+        _trayMenu.Items.Add(_stopListeningMenuItem);
+        _trayMenu.Items.Add("退出屏幕陪练老师", null, (_, _) => Dispatcher.BeginInvoke(async () =>
+            await ExitApplicationAsync()));
 
         _notifyIcon = new Forms.NotifyIcon
         {
             Icon = Drawing.SystemIcons.Application,
-            Text = "屏幕陪练老师",
+            Text = "屏幕陪练老师（麦克风未启动）",
             Visible = true,
             ContextMenuStrip = _trayMenu
         };
@@ -306,11 +368,13 @@ public partial class MainWindow : Window
         _notifyIcon?.ShowBalloonTip(2500, title, text, Forms.ToolTipIcon.Info);
     }
 
-    private void ExitApplication()
+    private async Task ExitApplicationAsync()
     {
         _allowExit = true;
-        _backgroundEnabled = false;
-        _voiceCancellation?.Cancel();
+        if (_backgroundEnabled)
+        {
+            await StopBackgroundModeAsync(showSettings: false);
+        }
         Close();
     }
 
@@ -320,20 +384,25 @@ public partial class MainWindow : Window
         {
             e.Cancel = true;
             Hide();
-            _overlay.ShowReady();
+            _overlay.ShowWaitingForWakeWord();
             ShowTrayMessage(
                 "屏幕陪练仍在后台",
-                $"按 {_hotkeys.VoiceShortcutDisplay} 说话，或从右下角图标退出。");
+                "直接说“你好贾维斯”，或从右下角菜单立即停止麦克风。 ");
         }
     }
 
     private void Window_Closed(object? sender, EventArgs e)
     {
+        _voiceAssistant.WakeWordDetected -= VoiceAssistant_WakeWordDetected;
+        _voiceAssistant.QuestionRecognized -= VoiceAssistant_QuestionRecognized;
+        _voiceAssistant.StatusChanged -= VoiceAssistant_StatusChanged;
+        _voiceAssistant.Failed -= VoiceAssistant_Failed;
         _hotkeys.VoiceRequested -= Hotkeys_VoiceRequested;
         _hotkeys.StopRequested -= Hotkeys_StopRequested;
         _hotkeys.Dispose();
-        _voiceCancellation?.Cancel();
-        _voiceCancellation?.Dispose();
+        _backgroundCancellation?.Cancel();
+        _voiceAssistant.StopAsync().GetAwaiter().GetResult();
+        _backgroundCancellation?.Dispose();
         _notifyIcon?.Dispose();
         _trayMenu?.Dispose();
 

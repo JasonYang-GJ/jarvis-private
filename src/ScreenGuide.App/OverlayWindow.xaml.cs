@@ -30,9 +30,14 @@ public partial class OverlayWindow : Window
 
     public void ShowReady()
     {
+        ShowWaitingForWakeWord();
+    }
+
+    public void ShowWaitingForWakeWord()
+    {
         ShowStatus(
-            "后台陪练已就绪",
-            $"按 {_voiceShortcut} 开始说话；{_stopShortcut} 停止",
+            "贾维斯正在本机待命",
+            $"说“你好贾维斯”；备用 {_voiceShortcut}；{_stopShortcut} 停止",
             "●",
             System.Windows.Media.Color.FromRgb(22, 138, 103));
     }
