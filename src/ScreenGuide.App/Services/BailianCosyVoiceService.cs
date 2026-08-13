@@ -1,5 +1,6 @@
 using System.Net.WebSockets;
 using System.Runtime.CompilerServices;
+using System.Diagnostics;
 using System.IO;
 using System.Text;
 using System.Text.Json;
@@ -60,7 +61,7 @@ internal sealed class BailianCosyVoiceService : ICloudSpeechService
 
         var audio = new BufferedWaveProvider(new WaveFormat(24000, 16, 1))
         {
-            BufferDuration = TimeSpan.FromSeconds(20),
+            BufferDuration = TimeSpan.FromMinutes(5),
             DiscardOnBufferOverflow = true
         };
         using var output = new WaveOutEvent { DesiredLatency = 100 };
@@ -105,11 +106,7 @@ internal sealed class BailianCosyVoiceService : ICloudSpeechService
 
         await receiveTask.ConfigureAwait(false);
 
-        var drainDeadline = DateTime.UtcNow.AddSeconds(15);
-        while (audio.BufferedBytes > 0 && DateTime.UtcNow < drainDeadline)
-        {
-            await Task.Delay(50, cancellationToken).ConfigureAwait(false);
-        }
+        await WaitForPlaybackToFinishAsync(audio, cancellationToken, progress).ConfigureAwait(false);
 
         output.Stop();
         if (webSocket.State is WebSocketState.Open or WebSocketState.CloseReceived)
@@ -118,6 +115,38 @@ internal sealed class BailianCosyVoiceService : ICloudSpeechService
                 WebSocketCloseStatus.NormalClosure,
                 "finished",
                 CancellationToken.None).ConfigureAwait(false);
+        }
+    }
+
+    private static async Task WaitForPlaybackToFinishAsync(
+        BufferedWaveProvider audio,
+        CancellationToken cancellationToken,
+        Action<string>? progress)
+    {
+        if (audio.BufferedBytes <= 0)
+        {
+            return;
+        }
+
+        progress?.Invoke("正在播放剩余语音…");
+        var previousBufferedBytes = audio.BufferedBytes;
+        var noProgressTimer = Stopwatch.StartNew();
+
+        while (audio.BufferedBytes > 0)
+        {
+            await Task.Delay(50, cancellationToken).ConfigureAwait(false);
+            var currentBufferedBytes = audio.BufferedBytes;
+            if (currentBufferedBytes != previousBufferedBytes)
+            {
+                previousBufferedBytes = currentBufferedBytes;
+                noProgressTimer.Restart();
+                continue;
+            }
+
+            if (noProgressTimer.Elapsed >= TimeSpan.FromSeconds(10))
+            {
+                throw new InvalidOperationException("语音播放设备连续10秒没有进度。");
+            }
         }
     }
 

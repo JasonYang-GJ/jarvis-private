@@ -181,7 +181,7 @@ public partial class MainWindow : Window
         {
             if (Volatile.Read(ref _questionTurnInProgress) != 0)
             {
-                _overlay.ShowProcessing("上一轮还在处理", "最长等待30秒；结束或超时后会自动恢复待命。");
+                _overlay.ShowProcessing("上一轮还在处理", "长回答会继续播放；完成或异常后会自动恢复待命。");
                 return;
             }
 
@@ -261,7 +261,7 @@ public partial class MainWindow : Window
                    sessionToken.IsCancellationRequested,
                    turnCancellation.IsCancellationRequested))
         {
-            const string timeoutMessage = "这次回答等待超过30秒，已自动取消并恢复待命。你可以重新说“你好贾维斯”。";
+            const string timeoutMessage = "这次回答连续处理超过5分钟，已自动取消并恢复待命。你可以重新说“你好贾维斯”。";
             _overlay.ShowProblem(timeoutMessage);
             LastVoiceStatusText.Text = timeoutMessage;
             StatusLight.Fill = IdleBrush;

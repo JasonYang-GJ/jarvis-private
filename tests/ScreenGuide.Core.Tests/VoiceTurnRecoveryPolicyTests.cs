@@ -7,9 +7,9 @@ public sealed class VoiceTurnRecoveryPolicyTests
     private readonly VoiceTurnRecoveryPolicy _policy = VoiceTurnRecoveryPolicy.Default;
 
     [Fact]
-    public void DefaultTimeoutIsThirtySeconds()
+    public void DefaultTimeoutAllowsLongSpokenAnswers()
     {
-        Assert.Equal(TimeSpan.FromSeconds(30), _policy.TurnTimeout);
+        Assert.Equal(TimeSpan.FromMinutes(5), _policy.TurnTimeout);
     }
 
     [Fact]

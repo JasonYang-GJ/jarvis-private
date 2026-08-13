@@ -5,7 +5,7 @@
 - 桌面应用：C# / .NET 10 LTS，Windows 原生界面。
 - 画面授权：Windows Graphics Capture 系统选择器；当前单帧读取使用与选择结果严格匹配的窗口句柄和 `PrintWindow`，匹配不唯一时拒绝读取。后续可替换为完整 Windows Graphics Capture 帧管线。
 - 控件识别：Windows UI Automation，优先读取按钮、菜单和文字结构。
-- 语音输入：sherpa-onnx 在本机完成唤醒和问题识别；麦克风音频不上传。
+- 语音输入：Windows 中文识别与 sherpa-onnx 双通道共同完成本机唤醒，sherpa-onnx 在本机识别问题；麦克风音频不上传。
 - 语音输出：百炼 CosyVoice 通过 WebSocket 接收 AI 文字片段并返回 PCM 音频；失败时可退回 Windows 中文声音。
 - AI 分析：`IGuidanceProvider` 隔离模型供应商；默认百炼 `qwen3-vl-flash`，关闭思考模式并使用 SSE 流式输出。
 
@@ -14,7 +14,7 @@
 1. `WindowConsent`：已实现。通过 Windows 原生选择器取得用户选择的目标，展示授权状态，并在取消、停止、目标关闭或应用退出时清除状态；本组件本身不读取画面。
 2. `BackgroundSession`：管理设置窗口隐藏、系统托盘入口、开始和停止状态，不做隐藏启动或无人值守运行。
 3. `GlobalHotkey`：注册系统级语音和停止快捷键；常用组合冲突时依次选择备用组合。
-4. `Speech`：本地持续等待唤醒词，唤醒后只识别一句问题；云端语音只接收 AI 生成的回答文字。
+4. `Speech`：三条本地通道持续等待唤醒词，唤醒后只识别一句问题；云端语音只接收 AI 生成的回答文字。长语音按缓冲区实际播放进度结束，不使用固定 15 秒截断。
 5. `Overlay`：显示就绪、监听、识别和错误状态；使用不激活、鼠标穿透窗口，不抢走目标软件焦点。
 6. `Capture`：只产生用户触发时目标窗口的一张内存画面，不负责联网；窗口句柄失效或匹配含糊时直接拒绝。
 7. `UiInspection`：读取可访问控件树，不执行控件动作。
