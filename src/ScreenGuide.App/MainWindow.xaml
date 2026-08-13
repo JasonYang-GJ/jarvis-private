@@ -8,7 +8,8 @@
         MinHeight="640"
         WindowStartupLocation="CenterScreen"
         Background="{StaticResource PageBrush}"
-        FontFamily="Microsoft YaHei UI">
+        FontFamily="Microsoft YaHei UI"
+        Closed="Window_Closed">
     <Grid Margin="34">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
@@ -84,7 +85,7 @@
                                 Content="选择要学习的软件" Click="SelectWindowButton_Click" />
                         <Button x:Name="StopButton" Style="{StaticResource QuietButton}"
                                 Content="停止观察" IsEnabled="False" Margin="0,10,0,0" Click="StopButton_Click" />
-                        <TextBlock Text="当前是界面原型，尚未读取任何屏幕内容。"
+                        <TextBlock x:Name="SelectionDetailText" Text="尚未授权任何窗口，也未读取屏幕内容。"
                                    Foreground="{StaticResource MutedBrush}" FontSize="12"
                                    TextAlignment="Center" Margin="0,14,0,0" TextWrapping="Wrap" />
                     </StackPanel>
@@ -108,7 +109,7 @@
                         </Grid.ColumnDefinitions>
                         <StackPanel>
                             <TextBlock Text="老师的下一步" Foreground="{StaticResource MutedBrush}" FontSize="14" FontWeight="SemiBold" />
-                            <TextBlock Text="先选择一个窗口" FontSize="30" FontWeight="Bold" Margin="0,7,0,0" />
+                            <TextBlock x:Name="NextStepTitle" Text="先选择一个窗口" FontSize="30" FontWeight="Bold" Margin="0,7,0,0" />
                         </StackPanel>
                         <Border Grid.Column="1" Background="{StaticResource GuideSoftBrush}" CornerRadius="24" Width="48" Height="48">
                             <TextBlock Text="1" Foreground="{StaticResource GuideBrush}" FontSize="21" FontWeight="Bold"
@@ -124,13 +125,13 @@
                                 <RowDefinition Height="18" />
                                 <RowDefinition Height="Auto" />
                             </Grid.RowDefinitions>
-                            <TextBlock Text="请选择你想学习的软件窗口，例如 GitHub Desktop。第一版会先让你亲自操作，不会接管鼠标。"
+                            <TextBlock x:Name="GuidanceText" Text="请选择你想学习的软件窗口，例如 GitHub Desktop。第一版会先让你亲自操作，不会接管鼠标。"
                                        FontSize="18" LineHeight="31" TextWrapping="Wrap" />
                             <Border Grid.Row="2" Background="White" BorderBrush="{StaticResource LineBrush}"
                                     BorderThickness="1" CornerRadius="10" Padding="16,13">
                                 <StackPanel Orientation="Horizontal">
                                     <TextBlock Text="为什么这样做？" FontWeight="Bold" FontSize="13" />
-                                    <TextBlock Text="  先把观察权限做对，再增加语音和智能判断。"
+                                    <TextBlock x:Name="GuidanceReasonText" Text="  先把观察权限做对，再增加语音和智能判断。"
                                                Foreground="{StaticResource MutedBrush}" FontSize="13" />
                                 </StackPanel>
                             </Border>
