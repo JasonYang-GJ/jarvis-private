@@ -491,12 +491,27 @@ public partial class MainWindow : Window
             var result = await _windowPicker.PickWindowAsync(new WindowInteropHelper(this).Handle);
             if (result is null)
             {
-                SelectedWindowText.Text = "已取消选择";
+                if (_selectedWindow is { CanCapture: true })
+                {
+                    SelectedWindowText.Text = $"✓ 继续使用：{_selectedWindow.DisplayName}";
+                    SelectedWindowText.Foreground = ActiveBrush;
+                    CloudConsentCheckBox.IsEnabled = true;
+                }
+                else
+                {
+                    _selectedWindow = null;
+                    _cloudAuthorization.Revoke();
+                    CloudConsentCheckBox.IsChecked = false;
+                    CloudConsentCheckBox.IsEnabled = false;
+                    SelectedWindowText.Text = "尚未选择（刚才已取消）";
+                    SelectedWindowText.Foreground = IdleBrush;
+                }
                 return;
             }
 
             _selectedWindow = result;
             CloudConsentCheckBox.IsChecked = false;
+            CloudConsentCheckBox.IsEnabled = false;
             _cloudAuthorization.Revoke();
             if (!result.CanCapture)
             {
@@ -507,6 +522,7 @@ public partial class MainWindow : Window
 
             SelectedWindowText.Text = $"✓ {result.DisplayName}";
             SelectedWindowText.Foreground = ActiveBrush;
+            CloudConsentCheckBox.IsEnabled = true;
             PrivacyScopeText.Text = "已选择窗口，但只有勾选下方授权后，每次提问才会读取一帧。";
         }
         catch (Exception exception)
@@ -530,11 +546,17 @@ public partial class MainWindow : Window
         else
         {
             _cloudAuthorization.Revoke();
+            if (_selectedWindow is not { CanCapture: true } && CloudConsentCheckBox.IsChecked == true)
+            {
+                CloudConsentCheckBox.IsChecked = false;
+            }
         }
 
-        PrivacyScopeText.Text = CloudConsentCheckBox.IsChecked == true
+        PrivacyScopeText.Text = _cloudAuthorization.IsGranted
             ? "授权已开启：每次提问只读取一帧；麦克风音频仍不上传，截图不写入硬盘。"
-            : "授权未开启：程序不会读取或发送任何窗口画面。";
+            : _selectedWindow is { CanCapture: true }
+                ? "授权未开启：已选窗口，但程序不会读取或发送画面。"
+                : "请先成功选择一个软件窗口，之后才能勾选上传授权。";
     }
 
     private void WindowPicker_SelectedTargetClosed(object? sender, EventArgs e)
@@ -544,6 +566,7 @@ public partial class MainWindow : Window
             _selectedWindow = null;
             _cloudAuthorization.Revoke();
             CloudConsentCheckBox.IsChecked = false;
+            CloudConsentCheckBox.IsEnabled = false;
             SelectedWindowText.Text = "原授权窗口已关闭，请重新选择";
             SelectedWindowText.Foreground = new SolidColorBrush(System.Windows.Media.Color.FromRgb(160, 79, 20));
         });

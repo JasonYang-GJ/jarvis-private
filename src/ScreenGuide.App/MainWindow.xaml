@@ -207,7 +207,7 @@
                                                VerticalAlignment="Center" Foreground="{StaticResource MutedBrush}"
                                                FontSize="12" TextTrimming="CharacterEllipsis" />
                                 </Grid>
-                                <CheckBox x:Name="CloudConsentCheckBox" Margin="0,11,0,0"
+                                <CheckBox x:Name="CloudConsentCheckBox" Margin="0,11,0,0" IsEnabled="False"
                                           Checked="CloudConsentCheckBox_Changed"
                                           Unchecked="CloudConsentCheckBox_Changed">
                                     <TextBlock TextWrapping="Wrap" FontSize="12"
