@@ -4,7 +4,7 @@
 
 ## 当前阶段
 
-项目目前处于“安全骨架”阶段，尚未实现屏幕读取或鼠标控制。
+项目目前已经具备可运行的 Windows 界面原型和最基本的观察权限状态测试，尚未实现真实屏幕读取或鼠标控制。
 
 第一版只做：
 
@@ -30,6 +30,18 @@
 - 涉及点击、输入、删除、支付、发布等操作时，未来版本仍需单独确认。
 
 详细范围见 [第一版范围](docs/MVP.md)、[隐私与安全](docs/PRIVACY.md) 和 [架构说明](docs/ARCHITECTURE.md)。
+
+## 本地开发
+
+需要 .NET 10 SDK。在项目根目录执行：
+
+```powershell
+dotnet build ScreenGuide.slnx
+dotnet test ScreenGuide.slnx
+dotnet run --project src/ScreenGuide.App/ScreenGuide.App.csproj
+```
+
+当前“选择要学习的软件”按钮只显示安全说明，不会读取屏幕。下一阶段才会接入 Windows 原生窗口选择器。
 
 ## 开源状态
 

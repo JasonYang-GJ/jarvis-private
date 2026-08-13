@@ -2,7 +2,7 @@
 
 ## 建议技术路线
 
-- 桌面应用：C# / .NET 8，Windows 原生界面。
+- 桌面应用：C# / .NET 10 LTS，Windows 原生界面。
 - 画面读取：Windows Graphics Capture，由用户通过系统界面选择窗口。
 - 控件识别：Windows UI Automation，优先读取按钮、菜单和文字结构。
 - 语音输入输出：做成可替换模块；第一轮可以先用文字完成闭环。
