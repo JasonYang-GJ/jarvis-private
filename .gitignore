@@ -1,0 +1,40 @@
+# Local secrets and model configuration
+.env
+.env.*
+!.env.example
+secrets/
+*.key
+*.pem
+
+# User-private runtime data
+data/
+logs/
+captures/
+recordings/
+screenshots/
+sessions/
+*.db
+*.sqlite
+*.log
+
+# Local configuration
+appsettings.Local.json
+appsettings.local.json
+user-settings.json
+
+# .NET build output
+bin/
+obj/
+artifacts/
+TestResults/
+*.user
+*.suo
+.vs/
+
+# IDE and OS files
+.idea/
+.vscode/
+Thumbs.db
+Desktop.ini
+.DS_Store
+
