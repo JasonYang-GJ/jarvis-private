@@ -33,10 +33,16 @@ internal sealed class WindowsWindowPickerService : IDisposable
 
         ReplaceSelection(selectedItem);
 
-        return new WindowSelectionResult(
+        var windowHandle = NativeWindowLocator.FindUniqueWindow(
             selectedItem.DisplayName,
             selectedItem.Size.Width,
             selectedItem.Size.Height);
+
+        return new WindowSelectionResult(
+            selectedItem.DisplayName,
+            selectedItem.Size.Width,
+            selectedItem.Size.Height,
+            windowHandle);
     }
 
     public void ClearSelection()

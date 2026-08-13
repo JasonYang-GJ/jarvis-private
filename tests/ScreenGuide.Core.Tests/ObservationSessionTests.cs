@@ -116,3 +116,38 @@ public sealed class ObservationSessionTests
         return session;
     }
 }
+
+public sealed class CloudSharingAuthorizationTests
+{
+    [Fact]
+    public void NewAuthorization_DoesNotAllowCloudSharing()
+    {
+        var authorization = new CloudSharingAuthorization();
+
+        Assert.False(authorization.IsGranted);
+        Assert.False(authorization.CanShareFrameFrom("GitHub Desktop"));
+    }
+
+    [Fact]
+    public void Grant_AllowsOnlyTheExactSelectedWindow()
+    {
+        var authorization = new CloudSharingAuthorization();
+
+        authorization.GrantForWindow("GitHub Desktop");
+
+        Assert.True(authorization.CanShareFrameFrom("GitHub Desktop"));
+        Assert.False(authorization.CanShareFrameFrom("浏览器"));
+    }
+
+    [Fact]
+    public void Revoke_ImmediatelyBlocksCloudSharing()
+    {
+        var authorization = new CloudSharingAuthorization();
+        authorization.GrantForWindow("GitHub Desktop");
+
+        authorization.Revoke();
+
+        Assert.False(authorization.IsGranted);
+        Assert.False(authorization.CanShareFrameFrom("GitHub Desktop"));
+    }
+}

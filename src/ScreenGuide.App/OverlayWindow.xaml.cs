@@ -60,10 +60,30 @@ public partial class OverlayWindow : Window
             System.Windows.Media.Color.FromRgb(22, 138, 103));
     }
 
+    public void ShowProcessing(string title, string detail)
+    {
+        ShowStatus(
+            title,
+            string.IsNullOrWhiteSpace(detail) ? "请稍候…" : detail,
+            "●",
+            System.Windows.Media.Color.FromRgb(43, 102, 217));
+    }
+
+    public void ShowAnswer(string answer)
+    {
+        var normalized = answer.ReplaceLineEndings(" ").Trim();
+        var preview = normalized.Length <= 120 ? normalized : normalized[..120] + "…";
+        ShowStatus(
+            "贾维斯回答",
+            preview,
+            "✓",
+            System.Windows.Media.Color.FromRgb(22, 138, 103));
+    }
+
     public void ShowProblem(string message)
     {
         ShowStatus(
-            "这次没有听清",
+            "这次没有完成",
             message,
             "!",
             System.Windows.Media.Color.FromRgb(201, 111, 24));

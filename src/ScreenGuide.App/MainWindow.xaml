@@ -3,9 +3,9 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="屏幕陪练老师"
         Width="1040"
-        Height="690"
+        Height="780"
         MinWidth="900"
-        MinHeight="620"
+        MinHeight="700"
         WindowStartupLocation="CenterScreen"
         Background="{StaticResource PageBrush}"
         FontFamily="Microsoft YaHei UI"
@@ -40,7 +40,7 @@
             <Border Grid.Column="1" Background="#E8F7F1" CornerRadius="16" Padding="14,8" VerticalAlignment="Center">
                 <StackPanel Orientation="Horizontal">
                     <Ellipse Width="8" Height="8" Fill="{StaticResource SafeBrush}" Margin="0,0,8,0" />
-                    <TextBlock Text="本机监听唤醒词，不保存、不上传"
+                    <TextBlock Text="唤醒与识别留在本机；仅授权画面和文字发往百炼"
                                Foreground="{StaticResource SafeBrush}" FontWeight="SemiBold" FontSize="13" />
                 </StackPanel>
             </Border>
@@ -162,33 +162,72 @@
 
                     <Border Grid.Row="4" Background="White" BorderBrush="{StaticResource LineBrush}"
                             BorderThickness="1" CornerRadius="14" Padding="22">
-                        <Grid>
-                            <Grid.RowDefinitions>
-                                <RowDefinition Height="Auto" />
-                                <RowDefinition Height="14" />
-                                <RowDefinition Height="Auto" />
-                                <RowDefinition Height="10" />
-                                <RowDefinition Height="Auto" />
-                                <RowDefinition Height="*" />
-                                <RowDefinition Height="Auto" />
-                            </Grid.RowDefinitions>
-                            <TextBlock Text="这台电脑的语音检查" FontSize="15" FontWeight="Bold" />
-                            <TextBlock x:Name="RecognitionCapabilityText" Grid.Row="2"
-                                       Text="正在检查中文语音识别…" FontSize="13" TextWrapping="Wrap" />
-                            <TextBlock x:Name="VoiceCapabilityText" Grid.Row="4"
-                                       Text="正在检查中文语音播报…" FontSize="13" TextWrapping="Wrap" />
-                            <Border Grid.Row="6" Background="#FFF7E9" CornerRadius="10" Padding="14,11">
-                                <TextBlock Text="当前先验证：持续唤醒、重复提问和随时停止。画面理解与 AI 回答将在语音链路稳定后接入。"
-                                           Foreground="#8A5A17" FontSize="12" TextWrapping="Wrap" />
-                            </Border>
-                        </Grid>
+                        <ScrollViewer VerticalScrollBarVisibility="Auto">
+                            <StackPanel>
+                                <TextBlock Text="1. 本机语音" FontSize="15" FontWeight="Bold" />
+                                <TextBlock x:Name="RecognitionCapabilityText" Text="正在检查中文语音识别…"
+                                           FontSize="13" TextWrapping="Wrap" Margin="0,8,0,0" />
+                                <TextBlock x:Name="VoiceCapabilityText" Text="正在检查中文语音播报…"
+                                           FontSize="13" TextWrapping="Wrap" Margin="0,5,0,0" />
+
+                                <Separator Margin="0,15" />
+
+                                <TextBlock Text="2. 连接阿里百炼" FontSize="15" FontWeight="Bold" />
+                                <TextBlock Text="API Key 只保存到 Windows 凭据管理器；测试会发起一次不含画面的最小调用，可能按量计费。"
+                                           Foreground="{StaticResource MutedBrush}" FontSize="12" Margin="0,5,0,0" />
+                                <Grid Margin="0,10,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="12" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <PasswordBox x:Name="BailianApiKeyBox" Height="38" Padding="10,7"
+                                                 ToolTip="粘贴华北2（北京）地域的百炼 API Key" />
+                                    <Button x:Name="SaveBailianButton" Grid.Column="2" Content="保存并测试"
+                                            Style="{StaticResource QuietButton}" Padding="18,8"
+                                            Click="SaveBailianButton_Click" />
+                                </Grid>
+                                <TextBlock x:Name="BailianStatusText" Text="尚未配置百炼。"
+                                           Foreground="{StaticResource MutedBrush}" FontSize="12"
+                                           Margin="0,7,0,0" TextWrapping="Wrap" />
+
+                                <Separator Margin="0,15" />
+
+                                <TextBlock Text="3. 授权一个要观察的窗口" FontSize="15" FontWeight="Bold" />
+                                <Grid Margin="0,10,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="12" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <Button x:Name="SelectWindowButton" Content="选择软件窗口"
+                                            Style="{StaticResource QuietButton}" Padding="18,8"
+                                            Click="SelectWindowButton_Click" />
+                                    <TextBlock x:Name="SelectedWindowText" Grid.Column="2" Text="尚未选择"
+                                               VerticalAlignment="Center" Foreground="{StaticResource MutedBrush}"
+                                               FontSize="12" TextTrimming="CharacterEllipsis" />
+                                </Grid>
+                                <CheckBox x:Name="CloudConsentCheckBox" Margin="0,11,0,0"
+                                          Checked="CloudConsentCheckBox_Changed"
+                                          Unchecked="CloudConsentCheckBox_Changed">
+                                    <TextBlock TextWrapping="Wrap" FontSize="12"
+                                               Text="我同意：每次提问后，只读取所选窗口的一帧画面，并把该画面和问题文字发送到阿里百炼。" />
+                                </CheckBox>
+
+                                <Border Background="#E8F7F1" CornerRadius="10" Padding="14,11" Margin="0,14,0,0">
+                                    <TextBlock x:Name="PrivacyScopeText"
+                                               Text="麦克风音频仍不上传；截图只在内存中处理，不保存到硬盘。"
+                                               Foreground="{StaticResource SafeBrush}" FontSize="12" TextWrapping="Wrap" />
+                                </Border>
+                            </StackPanel>
+                        </ScrollViewer>
                     </Border>
                 </Grid>
             </Border>
         </Grid>
 
         <Border Grid.Row="4" Background="#EAF0FF" CornerRadius="10" Padding="15,10">
-            <TextBlock Text="隐私提示：运行时只在本机持续识别“你好贾维斯”；音频不保存、不上传，可用停止按钮或托盘菜单立即关闭麦克风。"
+            <TextBlock Text="隐私提示：音频不保存、不上传；只有勾选授权后，才会在每次提问时发送所选窗口的一帧画面和识别文字。"
                        Foreground="{StaticResource GuideBrush}" FontSize="13" TextAlignment="Center" />
         </Border>
     </Grid>
