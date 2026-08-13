@@ -3,6 +3,7 @@ using System.IO;
 using System.Threading.Channels;
 using NAudio;
 using NAudio.Wave;
+using ScreenGuide.Core;
 using SherpaOnnx;
 
 namespace ScreenGuide.App.Services;
@@ -27,6 +28,7 @@ internal sealed class SherpaVoiceAssistantService : IAsyncDisposable
     private OnlineStream? _recognitionStream;
     private volatile VoiceListeningState _state = VoiceListeningState.Stopped;
     private readonly Stopwatch _questionTimer = new();
+    private int _microphoneSignalReported;
 
     public SherpaVoiceAssistantService(LocalVoiceModelPaths paths)
     {
@@ -84,6 +86,7 @@ internal sealed class SherpaVoiceAssistantService : IAsyncDisposable
             {
                 _audioChannel = channel;
                 _microphone = microphone;
+                _microphoneSignalReported = 0;
                 _state = VoiceListeningState.WaitingForWakeWord;
                 _workerTask = ProcessAudioAsync(channel.Reader, _cancellation!.Token);
             }
@@ -110,6 +113,7 @@ internal sealed class SherpaVoiceAssistantService : IAsyncDisposable
             _recognizer?.Reset(_recognitionStream!);
             _keywordSpotter?.Reset(_keywordStream!);
             _questionTimer.Reset();
+            Interlocked.Exchange(ref _microphoneSignalReported, 0);
             _state = VoiceListeningState.WaitingForWakeWord;
         }
         RaiseStatus("正在本机等待“你好贾维斯”");
@@ -235,11 +239,20 @@ internal sealed class SherpaVoiceAssistantService : IAsyncDisposable
     private void Microphone_DataAvailable(object? sender, WaveInEventArgs e)
     {
         var samples = new float[e.BytesRecorded / 2];
+        var peak = 0F;
         for (var index = 0; index < samples.Length; index++)
         {
             var offset = index * 2;
             var value = (short)(e.Buffer[offset] | (e.Buffer[offset + 1] << 8));
             samples[index] = value / 32768F;
+            peak = Math.Max(peak, Math.Abs(samples[index]));
+        }
+
+        if (_state == VoiceListeningState.WaitingForWakeWord
+            && peak >= 0.006F
+            && Interlocked.CompareExchange(ref _microphoneSignalReported, 1, 0) == 0)
+        {
+            RaiseStatus("已检测到麦克风声音，正在识别唤醒词");
         }
 
         _audioChannel?.Writer.TryWrite(samples);
@@ -291,14 +304,39 @@ internal sealed class SherpaVoiceAssistantService : IAsyncDisposable
                 continue;
             }
 
-            _keywordSpotter.Reset(_keywordStream);
-            _recognizer!.Reset(_recognitionStream!);
-            _questionTimer.Restart();
-            _state = VoiceListeningState.ListeningForQuestion;
-            WakeWordDetected?.Invoke(this, EventArgs.Empty);
-            RaiseStatus("已唤醒，请直接说问题");
-            break;
+            ActivateQuestionListening();
+            return;
         }
+
+        // The dedicated wake-word model can be sensitive to pronunciation and microphone tone.
+        // Run the full local Chinese recognizer in parallel as a second, more tolerant path.
+        _recognitionStream!.AcceptWaveform(SampleRate, samples);
+        while (_recognizer!.IsReady(_recognitionStream))
+        {
+            _recognizer.Decode(_recognitionStream);
+        }
+
+        var recognizedText = _recognizer.GetResult(_recognitionStream).Text;
+        if (WakePhraseMatcher.IsMatch(recognizedText))
+        {
+            ActivateQuestionListening();
+            return;
+        }
+
+        if (_recognizer.IsEndpoint(_recognitionStream))
+        {
+            _recognizer.Reset(_recognitionStream);
+        }
+    }
+
+    private void ActivateQuestionListening()
+    {
+        _keywordSpotter!.Reset(_keywordStream!);
+        _recognizer!.Reset(_recognitionStream!);
+        _questionTimer.Restart();
+        _state = VoiceListeningState.ListeningForQuestion;
+        WakeWordDetected?.Invoke(this, EventArgs.Empty);
+        RaiseStatus("已唤醒，请直接说问题");
     }
 
     private void ProcessQuestionSamples(float[] samples)

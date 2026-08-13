@@ -1,0 +1,40 @@
+using System.Text;
+
+namespace ScreenGuide.Core;
+
+public static class WakePhraseMatcher
+{
+    private static readonly string[] AcceptedPhrases =
+    {
+        "你好贾维斯",
+        "你好贾维思",
+        "你好贾维丝",
+        "你好加维斯",
+        "你好佳维斯"
+    };
+
+    public static bool IsMatch(string? recognizedText)
+    {
+        var normalized = Normalize(recognizedText);
+        return AcceptedPhrases.Any(normalized.Contains);
+    }
+
+    internal static string Normalize(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return string.Empty;
+        }
+
+        var normalized = new StringBuilder(text.Length);
+        foreach (var character in text)
+        {
+            if (char.IsLetterOrDigit(character))
+            {
+                normalized.Append(char.ToLowerInvariant(character));
+            }
+        }
+
+        return normalized.ToString();
+    }
+}

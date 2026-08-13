@@ -455,7 +455,14 @@ public partial class MainWindow : Window
             }
 
             LastVoiceStatusText.Text = e.Message;
-            if (e.Message.Contains("没有听清", StringComparison.Ordinal))
+            if (e.Message.Contains("已检测到麦克风声音", StringComparison.Ordinal))
+            {
+                StatusLight.Fill = ListeningBrush;
+                StatusTitle.Text = "麦克风输入正常";
+                StatusDescription.Text = "已经收到声音，正在用两种本地方式识别“你好贾维斯”。";
+                _overlay.ShowProcessing("麦克风已经听到声音", "正在识别“你好贾维斯”…");
+            }
+            else if (e.Message.Contains("没有听清", StringComparison.Ordinal))
             {
                 _overlay.ShowProblem("没有听清问题，已继续等待“你好贾维斯”。");
                 _ = RestoreWaitingOverlayAfterDelayAsync();

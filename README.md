@@ -45,7 +45,7 @@ dotnet run --project src/ScreenGuide.App/ScreenGuide.App.csproj
 
 每轮回答最长等待 30 秒。云端回答、语音连接或播放任何一步超时后，程序都会取消本轮并自动恢复唤醒词监听；右上角状态条会明确显示“待命、正在听、正在处理或已停止”，已停止状态不会自动消失。
 
-唤醒词和中文识别使用 sherpa-onnx 本地模型。模型安装在 `%LOCALAPPDATA%\ScreenGuideTeacher\models`，唤醒词配置安装在 `%LOCALAPPDATA%\ScreenGuideTeacher\config`，两者都不进入 Git 仓库。麦克风音频只以短音频块在内存中处理，当前实现不会写入录音文件，也不会上传音频。
+唤醒词和中文识别使用 sherpa-onnx 本地模型。等待唤醒时会同时运行专用唤醒模型和本地中文流式识别作为双重通道，并在检测到麦克风声音时显示明确反馈。模型安装在 `%LOCALAPPDATA%\ScreenGuideTeacher\models`，唤醒词配置安装在 `%LOCALAPPDATA%\ScreenGuideTeacher\config`，两者都不进入 Git 仓库。麦克风音频只以短音频块在内存中处理，当前实现不会写入录音文件，也不会上传音频。
 
 云端链路使用可替换的模型接口，默认视觉模型为 `qwen3-vl-flash`，默认语音模型为 `qwen-audio-3.0-tts-flash`。没有 API Key、没有准确选择窗口或没有勾选上传授权时，程序会阻止云端陪练启动；“我现在在哪个界面”仍可用本机窗口标题快速回答。当前尚未加入自动点击、键盘输入或鼠标控制。
 
