@@ -10,4 +10,3 @@ namespace ScreenGuide.App;
 public partial class App : Application
 {
 }
-
