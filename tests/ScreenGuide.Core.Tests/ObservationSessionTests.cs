@@ -88,6 +88,19 @@ public sealed class ObservationSessionTests
     }
 
     [Fact]
+    public void Stop_DuringReplacementSelection_RemovesPreviousConsent()
+    {
+        var session = CreateObservingSession("GitHub Desktop");
+        session.BeginSelection();
+
+        session.Stop();
+
+        Assert.Equal(ObservationStatus.Stopped, session.Status);
+        Assert.False(session.CanCapture);
+        Assert.Null(session.TargetWindowTitle);
+    }
+
+    [Fact]
     public void CompleteSelection_WithoutBeginning_Throws()
     {
         var session = new ObservationSession();

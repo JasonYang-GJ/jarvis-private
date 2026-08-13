@@ -1,165 +1,349 @@
+using System.ComponentModel;
 using System.Windows;
-using System.Windows.Interop;
 using System.Windows.Media;
 using ScreenGuide.App.Services;
-using ScreenGuide.Core;
+using Drawing = System.Drawing;
+using Forms = System.Windows.Forms;
 
 namespace ScreenGuide.App;
 
 public partial class MainWindow : Window
 {
-    private static readonly SolidColorBrush IdleBrush = new(Color.FromRgb(169, 178, 194));
-    private static readonly SolidColorBrush SelectingBrush = new(Color.FromRgb(43, 102, 217));
-    private static readonly SolidColorBrush ActiveBrush = new(Color.FromRgb(22, 138, 103));
+    private static readonly SolidColorBrush IdleBrush = new(System.Windows.Media.Color.FromRgb(169, 178, 194));
+    private static readonly SolidColorBrush ActiveBrush = new(System.Windows.Media.Color.FromRgb(22, 138, 103));
+    private static readonly SolidColorBrush ListeningBrush = new(System.Windows.Media.Color.FromRgb(43, 102, 217));
 
-    private readonly ObservationSession _observationSession = new();
-    private readonly WindowsWindowPickerService _windowPicker = new();
+    private readonly GlobalHotkeyService _hotkeys = new();
+    private readonly WindowsSpeechService _speech = new();
+    private readonly OverlayWindow _overlay = new();
+
+    private Forms.NotifyIcon? _notifyIcon;
+    private Forms.ContextMenuStrip? _trayMenu;
+    private SpeechCapabilityReport? _speechCapabilities;
+    private CancellationTokenSource? _voiceCancellation;
+    private bool _backgroundEnabled;
+    private bool _voiceRequestInProgress;
+    private bool _hotkeysReady;
+    private bool _allowExit;
+    private bool _initialized;
 
     public MainWindow()
     {
         InitializeComponent();
-        _windowPicker.SelectedTargetClosed += WindowPicker_SelectedTargetClosed;
     }
 
-    private async void SelectWindowButton_Click(object sender, RoutedEventArgs e)
+    private void Window_Loaded(object sender, RoutedEventArgs e)
     {
-        if (!_windowPicker.IsSupported)
+        if (_initialized)
         {
-            ShowUnsupportedState();
             return;
         }
 
-        _observationSession.BeginSelection();
-        ShowSelectingState();
+        _initialized = true;
+        InitializeTrayIcon();
 
         try
         {
-            var ownerWindowHandle = new WindowInteropHelper(this).EnsureHandle();
-            var selection = await _windowPicker.PickWindowAsync(ownerWindowHandle);
+            _hotkeys.Register(this);
+            _hotkeys.VoiceRequested += Hotkeys_VoiceRequested;
+            _hotkeys.StopRequested += Hotkeys_StopRequested;
+            VoiceShortcutText.Text = _hotkeys.VoiceShortcutDisplay;
+            _overlay.ConfigureShortcuts(_hotkeys.VoiceShortcutDisplay, _hotkeys.StopShortcutDisplay);
+            _hotkeysReady = true;
+        }
+        catch (Win32Exception exception)
+        {
+            StartBackgroundButton.IsEnabled = false;
+            _hotkeysReady = false;
+            StatusTitle.Text = "快捷键无法使用";
+            StatusDescription.Text = exception.Message;
+            VoiceShortcutText.Text = "没有找到可用快捷键";
+        }
 
-            if (selection is null)
+        RefreshSpeechCapabilities();
+    }
+
+    private async void StartBackgroundButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_speechCapabilities is null)
+        {
+            RefreshSpeechCapabilities();
+        }
+
+        if (!_hotkeysReady || _speechCapabilities is not { IsReady: true })
+        {
+            System.Windows.MessageBox.Show(
+                "这台电脑还缺少中文语音识别或中文语音播报组件。请先按照右侧检查结果安装，然后重新打开本程序。",
+                "语音组件尚未准备好",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+            return;
+        }
+
+        _backgroundEnabled = true;
+        StartBackgroundButton.IsEnabled = false;
+        StopBackgroundButton.IsEnabled = true;
+        StatusLight.Fill = ActiveBrush;
+        StatusTitle.Text = "后台陪练已启动";
+        StatusDescription.Text = $"可以停留在任何软件里，按 {_hotkeys.VoiceShortcutDisplay} 说话。";
+        LastVoiceStatusText.Text = "尚未使用麦克风。";
+
+        Hide();
+        _overlay.ShowReady();
+        ShowTrayMessage(
+            "后台陪练已启动",
+            $"按 {_hotkeys.VoiceShortcutDisplay} 开始说话。按 {_hotkeys.StopShortcutDisplay} 停止。");
+
+        try
+        {
+            await _speech.SpeakChineseAsync(
+                "后台陪练已启动。请按屏幕提示的语音快捷键，然后直接说话。",
+                CancellationToken.None);
+        }
+        catch
+        {
+            _overlay.ShowProblem("语音播报没有启动，请从右下角图标打开设置检查。 ");
+        }
+    }
+
+    private void StopBackgroundButton_Click(object sender, RoutedEventArgs e)
+    {
+        StopBackgroundMode(showSettings: true);
+    }
+
+    private void Hotkeys_VoiceRequested(object? sender, EventArgs e)
+    {
+        if (!_backgroundEnabled || _voiceRequestInProgress)
+        {
+            return;
+        }
+
+        _ = RunVoiceRequestAsync();
+    }
+
+    private void Hotkeys_StopRequested(object? sender, EventArgs e)
+    {
+        if (_backgroundEnabled)
+        {
+            StopBackgroundMode(showSettings: false);
+        }
+    }
+
+    private async Task RunVoiceRequestAsync()
+    {
+        _voiceRequestInProgress = true;
+        _voiceCancellation = new CancellationTokenSource();
+        var cancellationToken = _voiceCancellation.Token;
+
+        StatusLight.Fill = ListeningBrush;
+        StatusTitle.Text = "正在听";
+        StatusDescription.Text = "说完后停顿一下，本次监听会自动结束。";
+        LastVoiceStatusText.Text = "麦克风只在这一次提问期间开启。";
+        _overlay.ShowListening();
+
+        try
+        {
+            var recognizedText = await _speech.RecognizeChineseOnceAsync(cancellationToken);
+            if (string.IsNullOrWhiteSpace(recognizedText))
             {
-                _observationSession.CancelSelection();
-                RestoreCurrentState("你取消了这次选择，没有新增任何授权。");
+                _overlay.ShowProblem("没有识别到清楚的话，请再按一次快捷键重试。 ");
+                LastVoiceStatusText.Text = "这次没有识别到文字。";
+                await _speech.SpeakChineseAsync("这次没有听清，请再说一次。", cancellationToken);
                 return;
             }
 
-            var displayName = string.IsNullOrWhiteSpace(selection.DisplayName)
-                ? "已选择的窗口"
-                : selection.DisplayName;
+            _overlay.ShowRecognized($"你说：{recognizedText}");
+            LastVoiceStatusText.Text = $"刚刚听到：{recognizedText}";
+            StatusLight.Fill = ActiveBrush;
+            StatusTitle.Text = "已经听清";
+            StatusDescription.Text = "语音通道正常；下一步接入当前窗口画面和 AI 回答。";
 
-            _observationSession.CompleteSelection(displayName);
-            ShowSelectedState(selection with { DisplayName = displayName });
+            var spokenReply = $"我听到了。你说的是，{recognizedText}。语音陪练通道已经工作。";
+            await _speech.SpeakChineseAsync(spokenReply, cancellationToken);
+
+            await Task.Delay(TimeSpan.FromSeconds(1.5), cancellationToken);
+            if (_backgroundEnabled)
+            {
+                _overlay.ShowReady();
+            }
         }
-        catch (UnauthorizedAccessException)
+        catch (OperationCanceledException)
         {
-            _observationSession.CancelSelection();
-            RestoreCurrentState("Windows 没有授予窗口选择权限，请重新选择。", showError: true);
+            // StopBackgroundMode already updates the visible state.
         }
-        catch (Exception)
+        catch (InvalidOperationException)
         {
-            _observationSession.CancelSelection();
-            RestoreCurrentState("系统窗口选择器没有正常打开，请稍后重试。", showError: true);
+            ShowVoiceProblem("麦克风或中文语音识别不可用。请打开 Windows 设置检查麦克风权限和中文语音组件。");
+        }
+        catch
+        {
+            ShowVoiceProblem("语音识别没有正常完成。请确认麦克风已连接，然后再按一次快捷键。");
+        }
+        finally
+        {
+            _voiceCancellation?.Dispose();
+            _voiceCancellation = null;
+            _voiceRequestInProgress = false;
+
+            if (_backgroundEnabled && StatusTitle.Text == "正在听")
+            {
+                StatusLight.Fill = ActiveBrush;
+                StatusTitle.Text = "后台陪练已启动";
+                StatusDescription.Text = $"按 {_hotkeys.VoiceShortcutDisplay} 可以重新说话。";
+            }
         }
     }
 
-    private void StopButton_Click(object sender, RoutedEventArgs e)
+    private void ShowVoiceProblem(string message)
     {
-        _windowPicker.ClearSelection();
-        _observationSession.Stop();
-        ShowIdleState("窗口授权已经清除，当前没有读取任何画面。");
+        _overlay.ShowProblem(message);
+        StatusLight.Fill = IdleBrush;
+        StatusTitle.Text = "语音功能需要检查";
+        StatusDescription.Text = message;
+        LastVoiceStatusText.Text = message;
     }
 
-    private void WindowPicker_SelectedTargetClosed(object? sender, EventArgs e)
+    private void StopBackgroundMode(bool showSettings)
     {
-        Dispatcher.Invoke(() =>
+        _backgroundEnabled = false;
+        _voiceCancellation?.Cancel();
+        StartBackgroundButton.IsEnabled = _hotkeysReady && _speechCapabilities is { IsReady: true };
+        StopBackgroundButton.IsEnabled = false;
+        StatusLight.Fill = IdleBrush;
+        StatusTitle.Text = "后台陪练已停止";
+        StatusDescription.Text = "当前没有监听麦克风，也不会在后台响应语音快捷键。";
+        LastVoiceStatusText.Text = "麦克风已停止。";
+        _overlay.ShowStopped();
+
+        if (showSettings)
         {
-            _observationSession.Stop();
-            ShowIdleState("你选择的窗口已经关闭，授权已自动清除。");
-        });
+            OpenSettings();
+        }
+        else
+        {
+            _ = HideOverlayAfterDelayAsync();
+            ShowTrayMessage("后台陪练已停止", "从右下角图标可以重新打开设置。");
+        }
+    }
+
+    private async Task HideOverlayAfterDelayAsync()
+    {
+        await Task.Delay(TimeSpan.FromSeconds(2.5));
+        if (!_backgroundEnabled)
+        {
+            _overlay.Hide();
+        }
+    }
+
+    private void RefreshSpeechCapabilities()
+    {
+        _speechCapabilities = _speech.GetCapabilityReport();
+
+        RecognitionCapabilityText.Text = _speechCapabilities.HasChineseRecognizer
+            ? $"✓ 中文语音识别：{_speechCapabilities.RecognizerName}"
+            : "✕ 未检测到中文语音识别。请在 Windows 设置的语言选项中安装“语音”。";
+        RecognitionCapabilityText.Foreground = _speechCapabilities.HasChineseRecognizer
+            ? ActiveBrush
+            : new SolidColorBrush(System.Windows.Media.Color.FromRgb(160, 79, 20));
+
+        VoiceCapabilityText.Text = _speechCapabilities.HasChineseVoice
+            ? $"✓ 中文语音播报：{_speechCapabilities.VoiceName}"
+            : "✕ 未检测到中文语音播报。请在 Windows 设置中安装中文语音包。";
+        VoiceCapabilityText.Foreground = _speechCapabilities.HasChineseVoice
+            ? ActiveBrush
+            : new SolidColorBrush(System.Windows.Media.Color.FromRgb(160, 79, 20));
+
+        if (_speechCapabilities.IsReady && _hotkeysReady)
+        {
+            StatusTitle.Text = "语音组件已就绪";
+            StatusDescription.Text = "可以启动后台陪练。启动后主窗口会隐藏。";
+            StartBackgroundButton.IsEnabled = true;
+        }
+        else if (!_hotkeysReady)
+        {
+            StatusTitle.Text = "快捷键无法使用";
+            StatusDescription.Text = "常用的语音快捷键都被其他软件占用，请先关闭冲突软件。";
+            StartBackgroundButton.IsEnabled = false;
+        }
+        else
+        {
+            StatusTitle.Text = "缺少语音组件";
+            StatusDescription.Text = "请先根据右侧提示补齐中文语音组件。";
+            StartBackgroundButton.IsEnabled = false;
+        }
+    }
+
+    private void InitializeTrayIcon()
+    {
+        _trayMenu = new Forms.ContextMenuStrip();
+        _trayMenu.Items.Add("打开设置", null, (_, _) => Dispatcher.Invoke(OpenSettings));
+        _trayMenu.Items.Add("退出屏幕陪练老师", null, (_, _) => Dispatcher.Invoke(ExitApplication));
+
+        _notifyIcon = new Forms.NotifyIcon
+        {
+            Icon = Drawing.SystemIcons.Application,
+            Text = "屏幕陪练老师",
+            Visible = true,
+            ContextMenuStrip = _trayMenu
+        };
+        _notifyIcon.DoubleClick += (_, _) => Dispatcher.Invoke(OpenSettings);
+    }
+
+    private void OpenSettings()
+    {
+        if (!IsVisible)
+        {
+            Show();
+        }
+
+        WindowState = WindowState.Normal;
+        Activate();
+        _overlay.Hide();
+    }
+
+    private void ShowTrayMessage(string title, string text)
+    {
+        _notifyIcon?.ShowBalloonTip(2500, title, text, Forms.ToolTipIcon.Info);
+    }
+
+    private void ExitApplication()
+    {
+        _allowExit = true;
+        _backgroundEnabled = false;
+        _voiceCancellation?.Cancel();
+        Close();
+    }
+
+    private void Window_Closing(object? sender, CancelEventArgs e)
+    {
+        if (_backgroundEnabled && !_allowExit)
+        {
+            e.Cancel = true;
+            Hide();
+            _overlay.ShowReady();
+            ShowTrayMessage(
+                "屏幕陪练仍在后台",
+                $"按 {_hotkeys.VoiceShortcutDisplay} 说话，或从右下角图标退出。");
+        }
     }
 
     private void Window_Closed(object? sender, EventArgs e)
     {
-        _windowPicker.SelectedTargetClosed -= WindowPicker_SelectedTargetClosed;
-        _windowPicker.Dispose();
-        _observationSession.Stop();
-    }
+        _hotkeys.VoiceRequested -= Hotkeys_VoiceRequested;
+        _hotkeys.StopRequested -= Hotkeys_StopRequested;
+        _hotkeys.Dispose();
+        _voiceCancellation?.Cancel();
+        _voiceCancellation?.Dispose();
+        _notifyIcon?.Dispose();
+        _trayMenu?.Dispose();
 
-    private void ShowSelectingState()
-    {
-        StatusLight.Fill = SelectingBrush;
-        StatusTitle.Text = "等待你选择";
-        StatusDescription.Text = "请在 Windows 系统界面里选择一个软件窗口；点击取消不会授权。";
-        SelectionDetailText.Text = "系统选择器打开期间，本软件不会读取画面。";
-        NextStepTitle.Text = "在系统界面中选择窗口";
-        GuidanceText.Text = "请选择一个具体的软件窗口，例如 GitHub Desktop。不要选择整个桌面或显示器。";
-        GuidanceReasonText.Text = "  选择由 Windows 系统完成，本软件不能替你确认。";
-        SelectWindowButton.Content = "等待选择…";
-        SelectWindowButton.IsEnabled = false;
-    }
-
-    private void ShowSelectedState(WindowSelectionResult selection)
-    {
-        StatusLight.Fill = ActiveBrush;
-        StatusTitle.Text = $"已选择：{selection.DisplayName}";
-        StatusDescription.Text = "Windows 已返回这个目标。当前版本只保存选择结果，尚未读取画面。";
-        SelectionDetailText.Text = $"目标大小：{selection.PixelWidth} × {selection.PixelHeight} 像素";
-        NextStepTitle.Text = "窗口授权成功";
-        GuidanceText.Text = $"已选择“{selection.DisplayName}”。你现在可以停止观察或重新选择；本步骤没有截取、保存或上传画面。";
-        GuidanceReasonText.Text = "  已完成系统选择，下一阶段才会读取一张测试画面。";
-        SelectWindowButton.Content = "重新选择软件";
-        SelectWindowButton.IsEnabled = true;
-        StopButton.IsEnabled = true;
-    }
-
-    private void ShowIdleState(string detail)
-    {
-        StatusLight.Fill = IdleBrush;
-        StatusTitle.Text = "尚未选择窗口";
-        StatusDescription.Text = "只有你主动选择后，软件才能取得那个窗口的授权。";
-        SelectionDetailText.Text = detail;
-        NextStepTitle.Text = "先选择一个窗口";
-        GuidanceText.Text = "请选择你想学习的软件窗口，例如 GitHub Desktop。第一版会先让你亲自操作，不会接管鼠标。";
-        GuidanceReasonText.Text = "  先把观察权限做对，再增加语音和智能判断。";
-        SelectWindowButton.Content = "选择要学习的软件";
-        SelectWindowButton.IsEnabled = true;
-        StopButton.IsEnabled = false;
-    }
-
-    private void RestoreCurrentState(string detail, bool showError = false)
-    {
-        if (_observationSession.CanCapture && _observationSession.TargetWindowTitle is not null)
+        try
         {
-            StatusLight.Fill = ActiveBrush;
-            StatusTitle.Text = $"仍在使用：{_observationSession.TargetWindowTitle}";
-            StatusDescription.Text = "原窗口授权保持不变，当前版本尚未读取画面。";
-            SelectionDetailText.Text = detail;
-            NextStepTitle.Text = "原窗口仍然有效";
-            GuidanceText.Text = "你可以继续保留原窗口、重新选择，或者点击“停止观察”清除授权。";
-            GuidanceReasonText.Text = "  取消重新选择不会破坏原来的授权。";
-            SelectWindowButton.Content = "重新选择软件";
-            SelectWindowButton.IsEnabled = true;
-            StopButton.IsEnabled = true;
+            _overlay.Close();
         }
-        else
+        catch (InvalidOperationException)
         {
-            ShowIdleState(detail);
+            // The overlay was already closed during application shutdown.
         }
-
-        if (showError)
-        {
-            MessageBox.Show(detail, "无法选择窗口", MessageBoxButton.OK, MessageBoxImage.Warning);
-        }
-    }
-
-    private void ShowUnsupportedState()
-    {
-        ShowIdleState("这台 Windows 设备不支持系统窗口选择器，未获得任何授权。");
-        MessageBox.Show(
-            "当前 Windows 设备不支持系统窗口选择器。软件没有读取或上传任何屏幕内容。",
-            "设备不支持",
-            MessageBoxButton.OK,
-            MessageBoxImage.Information);
     }
 }
