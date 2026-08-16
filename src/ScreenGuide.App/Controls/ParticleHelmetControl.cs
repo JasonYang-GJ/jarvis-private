@@ -25,8 +25,8 @@ public sealed class ParticleHelmetControl : FrameworkElement
     {
         Armor,
         HotArmor,
-        Faceplate,
-        Contour,
+        OuterContour,
+        PanelSeam,
         Eye,
         Ambient
     }
@@ -44,11 +44,13 @@ public sealed class ParticleHelmetControl : FrameworkElement
 
     private readonly record struct PlateSample(int Offset, byte B, byte G, byte R, byte A);
 
-    private static readonly Rgb ArmorRed = new(235, 45, 73);
-    private static readonly Rgb HotOrange = new(255, 112, 69);
+    private static readonly Rgb ArmorRed = new(222, 31, 57);
+    private static readonly Rgb HotOrange = new(255, 101, 54);
+    private static readonly Rgb PanelGold = new(194, 140, 55);
+    private static readonly Rgb PanelGoldLight = new(238, 198, 105);
     private static readonly Rgb ReactorCyan = new(72, 231, 255);
     private static readonly Rgb SignalSilver = new(205, 232, 244);
-    private static readonly Rgb FaceSteel = new(104, 155, 177);
+    private static readonly Rgb DeepArmor = new(24, 5, 11);
 
     private readonly Random _random = new(0x4A_52_56);
     private readonly List<Particle> _particles = [];
@@ -69,7 +71,7 @@ public sealed class ParticleHelmetControl : FrameworkElement
     private double _renderResolutionScale = 1;
     private ParticleHelmetState _state = ParticleHelmetState.Offline;
 
-    public int ParticleCount { get; set; } = 4200;
+    public int ParticleCount { get; set; } = 2600;
 
     public bool Compact { get; set; }
 
@@ -194,9 +196,9 @@ public sealed class ParticleHelmetControl : FrameworkElement
             return;
         }
 
-        var fillCount = (int)(ParticleCount * 0.54);
-        var contourCount = (int)(ParticleCount * 0.24);
-        var eyeCount = (int)(ParticleCount * 0.08);
+        var fillCount = (int)(ParticleCount * 0.43);
+        var contourCount = (int)(ParticleCount * 0.30);
+        var eyeCount = (int)(ParticleCount * 0.07);
         var ambientCount = Math.Max(40, ParticleCount - fillCount - contourCount - eyeCount);
 
         AddHelmetFill(fillCount);
@@ -216,24 +218,29 @@ public sealed class ParticleHelmetControl : FrameworkElement
                 continue;
             }
 
-            var inEyeOpening = y is > -0.14 and < 0.10 && Math.Abs(x) is > 0.13 and < 0.53;
+            var inEyeOpening = IsInsideEyeOpening(x, y);
             if (inEyeOpening && _random.NextDouble() < 0.88)
             {
                 continue;
             }
 
-            var faceVoid = y is > 0.04 and < 0.72 && Math.Abs(x) < 0.28;
-            if (faceVoid && _random.NextDouble() < 0.58)
+            var faceplate = IsInsideGoldFaceplate(x, y);
+            // The gold plate is deliberately solid. Particles belong to the red shell,
+            // seams and eyes so the face still reads as armor after the animation settles.
+            if (faceplate)
             {
                 continue;
             }
 
-            var kind = Math.Abs(x) > 0.44 || y > 0.56
+            if (IsNearPanelSeam(x, y) && _random.NextDouble() < 0.82)
+            {
+                continue;
+            }
+
+            var kind = Math.Abs(x) > 0.49 || y > 0.70
                 ? ParticleKind.HotArmor
-                : faceVoid
-                    ? ParticleKind.Faceplate
-                    : ParticleKind.Armor;
-            AddParticle(x, y, kind, Next(0.58, 1.28));
+                : ParticleKind.Armor;
+            AddParticle(x, y, kind, Next(0.42, 1.02));
             count--;
         }
     }
@@ -242,25 +249,25 @@ public sealed class ParticleHelmetControl : FrameworkElement
     {
         var outer = new (double X, double Y)[]
         {
-            (-0.25, -0.98), (-0.52, -0.82), (-0.68, -0.50), (-0.72, -0.08),
-            (-0.62, 0.58), (-0.34, 0.88), (0.00, 1.00), (0.34, 0.88),
-            (0.62, 0.58), (0.72, -0.08), (0.68, -0.50), (0.52, -0.82), (0.25, -0.98)
+            (-0.37, -1.00), (-0.57, -0.84), (-0.66, -0.46), (-0.67, 0.22),
+            (-0.54, 0.63), (-0.28, 0.88), (-0.17, 0.98), (0.17, 0.98), (0.28, 0.88),
+            (0.54, 0.63), (0.67, 0.22), (0.66, -0.46), (0.57, -0.84), (0.37, -1.00)
         };
-        AddPolyline(outer, count / 2, ParticleKind.Contour, 1.25, close: false);
+        AddPolyline(outer, (int)(count * 0.56), ParticleKind.OuterContour, 0.92, close: false);
 
         var panelLines = new (double X, double Y)[][]
         {
-            [(-0.10, -0.95), (-0.30, -0.58), (-0.49, -0.12), (-0.39, 0.15)],
-            [(0.10, -0.95), (0.30, -0.58), (0.49, -0.12), (0.39, 0.15)],
-            [(-0.63, 0.18), (-0.42, 0.52), (-0.18, 0.84)],
-            [(0.63, 0.18), (0.42, 0.52), (0.18, 0.84)],
-            [(-0.38, 0.56), (0.00, 0.86), (0.38, 0.56)],
-            [(-0.29, -0.51), (0.00, -0.63), (0.29, -0.51)]
+            [(-0.23, -0.77), (-0.43, -0.58), (-0.52, -0.18)],
+            [(0.23, -0.77), (0.43, -0.58), (0.52, -0.18)],
+            [(-0.52, 0.13), (-0.44, 0.49), (-0.23, 0.78)],
+            [(0.52, 0.13), (0.44, 0.49), (0.23, 0.78)],
+            [(-0.37, 0.67), (-0.20, 0.84), (-0.14, 0.91), (0.14, 0.91), (0.20, 0.84), (0.37, 0.67)],
+            [(-0.42, -0.50), (0.00, -0.61), (0.42, -0.50)]
         };
-        var remaining = Math.Max(1, count / 2 / panelLines.Length);
+        var remaining = Math.Max(1, (int)(count * 0.44) / panelLines.Length);
         foreach (var line in panelLines)
         {
-            AddPolyline(line, remaining, ParticleKind.Contour, 0.95, close: false);
+            AddPolyline(line, remaining, ParticleKind.PanelSeam, 0.66, close: false);
         }
     }
 
@@ -276,12 +283,12 @@ public sealed class ParticleHelmetControl : FrameworkElement
         for (var index = 0; index < count; index++)
         {
             var t = _random.NextDouble();
-            var innerX = 0.12;
-            var outerX = 0.50;
+            var innerX = 0.08;
+            var outerX = 0.53;
             var x = side * (innerX + (outerX - innerX) * t);
-            var centerY = -0.015 - 0.105 * t;
-            var thickness = Next(-0.030, 0.030) * Math.Sin(Math.PI * t);
-            AddParticle(x, centerY + thickness, ParticleKind.Eye, Next(1.0, 1.8));
+            var centerY = -0.035 - 0.082 * t;
+            var thickness = Next(-0.040, 0.040) * Math.Pow(Math.Sin(Math.PI * t), 0.65);
+            AddParticle(x, centerY + thickness, ParticleKind.Eye, Next(0.78, 1.38));
         }
     }
 
@@ -340,12 +347,96 @@ public sealed class ParticleHelmetControl : FrameworkElement
         var absoluteX = Math.Abs(x);
         var halfWidth = y switch
         {
-            < -0.72 => 0.24 + ((y + 1.0) / 0.28) * 0.36,
-            < 0.28 => 0.66 - ((y + 0.72) / 1.0) * 0.03,
-            < 0.75 => 0.63 - ((y - 0.28) / 0.47) * 0.22,
-            _ => 0.41 - ((y - 0.75) / 0.25) * 0.27
+            < -0.84 => 0.37 + ((y + 1.0) / 0.16) * 0.20,
+            < -0.25 => 0.57 + ((y + 0.84) / 0.59) * 0.10,
+            < 0.24 => 0.67 - ((y + 0.25) / 0.49) * 0.03,
+            < 0.68 => 0.64 - ((y - 0.24) / 0.44) * 0.16,
+            _ => 0.48 - ((y - 0.68) / 0.32) * 0.26
         };
         return absoluteX <= halfWidth;
+    }
+
+    private static bool IsInsideGoldFaceplate(double x, double y)
+    {
+        var absoluteX = Math.Abs(x);
+        var halfWidth = y switch
+        {
+            < -0.79 => 0.21 + ((y + 1.0) / 0.21) * 0.12,
+            < -0.50 => 0.33 + ((y + 0.79) / 0.29) * 0.15,
+            < 0.18 => 0.45 + ((y + 0.50) / 0.68) * 0.03,
+            < 0.68 => 0.48 - ((y - 0.18) / 0.50) * 0.13,
+            _ => 0.35 - ((y - 0.68) / 0.32) * 0.13
+        };
+        return absoluteX <= halfWidth;
+    }
+
+    private static bool IsInsideEyeOpening(double x, double y)
+    {
+        var absoluteX = Math.Abs(x);
+        if (absoluteX is < 0.075 or > 0.545)
+        {
+            return false;
+        }
+
+        var t = (absoluteX - 0.075) / 0.47;
+        var centerY = -0.035 - 0.082 * t;
+        var halfHeight = 0.018 + 0.048 * Math.Pow(Math.Sin(Math.PI * t), 0.68);
+        return Math.Abs(y - centerY) <= halfHeight;
+    }
+
+    private static bool IsInsideEyeGlow(double x, double y)
+    {
+        var absoluteX = Math.Abs(x);
+        if (absoluteX is < 0.095 or > 0.525)
+        {
+            return false;
+        }
+
+        var t = (absoluteX - 0.095) / 0.43;
+        var centerY = -0.035 - 0.082 * t;
+        var halfHeight = 0.010 + 0.028 * Math.Pow(Math.Sin(Math.PI * t), 0.72);
+        return Math.Abs(y - centerY) <= halfHeight;
+    }
+
+    private static bool IsNearPanelSeam(double x, double y)
+    {
+        const double tolerance = 0.018;
+        return IsNearSegment(x, y, -0.42, -0.50, 0.00, -0.61, tolerance) ||
+               IsNearSegment(x, y, 0.00, -0.61, 0.42, -0.50, tolerance) ||
+               IsNearSegment(x, y, -0.52, 0.13, -0.44, 0.49, tolerance) ||
+               IsNearSegment(x, y, -0.44, 0.49, -0.23, 0.78, tolerance) ||
+               IsNearSegment(x, y, 0.52, 0.13, 0.44, 0.49, tolerance) ||
+               IsNearSegment(x, y, 0.44, 0.49, 0.23, 0.78, tolerance) ||
+               IsNearSegment(x, y, -0.23, 0.55, 0.00, 0.59, tolerance * 1.15) ||
+               IsNearSegment(x, y, 0.00, 0.59, 0.23, 0.55, tolerance * 1.15) ||
+               IsNearSegment(x, y, -0.37, 0.67, -0.14, 0.91, tolerance) ||
+               IsNearSegment(x, y, -0.14, 0.91, 0.14, 0.91, tolerance) ||
+               IsNearSegment(x, y, 0.37, 0.67, 0.14, 0.91, tolerance);
+    }
+
+    private static bool IsNearSegment(
+        double x,
+        double y,
+        double startX,
+        double startY,
+        double endX,
+        double endY,
+        double tolerance)
+    {
+        var deltaX = endX - startX;
+        var deltaY = endY - startY;
+        var lengthSquared = deltaX * deltaX + deltaY * deltaY;
+        if (lengthSquared <= double.Epsilon)
+        {
+            return false;
+        }
+
+        var amount = Math.Clamp(((x - startX) * deltaX + (y - startY) * deltaY) / lengthSquared, 0, 1);
+        var nearestX = startX + deltaX * amount;
+        var nearestY = startY + deltaY * amount;
+        var distanceX = x - nearestX;
+        var distanceY = y - nearestY;
+        return distanceX * distanceX + distanceY * distanceY <= tolerance * tolerance;
     }
 
     private void RecreateBitmap()
@@ -399,40 +490,65 @@ public sealed class ParticleHelmetControl : FrameworkElement
                 }
 
                 var absoluteX = Math.Abs(normalizedX);
-                var faceplate = normalizedY > -0.18 && normalizedY < 0.78 &&
-                                absoluteX < 0.31 + Math.Max(0, normalizedY) * 0.08;
-                var eyeOpening = normalizedY is > -0.15 and < 0.09 && absoluteX is > 0.12 and < 0.53;
-                var lowerJaw = normalizedY > 0.58;
-                var sideArmor = absoluteX > 0.43;
-                var crown = normalizedY < -0.32;
+                var faceplate = IsInsideGoldFaceplate(normalizedX, normalizedY);
+                var eyeOpening = IsInsideEyeOpening(normalizedX, normalizedY);
+                var eyeGlow = IsInsideEyeGlow(normalizedX, normalizedY);
+                var panelSeam = IsNearPanelSeam(normalizedX, normalizedY);
+                var foreheadInset = normalizedY is > -0.93 and < -0.70 &&
+                                    absoluteX < 0.16 + (normalizedY + 0.93) * 0.36;
+                var sideArmor = absoluteX > 0.48;
+                var crown = normalizedY < -0.52;
+                var cheekFacet = faceplate && normalizedY is > 0.18 and < 0.63 && absoluteX > 0.27;
+                var centerFacet = faceplate && normalizedY is > 0.06 and < 0.52 &&
+                                  absoluteX < 0.065 + normalizedY * 0.055;
 
                 var color = faceplate
-                    ? new Rgb(10, 18, 25)
+                    ? PanelGold
                     : crown
-                        ? new Rgb(105, 12, 31)
+                        ? new Rgb(151, 18, 38)
                         : sideArmor
-                            ? new Rgb(123, 21, 34)
-                            : new Rgb(82, 13, 27);
-                if (lowerJaw)
+                            ? new Rgb(134, 14, 31)
+                            : new Rgb(107, 10, 26);
+
+                var light = faceplate
+                    ? 0.92 + (1.0 - absoluteX) * 0.16 - normalizedX * 0.07 - normalizedY * 0.025
+                    : 0.74 + (1.0 - absoluteX) * 0.20 - normalizedX * 0.08;
+                color = color.Scale(Math.Clamp(light, faceplate ? 0.78 : 0.56, faceplate ? 1.14 : 1.08));
+
+                if (cheekFacet)
                 {
-                    color = Rgb.Lerp(color, new Rgb(18, 15, 20), 0.58);
+                    color = color.Scale(0.92);
+                }
+                else if (centerFacet)
+                {
+                    color = color.Scale(1.08);
+                }
+
+                if (foreheadInset)
+                {
+                    color = new Rgb(111, 11, 27).Scale(0.86 + (1.0 - absoluteX) * 0.20);
+                }
+                if (panelSeam)
+                {
+                    color = DeepArmor;
                 }
                 if (eyeOpening)
                 {
-                    color = new Rgb(2, 10, 16);
+                    color = new Rgb(1, 7, 11);
                 }
-
-                var light = 0.68 + (1.0 - absoluteX) * 0.24 - normalizedX * 0.08;
-                if (crown)
+                if (eyeGlow)
                 {
-                    light += Math.Max(0, 0.12 - Math.Abs(normalizedX) * 0.08);
+                    color = new Rgb(178, 245, 255);
                 }
-                color = color.Scale(Math.Clamp(light, 0.54, 1.10));
 
-                var alpha = Compact ? 218 : faceplate ? 214 : 188;
+                var alpha = Compact ? 238 : faceplate ? 232 : 220;
+                if (panelSeam)
+                {
+                    alpha = 244;
+                }
                 if (eyeOpening)
                 {
-                    alpha = 226;
+                    alpha = 250;
                 }
                 var offset = pixelY * _stride + pixelX * 4;
                 _plateSamples.Add(new PlateSample(
@@ -536,6 +652,11 @@ public sealed class ParticleHelmetControl : FrameworkElement
 
             var color = ResolveColor(particle.Kind, assembled, stateElapsed, particle.Phase);
             var intensity = ResolveIntensity(particle.Kind, assembled, stateElapsed, particle.Phase) * (1.0 - dissolve);
+            if (particle.Kind == ParticleKind.Ambient && assembled > 0.92 &&
+                IsInsideHelmet((x - centerX) / scale, (y - centerY) / scale))
+            {
+                continue;
+            }
             if (intensity <= 0.01)
             {
                 continue;
@@ -543,12 +664,13 @@ public sealed class ParticleHelmetControl : FrameworkElement
 
             var kindScale = particle.Kind switch
             {
-                ParticleKind.Contour => 1.08,
+                ParticleKind.OuterContour => 0.84,
+                ParticleKind.PanelSeam => 0.66,
                 ParticleKind.Ambient => 0.72,
-                ParticleKind.Eye => 1.05,
-                _ => 1.18
+                ParticleKind.Eye => 0.96,
+                _ => 0.88
             };
-            var size = particle.Size * kindScale * (Compact ? 0.86 : 1.22);
+            var size = particle.Size * kindScale * (Compact ? 0.82 : 1.05);
             DrawParticle(x, y, size, color, intensity);
         }
 
@@ -586,19 +708,19 @@ public sealed class ParticleHelmetControl : FrameworkElement
         {
             ParticleKind.Armor => ArmorRed,
             ParticleKind.HotArmor => HotOrange,
-            ParticleKind.Faceplate => FaceSteel,
-            ParticleKind.Contour => SignalSilver,
+            ParticleKind.OuterContour => HotOrange,
+            ParticleKind.PanelSeam => PanelGoldLight,
             ParticleKind.Eye => ReactorCyan,
             ParticleKind.Ambient => ReactorCyan,
             _ => SignalSilver
         };
 
         var assemblyBlue = (1.0 - assembled) * 0.72;
-        stable = Rgb.Lerp(stable, kind == ParticleKind.Contour ? SignalSilver : ReactorCyan, assemblyBlue);
+        stable = Rgb.Lerp(stable, ReactorCyan, assemblyBlue);
 
         return _state switch
         {
-            ParticleHelmetState.Offline => Rgb.Lerp(stable, FaceSteel, 0.12),
+            ParticleHelmetState.Offline => Rgb.Lerp(stable, DeepArmor, 0.08),
             ParticleHelmetState.Listening when kind is not ParticleKind.Eye => Rgb.Lerp(stable, ReactorCyan, 0.34),
             ParticleHelmetState.Recognized => Rgb.Lerp(stable, SignalSilver, 0.22),
             ParticleHelmetState.Thinking => Rgb.Lerp(stable, HotOrange, 0.22 + 0.12 * Math.Sin(time * 3 + phase)),
@@ -634,9 +756,13 @@ public sealed class ParticleHelmetControl : FrameworkElement
         {
             stateLevel *= _state == ParticleHelmetState.Thinking ? 0.82 : 0.46;
         }
-        else if (kind == ParticleKind.Contour)
+        else if (kind == ParticleKind.OuterContour)
         {
-            stateLevel *= 1.08;
+            stateLevel *= 0.92;
+        }
+        else if (kind == ParticleKind.PanelSeam)
+        {
+            stateLevel *= 0.72;
         }
 
         return Clamp01(assembled * stateLevel * twinkle);

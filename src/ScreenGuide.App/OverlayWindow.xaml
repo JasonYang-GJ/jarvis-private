@@ -66,7 +66,7 @@
 
         <Grid x:Name="LargeAvatarView">
             <controls:ParticleHelmetControl x:Name="LargeParticleHelmet"
-                                            ParticleCount="4200"
+                                            ParticleCount="2600"
                                             HorizontalAlignment="Stretch"
                                             VerticalAlignment="Stretch" />
 
@@ -130,7 +130,7 @@
               VerticalAlignment="Center"
               ToolTip="双击展开，右键打开菜单">
             <controls:ParticleHelmetControl x:Name="CompactParticleHelmet"
-                                            ParticleCount="1200"
+                                            ParticleCount="780"
                                             Compact="True"
                                             Width="112"
                                             Height="112" />
