@@ -3,7 +3,9 @@ namespace ScreenGuide.Core;
 public enum DesktopActionKind
 {
     OpenTarget,
-    SearchForeground
+    SearchForeground,
+    PrepareFirstImage,
+    InvokeForeground
 }
 
 public enum DesktopBrowserPreference
@@ -46,6 +48,18 @@ public static class DesktopActionIntentParser
         "打开"
     ];
 
+    private static readonly string[] InvokePrefixes =
+    [
+        "请帮我点击",
+        "帮我点击",
+        "请点击",
+        "点击",
+        "请帮我选择",
+        "帮我选择",
+        "请选择",
+        "选择"
+    ];
+
     public static bool TryParse(string? command, out DesktopActionIntent? intent)
     {
         intent = null;
@@ -55,6 +69,33 @@ public static class DesktopActionIntentParser
         }
 
         var normalized = Normalize(command);
+        if (LooksLikeImagePreparation(normalized))
+        {
+            intent = new DesktopActionIntent(DesktopActionKind.PrepareFirstImage, DetectImageLocation(normalized));
+            return true;
+        }
+
+        if (normalized is "发送" or "确认发送")
+        {
+            intent = new DesktopActionIntent(DesktopActionKind.InvokeForeground, "发送");
+            return true;
+        }
+
+        foreach (var prefix in InvokePrefixes)
+        {
+            if (!normalized.StartsWith(prefix, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            var target = normalized[prefix.Length..].TrimStart('按', '钮', '：', ':');
+            if (!string.IsNullOrWhiteSpace(target) && !LooksLikeExplanation(target))
+            {
+                intent = new DesktopActionIntent(DesktopActionKind.InvokeForeground, target);
+                return true;
+            }
+        }
+
         foreach (var prefix in SearchPrefixes)
         {
             if (!normalized.StartsWith(prefix, StringComparison.Ordinal))
@@ -133,5 +174,36 @@ public static class DesktopActionIntentParser
             || target.Contains("能不能", StringComparison.Ordinal)
             || target.Contains("可以", StringComparison.Ordinal)
             || target.EndsWith("吗", StringComparison.Ordinal);
+    }
+
+    private static bool LooksLikeImagePreparation(string command)
+    {
+        return (command.Contains("照片", StringComparison.Ordinal)
+                || command.Contains("图片", StringComparison.Ordinal))
+            && (command.Contains("找到", StringComparison.Ordinal)
+                || command.Contains("查找", StringComparison.Ordinal)
+                || command.Contains("第一张", StringComparison.Ordinal))
+            && !command.Contains("怎么", StringComparison.Ordinal)
+            && !command.EndsWith("吗", StringComparison.Ordinal);
+    }
+
+    private static string DetectImageLocation(string command)
+    {
+        if (command.Contains("桌面", StringComparison.Ordinal))
+        {
+            return "桌面";
+        }
+        if (command.Contains("下载", StringComparison.Ordinal))
+        {
+            return "下载";
+        }
+        if (command.Contains("C盘", StringComparison.OrdinalIgnoreCase)
+            || command.Contains("C：", StringComparison.OrdinalIgnoreCase)
+            || command.Contains("C:", StringComparison.OrdinalIgnoreCase))
+        {
+            return "C盘图片";
+        }
+
+        return "图片";
     }
 }

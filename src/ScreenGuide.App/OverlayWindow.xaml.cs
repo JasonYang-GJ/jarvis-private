@@ -164,7 +164,7 @@ public partial class OverlayWindow : Window
     {
         ShowStatus(
             "连续对话中",
-            "直接说下一句；说“你退下吧”或“退出”即可结束",
+            "直接说下一句；回答时也可插话；说“你退下吧”结束",
             System.Windows.Media.Color.FromRgb(72, 231, 255),
             ParticleHelmetState.Waiting);
     }

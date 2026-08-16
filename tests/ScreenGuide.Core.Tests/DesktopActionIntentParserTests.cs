@@ -37,6 +37,30 @@ public sealed class DesktopActionIntentParserTests
     }
 
     [Theory]
+    [InlineData("打开此电脑，找到C盘里面的照片，把第一张照片发给我", "C盘图片")]
+    [InlineData("找到图片文件夹里的第一张图片", "图片")]
+    [InlineData("查找桌面的第一张照片", "桌面")]
+    public void ImagePreparationCommands_AreParsed(string command, string location)
+    {
+        Assert.True(DesktopActionIntentParser.TryParse(command, out var intent));
+        Assert.NotNull(intent);
+        Assert.Equal(DesktopActionKind.PrepareFirstImage, intent.Kind);
+        Assert.Equal(location, intent.Target);
+    }
+
+    [Theory]
+    [InlineData("点击发送", "发送")]
+    [InlineData("请选择同意", "同意")]
+    [InlineData("确认发送", "发送")]
+    public void ForegroundSelectionCommands_AreParsed(string command, string target)
+    {
+        Assert.True(DesktopActionIntentParser.TryParse(command, out var intent));
+        Assert.NotNull(intent);
+        Assert.Equal(DesktopActionKind.InvokeForeground, intent.Kind);
+        Assert.Equal(target, intent.Target);
+    }
+
+    [Theory]
     [InlineData("怎么在抖音里搜索周杰伦")]
     [InlineData("打开是什么意思")]
     [InlineData("打开抖音可以吗")]

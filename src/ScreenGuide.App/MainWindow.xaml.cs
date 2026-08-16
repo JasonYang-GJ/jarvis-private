@@ -44,6 +44,8 @@ public partial class MainWindow : Window
     private bool _initialized;
     private volatile bool _continuousConversationActive;
     private int _questionTurnInProgress;
+    private CancellationTokenSource? _activeTurnInterruption;
+    private string? _pendingInterruptionQuestion;
     private ForegroundWindowContext _windowAtWake = ForegroundWindowContext.Unknown;
     private BailianConfiguration _bailianConfiguration = BailianConfiguration.Default;
     private string? _bailianApiKey;
@@ -70,6 +72,7 @@ public partial class MainWindow : Window
 
         _voiceAssistant.WakeWordDetected += VoiceAssistant_WakeWordDetected;
         _voiceAssistant.QuestionRecognized += VoiceAssistant_QuestionRecognized;
+        _voiceAssistant.InterruptionRecognized += VoiceAssistant_InterruptionRecognized;
         _voiceAssistant.StatusChanged += VoiceAssistant_StatusChanged;
         _voiceAssistant.Failed += VoiceAssistant_Failed;
         _overlay.SettingsRequested += Overlay_SettingsRequested;
@@ -289,6 +292,26 @@ public partial class MainWindow : Window
         Dispatcher.BeginInvoke(async () => await HandleRecognizedQuestionAsync(e.Text));
     }
 
+    private void VoiceAssistant_InterruptionRecognized(object? sender, VoiceQuestionEventArgs e)
+    {
+        Interlocked.Exchange(ref _pendingInterruptionQuestion, e.Text);
+        try
+        {
+            _activeTurnInterruption?.Cancel();
+        }
+        catch (ObjectDisposedException)
+        {
+            // The previous turn completed at the same moment; the pending question still runs next.
+        }
+        Dispatcher.BeginInvoke(() =>
+        {
+            StatusTitle.Text = "已被你打断";
+            StatusDescription.Text = $"停止上一轮，优先处理：{e.Text}";
+            LastVoiceStatusText.Text = $"你插话说：{e.Text}";
+            _overlay.ShowRecognized($"你插话说：{e.Text}");
+        });
+    }
+
     private async Task HandleRecognizedQuestionAsync(string recognizedText)
     {
         if (!_backgroundEnabled || _backgroundCancellation is null)
@@ -303,7 +326,11 @@ public partial class MainWindow : Window
         }
 
         var sessionToken = _backgroundCancellation.Token;
-        using var turnCancellation = CancellationTokenSource.CreateLinkedTokenSource(sessionToken);
+        using var interruptionCancellation = new CancellationTokenSource();
+        _activeTurnInterruption = interruptionCancellation;
+        using var turnCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+            sessionToken,
+            interruptionCancellation.Token);
         turnCancellation.CancelAfter(_turnRecoveryPolicy.TurnTimeout);
         var turnToken = turnCancellation.Token;
         var turnTimer = Stopwatch.StartNew();
@@ -313,6 +340,7 @@ public partial class MainWindow : Window
         StatusLight.Fill = ActiveBrush;
         StatusTitle.Text = "已经听清";
         StatusDescription.Text = "正在判断问题类型；只有屏幕问题才会按授权读取当前前台窗口。";
+        _voiceAssistant.BeginInterruptionListening();
 
         try
         {
@@ -414,12 +442,24 @@ public partial class MainWindow : Window
         }
         finally
         {
+            if (ReferenceEquals(_activeTurnInterruption, interruptionCancellation))
+            {
+                _activeTurnInterruption = null;
+            }
             Interlocked.Exchange(ref _questionTurnInProgress, 0);
             if (_turnRecoveryPolicy.ShouldResumeListening(
                     _backgroundEnabled,
                     sessionToken.IsCancellationRequested))
             {
-                if (_continuousConversationActive)
+                var pendingInterruption = Interlocked.Exchange(ref _pendingInterruptionQuestion, null);
+                if (!string.IsNullOrWhiteSpace(pendingInterruption))
+                {
+                    _ = Dispatcher.BeginInvoke(new Action(() =>
+                    {
+                        _ = HandleRecognizedQuestionAsync(pendingInterruption);
+                    }));
+                }
+                else if (_continuousConversationActive)
                 {
                     _voiceAssistant.BeginFollowUpListening();
                     ShowContinuousConversationState();
@@ -470,7 +510,7 @@ public partial class MainWindow : Window
     {
         StatusLight.Fill = ListeningBrush;
         StatusTitle.Text = "连续对话中";
-        StatusDescription.Text = "直接说下一句话；单独说“你退下吧”或“退出”即可安静结束。";
+        StatusDescription.Text = "可以直接说下一句话；回答过程中也可随时插话。说“你退下吧”即可结束。";
         LastVoiceStatusText.Text = "麦克风正在本机等待你的下一句话。";
         if (_notifyIcon is not null)
         {
@@ -600,6 +640,7 @@ public partial class MainWindow : Window
             {
                 firstTokenElapsed ??= modelTimer.Elapsed;
                 answer.Append(chunk);
+                _voiceAssistant.UpdateAssistantSpeechReference(answer.ToString());
                 await textChannel.Writer.WriteAsync(chunk, cancellationToken);
                 var providerName = route == GuidanceRoute.Vision ? "千问视觉" : "DeepSeek";
                 _overlay.ShowProcessing($"{providerName} 正在回答", ShortenForOverlay(answer.ToString()));
@@ -659,6 +700,7 @@ public partial class MainWindow : Window
 
     private async Task SpeakAssistantTextAsync(string text, CancellationToken cancellationToken)
     {
+        _voiceAssistant.UpdateAssistantSpeechReference(text);
         if (_cloudSpeech is null)
         {
             await _speech.SpeakChineseAsync(text, cancellationToken);
@@ -1103,6 +1145,7 @@ public partial class MainWindow : Window
     {
         _voiceAssistant.WakeWordDetected -= VoiceAssistant_WakeWordDetected;
         _voiceAssistant.QuestionRecognized -= VoiceAssistant_QuestionRecognized;
+        _voiceAssistant.InterruptionRecognized -= VoiceAssistant_InterruptionRecognized;
         _voiceAssistant.StatusChanged -= VoiceAssistant_StatusChanged;
         _voiceAssistant.Failed -= VoiceAssistant_Failed;
         _overlay.SettingsRequested -= Overlay_SettingsRequested;

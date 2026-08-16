@@ -28,6 +28,8 @@ internal sealed class SherpaVoiceAssistantService : IAsyncDisposable
     private OnlineRecognizer? _recognizer;
     private OnlineStream? _keywordStream;
     private OnlineStream? _recognitionStream;
+    private string _assistantSpeechReference = string.Empty;
+    private readonly Stopwatch _interruptionTimer = new();
     private volatile VoiceListeningState _state = VoiceListeningState.Stopped;
     private readonly Stopwatch _questionTimer = new();
     private int _microphoneSignalReported;
@@ -40,6 +42,7 @@ internal sealed class SherpaVoiceAssistantService : IAsyncDisposable
 
     public event EventHandler? WakeWordDetected;
     public event EventHandler<VoiceQuestionEventArgs>? QuestionRecognized;
+    public event EventHandler<VoiceQuestionEventArgs>? InterruptionRecognized;
     public event EventHandler<VoiceStatusEventArgs>? StatusChanged;
     public event EventHandler<VoiceStatusEventArgs>? Failed;
 
@@ -174,6 +177,28 @@ internal sealed class SherpaVoiceAssistantService : IAsyncDisposable
         }
 
         RaiseStatus("连续对话中，请直接说下一句话");
+    }
+
+    public void BeginInterruptionListening()
+    {
+        if (_state is VoiceListeningState.Stopped or VoiceListeningState.Starting)
+        {
+            return;
+        }
+
+        lock (_modelLock)
+        {
+            _recognizer?.Reset(_recognitionStream!);
+            _assistantSpeechReference = string.Empty;
+            _interruptionTimer.Restart();
+            _state = VoiceListeningState.ListeningForInterruption;
+        }
+        RaiseStatus("回答期间仍在听，你可以随时插话");
+    }
+
+    public void UpdateAssistantSpeechReference(string? text)
+    {
+        _assistantSpeechReference = text ?? string.Empty;
     }
 
     public void EndContinuousConversation()
@@ -389,6 +414,12 @@ internal sealed class SherpaVoiceAssistantService : IAsyncDisposable
                         ProcessQuestionSamples(samples);
                     }
                     break;
+                case VoiceListeningState.ListeningForInterruption:
+                    lock (_modelLock)
+                    {
+                        ProcessInterruptionSamples(samples);
+                    }
+                    break;
                 case VoiceListeningState.Paused:
                 case VoiceListeningState.Starting:
                 case VoiceListeningState.Stopped:
@@ -505,6 +536,56 @@ internal sealed class SherpaVoiceAssistantService : IAsyncDisposable
         QuestionRecognized?.Invoke(this, new VoiceQuestionEventArgs(result));
     }
 
+    private void ProcessInterruptionSamples(float[] samples)
+    {
+        _recognitionStream!.AcceptWaveform(SampleRate, samples);
+        while (_recognizer!.IsReady(_recognitionStream))
+        {
+            _recognizer.Decode(_recognitionStream);
+        }
+
+        var result = _recognizer.GetResult(_recognitionStream).Text.Trim();
+        var endpoint = _recognizer.IsEndpoint(_recognitionStream);
+        if (string.IsNullOrWhiteSpace(result))
+        {
+            if (endpoint)
+            {
+                _recognizer.Reset(_recognitionStream);
+            }
+            return;
+        }
+
+        if (_interruptionTimer.Elapsed < TimeSpan.FromMilliseconds(350))
+        {
+            return;
+        }
+
+        if (SpeechEchoMatcher.IsLikelyAssistantEcho(result, _assistantSpeechReference))
+        {
+            if (endpoint)
+            {
+                _recognizer.Reset(_recognitionStream);
+                _interruptionTimer.Restart();
+            }
+            return;
+        }
+
+        if (!SpeechEchoMatcher.CanInterrupt(result))
+        {
+            if (endpoint)
+            {
+                _recognizer.Reset(_recognitionStream);
+            }
+            return;
+        }
+
+        _interruptionTimer.Reset();
+        _recognizer.Reset(_recognitionStream);
+        _state = VoiceListeningState.Paused;
+        RaiseStatus($"已听到你的插话：{result}");
+        InterruptionRecognized?.Invoke(this, new VoiceQuestionEventArgs(result));
+    }
+
     private void DisposeModels()
     {
         _keywordStream?.Dispose();
@@ -534,6 +615,7 @@ internal sealed class SherpaVoiceAssistantService : IAsyncDisposable
         Starting,
         WaitingForWakeWord,
         ListeningForQuestion,
+        ListeningForInterruption,
         Paused
     }
 }

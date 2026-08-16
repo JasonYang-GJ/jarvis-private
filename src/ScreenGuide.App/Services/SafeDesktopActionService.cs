@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Collections.Specialized;
 using System.Windows.Automation;
 using Microsoft.Win32;
 using ScreenGuide.Core;
@@ -14,6 +15,7 @@ internal sealed class SafeDesktopActionService
 {
     private const string DouyinUrl = "https://www.douyin.com/";
     private const string DouyinSearchUrlPrefix = "https://www.douyin.com/search/";
+    private readonly InstalledApplicationCatalog _applications = new();
 
     public Task<DesktopActionResult> ExecuteAsync(
         DesktopActionIntent intent,
@@ -26,11 +28,15 @@ internal sealed class SafeDesktopActionService
             DesktopActionKind.SearchForeground => Task.Run(
                 () => SearchForeground(foregroundWindow, intent.Target, cancellationToken),
                 cancellationToken),
+            DesktopActionKind.PrepareFirstImage => Task.FromResult(PrepareFirstImage(intent.Target)),
+            DesktopActionKind.InvokeForeground => Task.Run(
+                () => InvokeForeground(foregroundWindow, intent.Target, cancellationToken),
+                cancellationToken),
             _ => Task.FromResult(new DesktopActionResult(false, "这个操作目前还没有开放。"))
         };
     }
 
-    private static DesktopActionResult OpenTarget(DesktopActionIntent intent)
+    private DesktopActionResult OpenTarget(DesktopActionIntent intent)
     {
         if (intent.Target.Contains("抖音", StringComparison.Ordinal))
         {
@@ -51,10 +57,70 @@ internal sealed class SafeDesktopActionService
             return OpenChrome(null, "已经打开谷歌浏览器。 ");
         }
 
-        return new DesktopActionResult(
-            false,
-            $"为了避免误开程序，我目前只认识抖音和谷歌浏览器。你说的是“{intent.Target}”。");
+        return _applications.Launch(intent.Target);
     }
+
+    private static DesktopActionResult PrepareFirstImage(string location)
+    {
+        var root = location switch
+        {
+            "桌面" => Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory),
+            "下载" => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads"),
+            _ => Environment.GetFolderPath(Environment.SpecialFolder.MyPictures)
+        };
+        if (!Directory.Exists(root))
+        {
+            return new DesktopActionResult(false, $"没有找到{location}对应的文件夹。 ");
+        }
+
+        string? firstImage;
+        try
+        {
+            firstImage = Directory.EnumerateFiles(root, "*.*", SearchOption.AllDirectories)
+                .Where(path => IsImageExtension(Path.GetExtension(path)))
+                .OrderBy(path => path, StringComparer.CurrentCultureIgnoreCase)
+                .FirstOrDefault();
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return new DesktopActionResult(false, $"没有权限读取{root}中的部分文件，所以没有选择照片。 ");
+        }
+        catch (IOException exception)
+        {
+            return new DesktopActionResult(false, $"读取图片文件夹失败：{exception.Message}");
+        }
+
+        if (firstImage is null)
+        {
+            return new DesktopActionResult(false, $"在{root}中没有找到常见格式的照片。 ");
+        }
+
+        try
+        {
+            var files = new StringCollection { firstImage };
+            Forms.Clipboard.SetFileDropList(files);
+            Process.Start(new ProcessStartInfo("explorer.exe")
+            {
+                UseShellExecute = true,
+                Arguments = $"/select,\"{firstImage}\""
+            });
+            return new DesktopActionResult(
+                true,
+                $"已在资源管理器中选中并复制第一张照片“{Path.GetFileName(firstImage)}”。因为你没有指定发送到哪个软件和联系人，我没有自动发出；现在可在目标聊天框按 Ctrl 加 V。 ");
+        }
+        catch (Exception exception)
+        {
+            return new DesktopActionResult(false, $"找到了照片，但没有成功选中或复制：{exception.Message}");
+        }
+    }
+
+    private static bool IsImageExtension(string extension) =>
+        extension.Equals(".jpg", StringComparison.OrdinalIgnoreCase)
+        || extension.Equals(".jpeg", StringComparison.OrdinalIgnoreCase)
+        || extension.Equals(".png", StringComparison.OrdinalIgnoreCase)
+        || extension.Equals(".webp", StringComparison.OrdinalIgnoreCase)
+        || extension.Equals(".bmp", StringComparison.OrdinalIgnoreCase)
+        || extension.Equals(".gif", StringComparison.OrdinalIgnoreCase);
 
     private static DesktopActionResult OpenWithDefaultBrowser(string url, string message)
     {
@@ -211,6 +277,96 @@ internal sealed class SafeDesktopActionService
         valuePattern.SetValue(query);
         Forms.SendKeys.SendWait("{ENTER}");
         return new DesktopActionResult(true, $"已经在当前软件的搜索框输入“{query}”并开始搜索。");
+    }
+
+    private static DesktopActionResult InvokeForeground(
+        ForegroundWindowContext foregroundWindow,
+        string target,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!foregroundWindow.CanCapture || foregroundWindow.BelongsToCurrentProcess)
+        {
+            return new DesktopActionResult(false, "我没有取得你正在使用的软件窗口，请先切回目标软件再说一次。 ");
+        }
+
+        var root = AutomationElement.FromHandle(foregroundWindow.WindowHandle);
+        if (root is null)
+        {
+            return new DesktopActionResult(false, "当前软件没有向 Windows 提供可操作的按钮或选项。 ");
+        }
+
+        var normalizedTarget = ApplicationNameMatcher.Normalize(target);
+        var controls = root.FindAll(TreeScope.Descendants, Condition.TrueCondition)
+            .Cast<AutomationElement>()
+            .Where(element => element.Current.IsEnabled && !element.Current.IsOffscreen)
+            .Select(element => new
+            {
+                Element = element,
+                Name = element.Current.Name ?? string.Empty,
+                Score = ScoreActionElement(element, normalizedTarget)
+            })
+            .Where(candidate => candidate.Score > 0)
+            .OrderByDescending(candidate => candidate.Score)
+            .ToArray();
+
+        foreach (var candidate in controls)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (candidate.Element.TryGetCurrentPattern(InvokePattern.Pattern, out var invokeObject)
+                && invokeObject is InvokePattern invokePattern)
+            {
+                if (!SetForegroundWindow(foregroundWindow.WindowHandle))
+                {
+                    return new DesktopActionResult(false, "目标软件没有取得焦点，所以没有执行点击。 ");
+                }
+                invokePattern.Invoke();
+                return new DesktopActionResult(true, $"已经点击“{candidate.Name}”。 ");
+            }
+
+            if (candidate.Element.TryGetCurrentPattern(SelectionItemPattern.Pattern, out var selectionObject)
+                && selectionObject is SelectionItemPattern selectionPattern)
+            {
+                if (!SetForegroundWindow(foregroundWindow.WindowHandle))
+                {
+                    return new DesktopActionResult(false, "目标软件没有取得焦点，所以没有执行选择。 ");
+                }
+                selectionPattern.Select();
+                return new DesktopActionResult(true, $"已经选择“{candidate.Name}”。 ");
+            }
+        }
+
+        return new DesktopActionResult(
+            false,
+            $"当前软件里没有找到名称可靠匹配“{target}”的可用按钮或选项，所以没有盲目点击。 ");
+    }
+
+    private static int ScoreActionElement(AutomationElement element, string normalizedTarget)
+    {
+        var controlType = element.Current.ControlType;
+        if (controlType != ControlType.Button
+            && controlType != ControlType.MenuItem
+            && controlType != ControlType.ListItem
+            && controlType != ControlType.Hyperlink
+            && controlType != ControlType.TabItem)
+        {
+            return 0;
+        }
+
+        var normalizedName = ApplicationNameMatcher.Normalize(element.Current.Name);
+        if (normalizedName.Length == 0)
+        {
+            return 0;
+        }
+        if (string.Equals(normalizedName, normalizedTarget, StringComparison.Ordinal))
+        {
+            return 100;
+        }
+        if (normalizedName.Contains(normalizedTarget, StringComparison.Ordinal))
+        {
+            return 70;
+        }
+        return 0;
     }
 
     private static bool IsDouyinDesktopProcess(uint processId)
