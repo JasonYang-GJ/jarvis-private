@@ -71,6 +71,10 @@ public partial class MainWindow : Window
         _voiceAssistant.StatusChanged += VoiceAssistant_StatusChanged;
         _voiceAssistant.Failed += VoiceAssistant_Failed;
         _windowPicker.SelectedTargetClosed += WindowPicker_SelectedTargetClosed;
+        _overlay.SettingsRequested += Overlay_SettingsRequested;
+        _overlay.StartVoiceRequested += Overlay_StartVoiceRequested;
+        _overlay.StopVoiceRequested += Overlay_StopVoiceRequested;
+        _overlay.ExitRequested += Overlay_ExitRequested;
 
         try
         {
@@ -90,6 +94,42 @@ public partial class MainWindow : Window
 
         LoadBailianConfiguration();
         RefreshSpeechCapabilities();
+
+        Dispatcher.BeginInvoke(() =>
+        {
+            Hide();
+            _overlay.ShowStopped();
+            _overlay.ShowAvatar(expanded: true);
+        });
+    }
+
+    private void Overlay_SettingsRequested(object? sender, EventArgs e)
+    {
+        Dispatcher.BeginInvoke(OpenSettings);
+    }
+
+    private void Overlay_StartVoiceRequested(object? sender, EventArgs e)
+    {
+        Dispatcher.BeginInvoke(() =>
+        {
+            var readinessProblem = GetCloudReadinessProblem();
+            if (readinessProblem is not null || _speechCapabilities is not { IsReady: true })
+            {
+                OpenSettings();
+            }
+
+            StartBackgroundButton_Click(StartBackgroundButton, new RoutedEventArgs());
+        });
+    }
+
+    private void Overlay_StopVoiceRequested(object? sender, EventArgs e)
+    {
+        Dispatcher.BeginInvoke(async () => await StopBackgroundModeAsync(showSettings: false));
+    }
+
+    private void Overlay_ExitRequested(object? sender, EventArgs e)
+    {
+        Dispatcher.BeginInvoke(async () => await ExitApplicationAsync());
     }
 
     private async void StartBackgroundButton_Click(object sender, RoutedEventArgs e)
@@ -143,6 +183,7 @@ public partial class MainWindow : Window
         }
 
         _backgroundEnabled = true;
+        _overlay.SetVoiceActive(true);
         StopBackgroundButton.IsEnabled = true;
         if (_stopListeningMenuItem is not null)
         {
@@ -711,6 +752,7 @@ public partial class MainWindow : Window
     private async Task StopBackgroundModeAsync(bool showSettings)
     {
         _backgroundEnabled = false;
+        _overlay.SetVoiceActive(false);
         _backgroundCancellation?.Cancel();
         await _voiceAssistant.StopAsync();
         _backgroundCancellation?.Dispose();
@@ -778,6 +820,7 @@ public partial class MainWindow : Window
     private void InitializeTrayIcon()
     {
         _trayMenu = new Forms.ContextMenuStrip();
+        _trayMenu.Items.Add("显示贾维斯", null, (_, _) => Dispatcher.Invoke(() => _overlay.ShowAvatar()));
         _trayMenu.Items.Add("打开设置", null, (_, _) => Dispatcher.Invoke(OpenSettings));
         _stopListeningMenuItem = new Forms.ToolStripMenuItem("立即停止麦克风") { Enabled = false };
         _stopListeningMenuItem.Click += (_, _) => Dispatcher.BeginInvoke(async () =>
@@ -797,7 +840,7 @@ public partial class MainWindow : Window
             Visible = true,
             ContextMenuStrip = _trayMenu
         };
-        _notifyIcon.DoubleClick += (_, _) => Dispatcher.Invoke(OpenSettings);
+        _notifyIcon.DoubleClick += (_, _) => Dispatcher.Invoke(() => _overlay.ShowAvatar());
     }
 
     private void ApplyLocalBranding()
@@ -819,6 +862,7 @@ public partial class MainWindow : Window
         BrandImage.Visibility = Visibility.Visible;
         BrandFallback.Visibility = Visibility.Collapsed;
         Icon = image;
+        _overlay.SetAvatarImage(image);
     }
 
     private void OpenSettings()
@@ -829,8 +873,9 @@ public partial class MainWindow : Window
         }
 
         WindowState = WindowState.Normal;
+        Opacity = 1;
         Activate();
-        _overlay.Hide();
+        _overlay.HideToTray();
     }
 
     private void ShowTrayMessage(string title, string text)
@@ -850,14 +895,24 @@ public partial class MainWindow : Window
 
     private void Window_Closing(object? sender, CancelEventArgs e)
     {
-        if (_backgroundEnabled && !_allowExit)
+        if (!_allowExit)
         {
             e.Cancel = true;
             Hide();
-            _overlay.ShowWaitingForWakeWord();
+            if (_backgroundEnabled)
+            {
+                _overlay.ShowWaitingForWakeWord();
+            }
+            else
+            {
+                _overlay.ShowStopped();
+            }
+            _overlay.ShowAvatar();
             ShowTrayMessage(
-                "贾维斯仍在后台",
-                "直接说“你好贾维斯”，或从右下角菜单立即停止麦克风。 ");
+                _backgroundEnabled ? "贾维斯仍在后台" : "设置已经收起",
+                _backgroundEnabled
+                    ? "直接说“你好贾维斯”，或从右下角菜单立即停止麦克风。"
+                    : "贾维斯悬浮形象仍在桌面，可右键启动语音。 ");
         }
     }
 
@@ -868,6 +923,10 @@ public partial class MainWindow : Window
         _voiceAssistant.StatusChanged -= VoiceAssistant_StatusChanged;
         _voiceAssistant.Failed -= VoiceAssistant_Failed;
         _windowPicker.SelectedTargetClosed -= WindowPicker_SelectedTargetClosed;
+        _overlay.SettingsRequested -= Overlay_SettingsRequested;
+        _overlay.StartVoiceRequested -= Overlay_StartVoiceRequested;
+        _overlay.StopVoiceRequested -= Overlay_StopVoiceRequested;
+        _overlay.ExitRequested -= Overlay_ExitRequested;
         _hotkeys.VoiceRequested -= Hotkeys_VoiceRequested;
         _hotkeys.StopRequested -= Hotkeys_StopRequested;
         _hotkeys.Dispose();
