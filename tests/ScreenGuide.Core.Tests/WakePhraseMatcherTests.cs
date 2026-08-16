@@ -45,4 +45,22 @@ public sealed class WakePhraseMatcherTests
     {
         Assert.False(WakePhraseMatcher.IsOnlyWakePhrase(text));
     }
+
+    [Theory]
+    [InlineData("斯")]
+    [InlineData("维斯")]
+    [InlineData("贾维斯")]
+    public void IdentifiesWakePhraseTailWithoutAQuestion(string text)
+    {
+        Assert.True(WakePhraseMatcher.IsOnlyWakePhraseRemainder(text));
+    }
+
+    [Theory]
+    [InlineData("斯是什么意思")]
+    [InlineData("贾维斯你能听见吗")]
+    [InlineData("帮我看看这个页面")]
+    public void DoesNotDiscardAQuestionContainingWakePhraseText(string text)
+    {
+        Assert.False(WakePhraseMatcher.IsOnlyWakePhraseRemainder(text));
+    }
 }

@@ -641,7 +641,9 @@ public partial class MainWindow : Window
     private void LoadBailianConfiguration()
     {
         _bailianConfiguration = _bailianStore.Load();
-        ModelRoutingText.Text = $"普通问题：{_bailianConfiguration.TextModel}（关闭思考）\n屏幕问题：{_bailianConfiguration.VisionModel}（按需单帧）";
+        ModelRoutingText.Text = $"普通问题：{_bailianConfiguration.TextModel}（关闭思考）\n"
+                                + $"屏幕问题：{_bailianConfiguration.VisionModel}（按需单帧）\n"
+                                + "对话记忆：本次运行内，DeepSeek约90万Token；千问视觉约22万Token";
         try
         {
             _bailianApiKey = _bailianStore.ReadApiKey();

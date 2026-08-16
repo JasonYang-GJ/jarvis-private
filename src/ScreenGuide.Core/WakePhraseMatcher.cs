@@ -4,6 +4,18 @@ namespace ScreenGuide.Core;
 
 public static class WakePhraseMatcher
 {
+    private static readonly string[] WakePhraseRemainders =
+    [
+        "斯",
+        "维斯",
+        "维思",
+        "维丝",
+        "贾维斯",
+        "贾维思",
+        "加维斯",
+        "佳维斯"
+    ];
+
     public static IReadOnlyList<string> AcceptedPhrases { get; } = new[]
     {
         "你好贾维斯",
@@ -29,6 +41,15 @@ public static class WakePhraseMatcher
         return AcceptedPhrases.Any(phrase => string.Equals(
             normalized,
             Normalize(phrase),
+            StringComparison.Ordinal));
+    }
+
+    public static bool IsOnlyWakePhraseRemainder(string? recognizedText)
+    {
+        var normalized = Normalize(recognizedText);
+        return WakePhraseRemainders.Any(remainder => string.Equals(
+            normalized,
+            Normalize(remainder),
             StringComparison.Ordinal));
     }
 

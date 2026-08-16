@@ -443,7 +443,8 @@ internal sealed class SherpaVoiceAssistantService : IAsyncDisposable
             return;
         }
 
-        if (WakePhraseMatcher.IsOnlyWakePhrase(result))
+        if (WakePhraseMatcher.IsOnlyWakePhrase(result)
+            || WakePhraseMatcher.IsOnlyWakePhraseRemainder(result))
         {
             _questionTimer.Restart();
             _state = VoiceListeningState.ListeningForQuestion;

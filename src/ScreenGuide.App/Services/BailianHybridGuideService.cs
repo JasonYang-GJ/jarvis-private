@@ -4,11 +4,15 @@ using System.Net.Http.Headers;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
+using ScreenGuide.Core;
 
 namespace ScreenGuide.App.Services;
 
 internal sealed class BailianHybridGuideService : IGuidanceProvider
 {
+    private const int TextHistoryTokenBudget = 900_000;
+    private const int VisionHistoryTokenBudget = 220_000;
+    private const int ReservedRequestTokens = 20_000;
     private const string TextSystemPrompt = """
         你叫贾维斯，是一个面向 Windows 新手的中文语音助手。当前请求没有提供屏幕画面，不得声称看到了用户的电脑。
         先直接回答结论，再补充最必要的说明。使用自然、清楚、简短的口语，不使用 Markdown 表格。
@@ -27,6 +31,7 @@ internal sealed class BailianHybridGuideService : IGuidanceProvider
     private readonly HttpClient _httpClient;
     private readonly BailianConfiguration _configuration;
     private readonly string _apiKey;
+    private readonly ConversationHistory _conversationHistory = new(TextHistoryTokenBudget);
 
     public BailianHybridGuideService(
         BailianConfiguration configuration,
@@ -69,14 +74,26 @@ internal sealed class BailianHybridGuideService : IGuidanceProvider
             userContent = $"用户问题：{request.Question}";
         }
 
+        var historyBudget = hasImage ? VisionHistoryTokenBudget : TextHistoryTokenBudget;
+        var history = _conversationHistory.GetRecentTurns(
+            historyBudget,
+            request.Question,
+            ReservedRequestTokens);
+        var messages = new List<object>
+        {
+            new { role = "system", content = hasImage ? VisionSystemPrompt : TextSystemPrompt }
+        };
+        foreach (var turn in history)
+        {
+            messages.Add(new { role = "user", content = turn.UserText });
+            messages.Add(new { role = "assistant", content = turn.AssistantText });
+        }
+        messages.Add(new { role = "user", content = userContent });
+
         var body = new
         {
             model = hasImage ? _configuration.VisionModel : _configuration.TextModel,
-            messages = new object[]
-            {
-                new { role = "system", content = hasImage ? VisionSystemPrompt : TextSystemPrompt },
-                new { role = "user", content = userContent }
-            },
+            messages,
             stream = true,
             stream_options = new { include_usage = true },
             enable_thinking = false,
@@ -102,12 +119,14 @@ internal sealed class BailianHybridGuideService : IGuidanceProvider
 
         await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
         using var reader = new StreamReader(stream, Encoding.UTF8);
+        var completedAnswer = new StringBuilder();
         while (true)
         {
             cancellationToken.ThrowIfCancellationRequested();
             var line = await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false);
             if (line is null)
             {
+                RememberCompletedTurn(request.Question, completedAnswer);
                 yield break;
             }
             if (string.IsNullOrWhiteSpace(line) || !line.StartsWith("data:", StringComparison.Ordinal))
@@ -118,6 +137,7 @@ internal sealed class BailianHybridGuideService : IGuidanceProvider
             var json = line[5..].Trim();
             if (json == "[DONE]")
             {
+                RememberCompletedTurn(request.Question, completedAnswer);
                 yield break;
             }
 
@@ -134,8 +154,17 @@ internal sealed class BailianHybridGuideService : IGuidanceProvider
             var text = content.GetString();
             if (!string.IsNullOrEmpty(text))
             {
+                completedAnswer.Append(text);
                 yield return text;
             }
+        }
+    }
+
+    private void RememberCompletedTurn(string question, StringBuilder answer)
+    {
+        if (answer.Length > 0)
+        {
+            _conversationHistory.AddTurn(question, answer.ToString());
         }
     }
 
