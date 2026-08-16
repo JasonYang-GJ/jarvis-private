@@ -13,12 +13,17 @@ public partial class OverlayWindow : Window
 {
     private const int GwlExStyle = -20;
     private const int WsExToolWindow = 0x00000080;
+    private const int WsExTransparent = 0x00000020;
+    private const double LargeWidth = 430;
+    private const double LargeHeight = 455;
     private string _voiceShortcut = "Ctrl + Shift + 空格";
     private string _stopShortcut = "Ctrl + Shift + Q";
     private bool _isCompact;
     private bool _userHidden;
     private bool _voiceActive;
     private int _hideRequestVersion;
+    private int _screenEntryVersion;
+    private bool _screenEntryActive;
     private string _lastTitle = "贾维斯已就绪";
     private string _lastDetail = "右键可以启动语音、缩小或打开设置";
     private System.Windows.Media.Color _lastAccent = System.Windows.Media.Color.FromRgb(72, 231, 255);
@@ -66,9 +71,12 @@ public partial class OverlayWindow : Window
             }
             else
             {
-                LargeParticleHelmet.TriggerAssembly(2.2);
+                BeginScreenEntry(2.25);
             }
-            Activate();
+            if (!_screenEntryActive)
+            {
+                Activate();
+            }
         });
     }
 
@@ -77,6 +85,7 @@ public partial class OverlayWindow : Window
         Dispatcher.Invoke(() =>
         {
             _userHidden = true;
+            CancelScreenEntry(restoreLargeWindow: true);
             var requestVersion = ++_hideRequestVersion;
             LargeParticleHelmet.PlayDissolve();
             CompactParticleHelmet.PlayDissolve();
@@ -113,6 +122,10 @@ public partial class OverlayWindow : Window
             "说完后停顿一下，我会自动开始处理",
             System.Windows.Media.Color.FromRgb(72, 231, 255),
             ParticleHelmetState.Listening);
+        if (!_userHidden && !_isCompact)
+        {
+            BeginScreenEntry(1.75);
+        }
     }
 
     public void ShowContinuousConversation()
@@ -216,7 +229,91 @@ public partial class OverlayWindow : Window
 
         SetCompactMode(false);
         ApplyStatus();
-        LargeParticleHelmet.TriggerAssembly(2.2);
+    }
+
+    private void BeginScreenEntry(double durationSeconds)
+    {
+        if (!Dispatcher.CheckAccess())
+        {
+            Dispatcher.BeginInvoke(() => BeginScreenEntry(durationSeconds));
+            return;
+        }
+        if (_userHidden || _isCompact || !IsVisible)
+        {
+            LargeParticleHelmet.TriggerAssembly(durationSeconds);
+            return;
+        }
+
+        var entryVersion = ++_screenEntryVersion;
+        _screenEntryActive = true;
+        HoverControls.BeginAnimation(OpacityProperty, null);
+        HoverControls.Opacity = 0;
+        StatusPill.BeginAnimation(OpacityProperty, null);
+        StatusPill.Opacity = 0;
+
+        var workArea = SystemParameters.WorkArea;
+        Left = workArea.Left;
+        Top = workArea.Top;
+        Width = workArea.Width;
+        Height = workArea.Height;
+        SetWindowClickThrough(true);
+        LargeParticleHelmet.TriggerAssembly(durationSeconds, fromScreenEdges: true);
+
+        var timer = new DispatcherTimer
+        {
+            Interval = TimeSpan.FromSeconds(durationSeconds + 0.38)
+        };
+        timer.Tick += (_, _) =>
+        {
+            timer.Stop();
+            if (entryVersion != _screenEntryVersion || _userHidden)
+            {
+                return;
+            }
+            FinishScreenEntry();
+        };
+        timer.Start();
+    }
+
+    private void FinishScreenEntry()
+    {
+        _screenEntryActive = false;
+        SetWindowClickThrough(false);
+        Width = LargeWidth;
+        Height = LargeHeight;
+        PositionLarge();
+    }
+
+    private void CancelScreenEntry(bool restoreLargeWindow)
+    {
+        _screenEntryVersion++;
+        if (!_screenEntryActive)
+        {
+            return;
+        }
+
+        _screenEntryActive = false;
+        SetWindowClickThrough(false);
+        if (restoreLargeWindow && !_isCompact)
+        {
+            Width = LargeWidth;
+            Height = LargeHeight;
+            PositionLarge();
+        }
+    }
+
+    private void SetWindowClickThrough(bool enabled)
+    {
+        var handle = new WindowInteropHelper(this).Handle;
+        if (handle == IntPtr.Zero)
+        {
+            return;
+        }
+
+        var style = GetWindowLongPtr(handle, GwlExStyle).ToInt64();
+        style = enabled ? style | WsExTransparent : style & ~WsExTransparent;
+        style |= WsExToolWindow;
+        SetWindowLongPtr(handle, GwlExStyle, new IntPtr(style));
     }
 
     private void Window_MouseEnter(object sender, System.Windows.Input.MouseEventArgs e)
@@ -246,6 +343,10 @@ public partial class OverlayWindow : Window
 
     private void SetCompactMode(bool compact)
     {
+        if (compact)
+        {
+            CancelScreenEntry(restoreLargeWindow: false);
+        }
         _isCompact = compact;
         if (compact)
         {
@@ -261,8 +362,8 @@ public partial class OverlayWindow : Window
         {
             CompactAvatarView.Visibility = Visibility.Collapsed;
             LargeAvatarView.Visibility = Visibility.Visible;
-            Width = 430;
-            Height = 455;
+            Width = LargeWidth;
+            Height = LargeHeight;
             SizeMenuItem.Header = "缩小贾维斯";
             PositionLarge();
             LargeParticleHelmet.TriggerAssembly(1.35);

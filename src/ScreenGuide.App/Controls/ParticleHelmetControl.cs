@@ -42,6 +42,8 @@ public sealed class ParticleHelmetControl : FrameworkElement
         double Phase,
         double Spin);
 
+    private readonly record struct PlateSample(int Offset, byte B, byte G, byte R, byte A);
+
     private static readonly Rgb ArmorRed = new(235, 45, 73);
     private static readonly Rgb HotOrange = new(255, 112, 69);
     private static readonly Rgb ReactorCyan = new(72, 231, 255);
@@ -50,6 +52,7 @@ public sealed class ParticleHelmetControl : FrameworkElement
 
     private readonly Random _random = new(0x4A_52_56);
     private readonly List<Particle> _particles = [];
+    private readonly List<PlateSample> _plateSamples = [];
     private WriteableBitmap? _bitmap;
     private byte[] _pixels = [];
     private int _pixelWidth;
@@ -62,6 +65,8 @@ public sealed class ParticleHelmetControl : FrameworkElement
     private DateTime _stateStartedUtc = DateTime.UtcNow;
     private DateTime _dissolveStartedUtc;
     private bool _isDissolving;
+    private bool _assemblyFromScreenEdges;
+    private double _renderResolutionScale = 1;
     private ParticleHelmetState _state = ParticleHelmetState.Offline;
 
     public int ParticleCount { get; set; } = 4200;
@@ -110,10 +115,11 @@ public sealed class ParticleHelmetControl : FrameworkElement
         }
     }
 
-    public void TriggerAssembly(double durationSeconds = 2.25)
+    public void TriggerAssembly(double durationSeconds = 2.25, bool fromScreenEdges = false)
     {
         _assemblyDurationSeconds = Math.Max(0.35, durationSeconds);
         _assemblyStartedUtc = DateTime.UtcNow;
+        _assemblyFromScreenEdges = fromScreenEdges;
         _isDissolving = false;
     }
 
@@ -344,19 +350,99 @@ public sealed class ParticleHelmetControl : FrameworkElement
 
     private void RecreateBitmap()
     {
-        var width = Math.Max(1, (int)Math.Ceiling(ActualWidth));
-        var height = Math.Max(1, (int)Math.Ceiling(ActualHeight));
-        if (width == _pixelWidth && height == _pixelHeight)
+        var requestedWidth = Math.Max(1, (int)Math.Ceiling(ActualWidth));
+        var requestedHeight = Math.Max(1, (int)Math.Ceiling(ActualHeight));
+        var renderResolutionScale = requestedWidth > 900 || requestedHeight > 700 ? 0.5 : 1.0;
+        var width = Math.Max(1, (int)Math.Ceiling(requestedWidth * renderResolutionScale));
+        var height = Math.Max(1, (int)Math.Ceiling(requestedHeight * renderResolutionScale));
+        if (width == _pixelWidth && height == _pixelHeight &&
+            Math.Abs(renderResolutionScale - _renderResolutionScale) < 0.001)
         {
             return;
         }
 
+        _renderResolutionScale = renderResolutionScale;
         _pixelWidth = width;
         _pixelHeight = height;
         _stride = width * 4;
         _pixels = new byte[_stride * height];
         _bitmap = new WriteableBitmap(width, height, 96, 96, PixelFormats.Pbgra32, null);
+        BuildBasePlate();
         InvalidateVisual();
+    }
+
+    private void BuildBasePlate()
+    {
+        _plateSamples.Clear();
+        if (_pixelWidth < 2 || _pixelHeight < 2)
+        {
+            return;
+        }
+
+        var scale = GetHelmetScale(_pixelWidth, _pixelHeight);
+        var centerX = _pixelWidth * 0.5;
+        var centerY = _pixelHeight * (Compact ? 0.49 : 0.47);
+        var left = Math.Max(0, (int)Math.Floor(centerX - scale * 0.76));
+        var right = Math.Min(_pixelWidth - 1, (int)Math.Ceiling(centerX + scale * 0.76));
+        var top = Math.Max(0, (int)Math.Floor(centerY - scale * 1.02));
+        var bottom = Math.Min(_pixelHeight - 1, (int)Math.Ceiling(centerY + scale * 1.02));
+
+        for (var pixelY = top; pixelY <= bottom; pixelY++)
+        {
+            var normalizedY = (pixelY - centerY) / scale;
+            for (var pixelX = left; pixelX <= right; pixelX++)
+            {
+                var normalizedX = (pixelX - centerX) / scale;
+                if (!IsInsideHelmet(normalizedX, normalizedY))
+                {
+                    continue;
+                }
+
+                var absoluteX = Math.Abs(normalizedX);
+                var faceplate = normalizedY > -0.18 && normalizedY < 0.78 &&
+                                absoluteX < 0.31 + Math.Max(0, normalizedY) * 0.08;
+                var eyeOpening = normalizedY is > -0.15 and < 0.09 && absoluteX is > 0.12 and < 0.53;
+                var lowerJaw = normalizedY > 0.58;
+                var sideArmor = absoluteX > 0.43;
+                var crown = normalizedY < -0.32;
+
+                var color = faceplate
+                    ? new Rgb(10, 18, 25)
+                    : crown
+                        ? new Rgb(105, 12, 31)
+                        : sideArmor
+                            ? new Rgb(123, 21, 34)
+                            : new Rgb(82, 13, 27);
+                if (lowerJaw)
+                {
+                    color = Rgb.Lerp(color, new Rgb(18, 15, 20), 0.58);
+                }
+                if (eyeOpening)
+                {
+                    color = new Rgb(2, 10, 16);
+                }
+
+                var light = 0.68 + (1.0 - absoluteX) * 0.24 - normalizedX * 0.08;
+                if (crown)
+                {
+                    light += Math.Max(0, 0.12 - Math.Abs(normalizedX) * 0.08);
+                }
+                color = color.Scale(Math.Clamp(light, 0.54, 1.10));
+
+                var alpha = Compact ? 218 : faceplate ? 214 : 188;
+                if (eyeOpening)
+                {
+                    alpha = 226;
+                }
+                var offset = pixelY * _stride + pixelX * 4;
+                _plateSamples.Add(new PlateSample(
+                    offset,
+                    (byte)(color.B * alpha / 255),
+                    (byte)(color.G * alpha / 255),
+                    (byte)(color.R * alpha / 255),
+                    (byte)alpha));
+            }
+        }
     }
 
     private void RenderFrame(DateTime nowUtc)
@@ -379,10 +465,28 @@ public sealed class ParticleHelmetControl : FrameworkElement
             : 0;
         var width = _pixelWidth;
         var height = _pixelHeight;
-        var scale = Math.Min(width, height) * (Compact ? 0.405 : 0.385);
+        var scale = GetHelmetScale(width, height);
         var centerX = width * 0.5;
         var centerY = height * (Compact ? 0.49 : 0.47);
         var breathing = 1.0 + Math.Sin(stateElapsed * 1.65) * (_state == ParticleHelmetState.Speaking ? 0.018 : 0.006);
+        var plateProgress = SmoothStep(Clamp01(
+            (elapsed - _assemblyDurationSeconds * 0.28) /
+            Math.Max(0.1, _assemblyDurationSeconds * 0.58)));
+        var plateStateOpacity = _state switch
+        {
+            ParticleHelmetState.Offline => 0.78,
+            ParticleHelmetState.Waiting => 0.86,
+            ParticleHelmetState.Listening => 0.92,
+            ParticleHelmetState.Thinking => 0.94,
+            ParticleHelmetState.Speaking => 0.90,
+            ParticleHelmetState.Alert => 0.88,
+            _ => 0.88
+        };
+        ApplyBasePlate(plateProgress * plateStateOpacity * (1.0 - dissolve));
+
+        var scatterBase = _assemblyFromScreenEdges
+            ? Math.Sqrt(width * (double)width + height * (double)height) * 0.53
+            : scale;
 
         for (var index = 0; index < _particles.Count; index++)
         {
@@ -390,7 +494,7 @@ public sealed class ParticleHelmetControl : FrameworkElement
             var localProgress = Clamp01((elapsed - particle.Delay) / _assemblyDurationSeconds);
             var assembled = SmoothStep(localProgress);
             var angle = particle.StartAngle + assembled * (4.7 + particle.Spin);
-            var scatterRadius = particle.StartRadius * scale * (1.0 - assembled);
+            var scatterRadius = particle.StartRadius * scatterBase * (1.0 - assembled);
             var scatterX = centerX + Math.Cos(angle) * scatterRadius;
             var scatterY = centerY + Math.Sin(angle) * scatterRadius * 0.82;
 
@@ -405,8 +509,10 @@ public sealed class ParticleHelmetControl : FrameworkElement
                 var orbitBoost = _state == ParticleHelmetState.Thinking ? 1.75 : 0.65;
                 var orbitAngle = particle.StartAngle + stateElapsed * orbitBoost * (0.28 + Math.Abs(particle.Spin) * 0.12);
                 var orbitRadius = scale * particle.StartRadius * (0.77 + Math.Sin(stateElapsed + particle.Phase) * 0.035);
-                x = centerX + Math.Cos(orbitAngle) * orbitRadius;
-                y = centerY + Math.Sin(orbitAngle) * orbitRadius * 0.78;
+                var orbitX = centerX + Math.Cos(orbitAngle) * orbitRadius;
+                var orbitY = centerY + Math.Sin(orbitAngle) * orbitRadius * 0.78;
+                x = Lerp(x, orbitX, assembled);
+                y = Lerp(y, orbitY, assembled);
             }
             else if (_state == ParticleHelmetState.Thinking && index % 13 == 0)
             {
@@ -448,6 +554,30 @@ public sealed class ParticleHelmetControl : FrameworkElement
 
         _bitmap.WritePixels(new Int32Rect(0, 0, _pixelWidth, _pixelHeight), _pixels, _stride, 0);
         InvalidateVisual();
+    }
+
+    private double GetHelmetScale(int width, int height)
+    {
+        var proportional = Math.Min(width, height) * (Compact ? 0.405 : 0.385);
+        var maximum = (Compact ? 46.0 : 158.0) * _renderResolutionScale;
+        return Math.Min(proportional, maximum);
+    }
+
+    private void ApplyBasePlate(double opacity)
+    {
+        opacity = Clamp01(opacity);
+        if (opacity <= 0.001)
+        {
+            return;
+        }
+
+        foreach (var sample in _plateSamples)
+        {
+            _pixels[sample.Offset] = (byte)Math.Round(sample.B * opacity);
+            _pixels[sample.Offset + 1] = (byte)Math.Round(sample.G * opacity);
+            _pixels[sample.Offset + 2] = (byte)Math.Round(sample.R * opacity);
+            _pixels[sample.Offset + 3] = (byte)Math.Round(sample.A * opacity);
+        }
     }
 
     private Rgb ResolveColor(ParticleKind kind, double assembled, double time, double phase)
@@ -587,6 +717,11 @@ public sealed class ParticleHelmetControl : FrameworkElement
 
     private readonly record struct Rgb(byte R, byte G, byte B)
     {
+        public Rgb Scale(double amount) => new(
+            (byte)Math.Clamp(Math.Round(R * amount), 0, 255),
+            (byte)Math.Clamp(Math.Round(G * amount), 0, 255),
+            (byte)Math.Clamp(Math.Round(B * amount), 0, 255));
+
         public static Rgb Lerp(Rgb start, Rgb end, double amount)
         {
             amount = Math.Clamp(amount, 0, 1);

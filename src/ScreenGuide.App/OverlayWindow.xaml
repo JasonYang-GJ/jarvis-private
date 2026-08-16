@@ -67,11 +67,8 @@
         <Grid x:Name="LargeAvatarView">
             <controls:ParticleHelmetControl x:Name="LargeParticleHelmet"
                                             ParticleCount="4200"
-                                            Width="420"
-                                            Height="410"
-                                            HorizontalAlignment="Center"
-                                            VerticalAlignment="Top"
-                                            Margin="0,3,0,0" />
+                                            HorizontalAlignment="Stretch"
+                                            VerticalAlignment="Stretch" />
 
             <Border x:Name="StatusPill"
                     HorizontalAlignment="Center"
