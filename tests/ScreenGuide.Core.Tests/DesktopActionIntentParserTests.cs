@@ -8,6 +8,9 @@ public sealed class DesktopActionIntentParserTests
     [InlineData("打开抖音", "抖音", DesktopBrowserPreference.Default)]
     [InlineData("打开谷歌抖音", "抖音", DesktopBrowserPreference.GoogleChrome)]
     [InlineData("用谷歌打开抖音", "抖音", DesktopBrowserPreference.GoogleChrome)]
+    [InlineData("打开谷歌浏览器的抖音", "抖音", DesktopBrowserPreference.GoogleChrome)]
+    [InlineData("在谷歌浏览器里打开抖音", "抖音", DesktopBrowserPreference.GoogleChrome)]
+    [InlineData("用Chrome打开抖音", "抖音", DesktopBrowserPreference.GoogleChrome)]
     [InlineData("打开谷歌浏览器", "谷歌浏览器", DesktopBrowserPreference.GoogleChrome)]
     public void OpenCommands_AreParsed(
         string command,

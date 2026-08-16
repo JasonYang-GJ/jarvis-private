@@ -34,6 +34,12 @@ public static class DesktopActionIntentParser
     [
         "请帮我打开",
         "帮我打开",
+        "请在谷歌浏览器里打开",
+        "在谷歌浏览器里打开",
+        "请在谷歌浏览器打开",
+        "在谷歌浏览器打开",
+        "请用Chrome打开",
+        "用Chrome打开",
         "请用谷歌打开",
         "用谷歌打开",
         "请打开",
@@ -73,6 +79,7 @@ public static class DesktopActionIntentParser
 
             var target = normalized[prefix.Length..];
             var useChrome = prefix.Contains("谷歌", StringComparison.Ordinal)
+                || prefix.Contains("Chrome", StringComparison.OrdinalIgnoreCase)
                 || target.StartsWith("谷歌浏览器", StringComparison.Ordinal)
                 || target.StartsWith("谷歌", StringComparison.Ordinal)
                 || target.StartsWith("Chrome", StringComparison.OrdinalIgnoreCase);
@@ -104,11 +111,12 @@ public static class DesktopActionIntentParser
 
     private static string TrimBrowserName(string target)
     {
+        target = target.TrimStart('的', '里', '面');
         foreach (var browserName in new[] { "谷歌浏览器", "谷歌", "Chrome", "chrome" })
         {
             if (target.StartsWith(browserName, StringComparison.Ordinal))
             {
-                return target[browserName.Length..].TrimStart('打', '开');
+                return target[browserName.Length..].TrimStart('的', '里', '面', '打', '开');
             }
         }
 

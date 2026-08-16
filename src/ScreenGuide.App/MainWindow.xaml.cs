@@ -29,6 +29,8 @@ public partial class MainWindow : Window
     private readonly BailianConfigurationStore _bailianStore = new();
     private readonly CloudSharingAuthorization _cloudAuthorization = new();
     private readonly VoiceTurnRecoveryPolicy _turnRecoveryPolicy = VoiceTurnRecoveryPolicy.Default;
+    private readonly IndexTtsLocalConfiguration _indexTtsConfiguration = IndexTtsLocalConfiguration.Create();
+    private IndexTtsLocalProcess? _indexTtsProcess;
 
     private Forms.NotifyIcon? _notifyIcon;
     private Drawing.Icon? _trayIcon;
@@ -469,6 +471,7 @@ public partial class MainWindow : Window
 
         var route = GuidanceRouteClassifier.Classify(recognizedText);
         CapturedWindowFrame? frame = null;
+        byte[]? imageForRequest = null;
         TimeSpan? captureElapsed = null;
         var windowTitle = _windowAtWake == ForegroundWindowContext.Unknown
             ? "未提供画面"
@@ -476,13 +479,18 @@ public partial class MainWindow : Window
 
         if (route == GuidanceRoute.Vision)
         {
+            RememberCurrentExternalWindow();
             if (!_cloudAuthorization.CanShareForegroundFrame())
             {
-                const string missingConsent = "这个问题需要查看屏幕。请先在贾维斯设置中开启当前窗口单帧授权。";
-                _overlay.ShowProblem(missingConsent);
-                LastPerformanceText.Text = "已判断为屏幕问题；本次运行未授权，没有读取或上传画面。";
-                await _speech.SpeakChineseAsync(missingConsent, cancellationToken);
-                return;
+                RequestForegroundCaptureConsentForSession();
+                if (!_cloudAuthorization.CanShareForegroundFrame())
+                {
+                    const string missingConsent = "这个问题需要查看屏幕，但你没有授权本次读取，所以我没有发送画面。";
+                    _overlay.ShowProblem(missingConsent);
+                    LastPerformanceText.Text = "已判断为屏幕问题；本次运行未授权，没有读取或上传画面。";
+                    await SpeakAssistantTextAsync(missingConsent, cancellationToken);
+                    return;
+                }
             }
 
             if (!_windowAtWake.CanCapture || _windowAtWake.BelongsToCurrentProcess)
@@ -490,7 +498,7 @@ public partial class MainWindow : Window
                 const string missingWindow = "我没有取得你正在使用的软件窗口。请先切到目标软件，再重新唤醒我提问。";
                 _overlay.ShowProblem(missingWindow);
                 LastPerformanceText.Text = "已判断为屏幕问题；没有取得外部前台窗口，未读取或上传画面。";
-                await _speech.SpeakChineseAsync(missingWindow, cancellationToken);
+                await SpeakAssistantTextAsync(missingWindow, cancellationToken);
                 return;
             }
 
@@ -504,10 +512,19 @@ public partial class MainWindow : Window
             captureTimer.Stop();
             captureElapsed = captureTimer.Elapsed;
             windowTitle = captureTarget.DisplayName;
+            var usePointerFocus = PointerFocusQuestionMatcher.IsMatch(recognizedText)
+                && frame.PointerFocusJpegBytes is { Length: > 0 };
+            imageForRequest = usePointerFocus ? frame.PointerFocusJpegBytes : frame.JpegBytes;
 
-            _overlay.ShowProcessing("正在请千问分析", $"已取得 {frame.PixelWidth}×{frame.PixelHeight} 画面；正在流式回答");
+            _overlay.ShowProcessing(
+                "正在请千问分析",
+                usePointerFocus
+                    ? "已自动裁剪鼠标附近的题目；正在流式回答"
+                    : $"已取得 {frame.PixelWidth}×{frame.PixelHeight} 画面；正在流式回答");
             StatusTitle.Text = "千问正在分析画面";
-            StatusDescription.Text = "只把本次授权画面和问题文字发送到百炼；音频没有上传。";
+            StatusDescription.Text = usePointerFocus
+                ? "本次只发送鼠标附近的局部画面和问题文字；音频没有上传。"
+                : "只把本次授权画面和问题文字发送到百炼；音频没有上传。";
         }
         else
         {
@@ -545,7 +562,7 @@ public partial class MainWindow : Window
         try
         {
             await foreach (var chunk in _guidanceProvider.StreamAnswerAsync(
-                               new GuidanceRequest(recognizedText, windowTitle, frame?.JpegBytes),
+                               new GuidanceRequest(recognizedText, windowTitle, imageForRequest),
                                cancellationToken))
             {
                 firstTokenElapsed ??= modelTimer.Elapsed;
@@ -833,7 +850,19 @@ public partial class MainWindow : Window
         }
 
         _guidanceProvider = new BailianHybridGuideService(_bailianConfiguration, _bailianApiKey);
-        _cloudSpeech = new BailianCosyVoiceService(_bailianConfiguration, _bailianApiKey);
+        var bailianSpeech = new BailianCosyVoiceService(_bailianConfiguration, _bailianApiKey);
+        if (_indexTtsConfiguration.IsConfigured)
+        {
+            _indexTtsProcess ??= new IndexTtsLocalProcess(_indexTtsConfiguration);
+            _ = _indexTtsProcess.TryStart();
+            _cloudSpeech = new LocalFirstSpeechService(
+                new IndexTtsLocalSpeechService(_indexTtsConfiguration.ServiceUri),
+                bailianSpeech);
+        }
+        else
+        {
+            _cloudSpeech = bailianSpeech;
+        }
     }
 
     private string? GetCloudReadinessProblem()
@@ -1056,6 +1085,7 @@ public partial class MainWindow : Window
         _notifyIcon?.Dispose();
         _trayIcon?.Dispose();
         _trayMenu?.Dispose();
+        _indexTtsProcess?.Dispose();
 
         try
         {

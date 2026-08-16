@@ -13,6 +13,7 @@ internal sealed record DesktopActionResult(bool Succeeded, string Message);
 internal sealed class SafeDesktopActionService
 {
     private const string DouyinUrl = "https://www.douyin.com/";
+    private const string DouyinSearchUrlPrefix = "https://www.douyin.com/search/";
 
     public Task<DesktopActionResult> ExecuteAsync(
         DesktopActionIntent intent,
@@ -94,7 +95,7 @@ internal sealed class SafeDesktopActionService
             Process.Start(new ProcessStartInfo(chromePath)
             {
                 UseShellExecute = true,
-                Arguments = url is null ? string.Empty : url
+                Arguments = url is null ? string.Empty : $"--new-tab \"{url}\""
             });
             return new DesktopActionResult(true, successMessage.Trim());
         }
@@ -167,6 +168,14 @@ internal sealed class SafeDesktopActionService
             return new DesktopActionResult(false, "我没有取得你正在使用的软件窗口，请先切回要搜索的软件再说一次。");
         }
 
+        if (IsDouyinDesktopProcess(foregroundWindow.ProcessId))
+        {
+            var searchUrl = DouyinSearchUrlPrefix + Uri.EscapeDataString(query);
+            return OpenChrome(
+                searchUrl,
+                $"抖音桌面版没有向系统开放搜索框，已改用谷歌浏览器搜索“{query}”。");
+        }
+
         var root = AutomationElement.FromHandle(foregroundWindow.WindowHandle);
         if (root is null)
         {
@@ -202,6 +211,28 @@ internal sealed class SafeDesktopActionService
         valuePattern.SetValue(query);
         Forms.SendKeys.SendWait("{ENTER}");
         return new DesktopActionResult(true, $"已经在当前软件的搜索框输入“{query}”并开始搜索。");
+    }
+
+    private static bool IsDouyinDesktopProcess(uint processId)
+    {
+        if (processId == 0 || processId > int.MaxValue)
+        {
+            return false;
+        }
+
+        try
+        {
+            using var process = Process.GetProcessById((int)processId);
+            return process.ProcessName.Contains("douyin", StringComparison.OrdinalIgnoreCase);
+        }
+        catch (ArgumentException)
+        {
+            return false;
+        }
+        catch (InvalidOperationException)
+        {
+            return false;
+        }
     }
 
     private static int ScoreSearchElement(AutomationElement element)

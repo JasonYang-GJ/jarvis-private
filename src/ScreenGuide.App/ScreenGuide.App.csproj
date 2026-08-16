@@ -34,4 +34,12 @@
     </Content>
   </ItemGroup>
 
+  <ItemGroup Condition="Exists('..\..\tools\jarvis_indextts_server.py')">
+    <Content Include="..\..\tools\jarvis_indextts_server.py">
+      <Link>tools\jarvis_indextts_server.py</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </Content>
+  </ItemGroup>
+
 </Project>
