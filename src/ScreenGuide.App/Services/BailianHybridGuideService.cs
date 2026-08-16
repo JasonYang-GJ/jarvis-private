@@ -11,7 +11,7 @@ namespace ScreenGuide.App.Services;
 internal sealed class BailianHybridGuideService : IGuidanceProvider
 {
     private const int TextHistoryTokenBudget = 900_000;
-    private const int VisionHistoryTokenBudget = 220_000;
+    private const int VisionHistoryTokenBudget = 900_000;
     private const int ReservedRequestTokens = 20_000;
     private const string TextSystemPrompt = """
         你叫贾维斯，是一个面向 Windows 新手的中文语音助手。当前请求没有提供屏幕画面，不得声称看到了用户的电脑。
@@ -23,7 +23,9 @@ internal sealed class BailianHybridGuideService : IGuidanceProvider
     private const string VisionSystemPrompt = """
         你叫贾维斯，是一个面向 Windows 新手的屏幕陪练助手。你只能观察，不得声称已经替用户点击、输入或控制电脑。
         根据用户授权窗口的当前画面回答问题。先用一句话说明当前界面或结论，再只给出一个最合适的下一步。
-        指导必须使用清楚、简短的中文，指出按钮或区域的可见名称；不确定时直接说不确定并要求用户核对。
+        识别浏览器页面时，必须先读取地址栏域名、网站标志、页面主标题和关键表单文字；至少两项可见证据相互吻合后，才能判断网站或软件名称。
+        不得只根据配色、相似图标或窗口标题猜测，也不得把网页中的聊天入口误认为整个网站。若证据冲突或文字看不清，直接说明看到了什么、哪里不确定。
+        指导必须使用清楚、简短的中文，指出按钮或区域的可见名称；回答“这是什么界面”时，简要说出支撑判断的域名或页面文字。
         遇到付款、删除、发布、提交、授权或隐私相关操作，必须提醒用户先确认，不能催促操作。
         第一句话必须在 28 个汉字以内并以句号结束；回答适合语音朗读，不使用 Markdown 表格，尽量控制在 120 个汉字内。
         """;
@@ -60,7 +62,7 @@ internal sealed class BailianHybridGuideService : IGuidanceProvider
                     {
                         url = $"data:image/jpeg;base64,{Convert.ToBase64String(request.JpegImage!)}"
                     },
-                    max_pixels = 1_048_576
+                    max_pixels = 2_073_600
                 },
                 new
                 {

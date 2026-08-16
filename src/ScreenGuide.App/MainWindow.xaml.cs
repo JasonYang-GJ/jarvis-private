@@ -330,23 +330,7 @@ public partial class MainWindow : Window
                 return;
             }
 
-            var localReply = TryBuildLocalReply(recognizedText);
-            if (localReply is not null)
-            {
-                _overlay.ShowAnswer(localReply);
-                await _speech.SpeakChineseAsync(localReply, turnToken);
-                turnTimer.Stop();
-                LastPerformanceText.Text = BuildPerformanceSummary(
-                    "本机快速回答",
-                    null,
-                    null,
-                    null,
-                    turnTimer.Elapsed);
-            }
-            else
-            {
-                await AskBailianAndSpeakAsync(recognizedText, turnTimer, turnToken);
-            }
+            await AskBailianAndSpeakAsync(recognizedText, turnTimer, turnToken);
         }
         catch (OperationCanceledException) when (_turnRecoveryPolicy.IsTurnTimeout(
                    sessionToken.IsCancellationRequested,
@@ -438,20 +422,6 @@ public partial class MainWindow : Window
             _notifyIcon.Text = "贾维斯（正在本机等待唤醒）";
         }
         _overlay.ShowWaitingForWakeWord();
-    }
-
-    private string? TryBuildLocalReply(string recognizedText)
-    {
-        if (recognizedText.Contains("哪个界面", StringComparison.Ordinal)
-            || recognizedText.Contains("什么界面", StringComparison.Ordinal)
-            || recognizedText.Contains("哪个窗口", StringComparison.Ordinal))
-        {
-            return _windowAtWake == ForegroundWindowContext.Unknown
-                ? "我已经听清问题，但这次没有取得前台窗口名称。"
-                : $"你现在位于，{_windowAtWake.Title}，窗口。";
-        }
-
-        return null;
     }
 
     private async Task AskBailianAndSpeakAsync(

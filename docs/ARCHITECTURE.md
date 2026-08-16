@@ -7,7 +7,7 @@
 - 控件识别：Windows UI Automation，优先读取按钮、菜单和文字结构。
 - 语音输入：Windows 中文识别与 sherpa-onnx 双通道共同完成本机唤醒，sherpa-onnx 在本机识别问题；麦克风音频不上传。
 - 语音输出：百炼 CosyVoice 通过 WebSocket 接收 AI 文字片段并返回 PCM 音频；失败时可退回 Windows 中文声音。
-- AI 分析：`IGuidanceProvider` 隔离模型供应商；普通问题默认使用百炼 `deepseek-v4-flash`，屏幕问题默认使用 `qwen3-vl-flash`，两者均关闭思考模式并使用 SSE 流式输出。
+- AI 分析：`IGuidanceProvider` 隔离模型供应商；普通问题默认使用百炼 `deepseek-v4-flash`，屏幕问题默认使用 `qwen3.7-plus`，两者均关闭思考模式并使用 SSE 流式输出。
 
 ## 组件边界
 

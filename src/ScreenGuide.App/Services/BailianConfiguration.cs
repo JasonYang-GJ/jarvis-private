@@ -12,7 +12,7 @@ internal sealed record BailianConfiguration(
 {
     public const string DefaultApiHost = "https://dashscope.aliyuncs.com";
     public const string DefaultTextModel = "deepseek-v4-flash";
-    public const string DefaultVisionModel = "qwen3-vl-flash";
+    public const string DefaultVisionModel = "qwen3.7-plus";
     public const string DefaultVoiceModel = "qwen-audio-3.0-tts-flash";
     public const string DefaultVoiceName = "longanlingxi";
 
@@ -98,15 +98,21 @@ internal sealed class BailianConfigurationStore
             throw new ArgumentException("百炼 API Host 必须是完整的 http 或 https 地址。");
         }
 
+        var configuredVisionModel = string.IsNullOrWhiteSpace(configuration.VisionModel)
+            ? BailianConfiguration.DefaultVisionModel
+            : configuration.VisionModel.Trim();
+        if (configuredVisionModel.Equals("qwen3-vl-flash", StringComparison.OrdinalIgnoreCase))
+        {
+            configuredVisionModel = BailianConfiguration.DefaultVisionModel;
+        }
+
         return configuration with
         {
             ApiHost = host,
             TextModel = string.IsNullOrWhiteSpace(configuration.TextModel)
                 ? BailianConfiguration.DefaultTextModel
                 : configuration.TextModel.Trim(),
-            VisionModel = string.IsNullOrWhiteSpace(configuration.VisionModel)
-                ? BailianConfiguration.DefaultVisionModel
-                : configuration.VisionModel.Trim(),
+            VisionModel = configuredVisionModel,
             VoiceModel = string.IsNullOrWhiteSpace(configuration.VoiceModel)
                 ? BailianConfiguration.DefaultVoiceModel
                 : configuration.VoiceModel.Trim(),
