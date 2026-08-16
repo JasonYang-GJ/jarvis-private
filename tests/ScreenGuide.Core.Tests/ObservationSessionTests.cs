@@ -125,29 +125,28 @@ public sealed class CloudSharingAuthorizationTests
         var authorization = new CloudSharingAuthorization();
 
         Assert.False(authorization.IsGranted);
-        Assert.False(authorization.CanShareFrameFrom("GitHub Desktop"));
+        Assert.False(authorization.CanShareForegroundFrame());
     }
 
     [Fact]
-    public void Grant_AllowsOnlyTheExactSelectedWindow()
+    public void Grant_AllowsOneForegroundFrameAtATimeDuringThisSession()
     {
         var authorization = new CloudSharingAuthorization();
 
-        authorization.GrantForWindow("GitHub Desktop");
+        authorization.GrantForForegroundWindowSession();
 
-        Assert.True(authorization.CanShareFrameFrom("GitHub Desktop"));
-        Assert.False(authorization.CanShareFrameFrom("浏览器"));
+        Assert.True(authorization.CanShareForegroundFrame());
     }
 
     [Fact]
     public void Revoke_ImmediatelyBlocksCloudSharing()
     {
         var authorization = new CloudSharingAuthorization();
-        authorization.GrantForWindow("GitHub Desktop");
+        authorization.GrantForForegroundWindowSession();
 
         authorization.Revoke();
 
         Assert.False(authorization.IsGranted);
-        Assert.False(authorization.CanShareFrameFrom("GitHub Desktop"));
+        Assert.False(authorization.CanShareForegroundFrame());
     }
 }

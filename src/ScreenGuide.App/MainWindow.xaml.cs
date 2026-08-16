@@ -5,7 +5,6 @@ using System.Media;
 using System.Text;
 using System.Threading.Channels;
 using System.Windows;
-using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using ScreenGuide.App.Services;
@@ -26,7 +25,6 @@ public partial class MainWindow : Window
     private readonly OverlayWindow _overlay = new();
     private readonly SherpaVoiceAssistantService _voiceAssistant = new(LocalVoiceModelPaths.Create());
     private readonly ForegroundWindowContextService _foregroundWindow = new();
-    private readonly WindowsWindowPickerService _windowPicker = new();
     private readonly SelectedWindowCaptureService _windowCapture = new();
     private readonly BailianConfigurationStore _bailianStore = new();
     private readonly CloudSharingAuthorization _cloudAuthorization = new();
@@ -48,7 +46,6 @@ public partial class MainWindow : Window
     private string? _bailianApiKey;
     private IGuidanceProvider? _guidanceProvider;
     private ICloudSpeechService? _cloudSpeech;
-    private WindowSelectionResult? _selectedWindow;
     private Stopwatch? _recognitionTimer;
     private TimeSpan? _lastRecognitionElapsed;
 
@@ -72,7 +69,6 @@ public partial class MainWindow : Window
         _voiceAssistant.QuestionRecognized += VoiceAssistant_QuestionRecognized;
         _voiceAssistant.StatusChanged += VoiceAssistant_StatusChanged;
         _voiceAssistant.Failed += VoiceAssistant_Failed;
-        _windowPicker.SelectedTargetClosed += WindowPicker_SelectedTargetClosed;
         _overlay.SettingsRequested += Overlay_SettingsRequested;
         _overlay.StartVoiceRequested += Overlay_StartVoiceRequested;
         _overlay.StopVoiceRequested += Overlay_StopVoiceRequested;
@@ -110,6 +106,15 @@ public partial class MainWindow : Window
             {
                 Hide();
                 _overlay.ShowAvatar(expanded: true);
+                if (GetCloudReadinessProblem() is null && _speechCapabilities is { IsReady: true })
+                {
+                    RequestForegroundCaptureConsentForSession();
+                    StartBackgroundButton_Click(StartBackgroundButton, new RoutedEventArgs());
+                }
+                else
+                {
+                    OpenSettings();
+                }
             }
         });
     }
@@ -127,6 +132,11 @@ public partial class MainWindow : Window
             if (readinessProblem is not null || _speechCapabilities is not { IsReady: true })
             {
                 OpenSettings();
+            }
+
+            if (!_cloudAuthorization.IsGranted)
+            {
+                RequestForegroundCaptureConsentForSession();
             }
 
             StartBackgroundButton_Click(StartBackgroundButton, new RoutedEventArgs());
@@ -241,6 +251,7 @@ public partial class MainWindow : Window
                 return;
             }
 
+            RememberCurrentExternalWindow();
             _voiceAssistant.BeginQuestionListening();
             return;
         }
@@ -259,7 +270,7 @@ public partial class MainWindow : Window
 
     private void VoiceAssistant_WakeWordDetected(object? sender, EventArgs e)
     {
-        _windowAtWake = _foregroundWindow.GetCurrent();
+        RememberCurrentExternalWindow();
         _recognitionTimer = Stopwatch.StartNew();
         Dispatcher.BeginInvoke(() =>
         {
@@ -274,6 +285,7 @@ public partial class MainWindow : Window
 
     private void VoiceAssistant_QuestionRecognized(object? sender, VoiceQuestionEventArgs e)
     {
+        RememberCurrentExternalWindow();
         _recognitionTimer?.Stop();
         _lastRecognitionElapsed = _recognitionTimer?.Elapsed;
         _recognitionTimer = null;
@@ -303,7 +315,7 @@ public partial class MainWindow : Window
         LastVoiceStatusText.Text = $"刚刚听到：{recognizedText}";
         StatusLight.Fill = ActiveBrush;
         StatusTitle.Text = "已经听清";
-        StatusDescription.Text = "正在判断能否本机快速回答，否则读取一次授权窗口。";
+        StatusDescription.Text = "正在判断问题类型；只有屏幕问题才会按授权读取当前前台窗口。";
 
         try
         {
@@ -431,33 +443,34 @@ public partial class MainWindow : Window
 
         if (route == GuidanceRoute.Vision)
         {
-            if (_selectedWindow is not { CanCapture: true })
+            if (!_cloudAuthorization.CanShareForegroundFrame())
             {
-                const string missingWindow = "这个问题需要查看屏幕。请先打开贾维斯设置，选择要观察的软件窗口。";
-                _overlay.ShowProblem(missingWindow);
-                LastPerformanceText.Text = "已判断为屏幕问题；没有读取或上传画面。";
-                await _speech.SpeakChineseAsync(missingWindow, cancellationToken);
-                return;
-            }
-
-            if (!_cloudAuthorization.CanShareFrameFrom(_selectedWindow.DisplayName))
-            {
-                const string missingConsent = "这个问题需要查看屏幕。请先在设置中勾选单帧画面授权。";
+                const string missingConsent = "这个问题需要查看屏幕。请先在贾维斯设置中开启当前窗口单帧授权。";
                 _overlay.ShowProblem(missingConsent);
-                LastPerformanceText.Text = "已判断为屏幕问题；授权未开启，没有读取或上传画面。";
+                LastPerformanceText.Text = "已判断为屏幕问题；本次运行未授权，没有读取或上传画面。";
                 await _speech.SpeakChineseAsync(missingConsent, cancellationToken);
                 return;
             }
 
-            _overlay.ShowProcessing("正在读取授权窗口", $"只读取一次：{_selectedWindow.DisplayName}");
+            if (!_windowAtWake.CanCapture || _windowAtWake.BelongsToCurrentProcess)
+            {
+                const string missingWindow = "我没有取得你正在使用的软件窗口。请先切到目标软件，再重新唤醒我提问。";
+                _overlay.ShowProblem(missingWindow);
+                LastPerformanceText.Text = "已判断为屏幕问题；没有取得外部前台窗口，未读取或上传画面。";
+                await _speech.SpeakChineseAsync(missingWindow, cancellationToken);
+                return;
+            }
+
+            var captureTarget = new WindowCaptureTarget(_windowAtWake.Title, _windowAtWake.WindowHandle);
+            _overlay.ShowProcessing("正在读取当前窗口", $"只读取一次：{captureTarget.DisplayName}");
             StatusTitle.Text = "正在读取一次画面";
-            StatusDescription.Text = $"目标：{_selectedWindow.DisplayName}。截图不保存到硬盘。";
+            StatusDescription.Text = $"自动跟随前台窗口：{captureTarget.DisplayName}。截图不保存到硬盘。";
 
             var captureTimer = Stopwatch.StartNew();
-            frame = await Task.Run(() => _windowCapture.CaptureOnce(_selectedWindow), cancellationToken);
+            frame = await Task.Run(() => _windowCapture.CaptureOnce(captureTarget), cancellationToken);
             captureTimer.Stop();
             captureElapsed = captureTimer.Elapsed;
-            windowTitle = _selectedWindow.DisplayName;
+            windowTitle = captureTarget.DisplayName;
 
             _overlay.ShowProcessing("正在请千问分析", $"已取得 {frame.PixelWidth}×{frame.PixelHeight} 画面；正在流式回答");
             StatusTitle.Text = "千问正在分析画面";
@@ -709,93 +722,42 @@ public partial class MainWindow : Window
         }
     }
 
-    private async void SelectWindowButton_Click(object sender, RoutedEventArgs e)
+    private void RequestForegroundCaptureConsentForSession()
     {
-        SelectWindowButton.IsEnabled = false;
-        try
-        {
-            var result = await _windowPicker.PickWindowAsync(new WindowInteropHelper(this).Handle);
-            if (result is null)
-            {
-                if (_selectedWindow is { CanCapture: true })
-                {
-                    SelectedWindowText.Text = $"✓ 继续使用：{_selectedWindow.DisplayName}";
-                    SelectedWindowText.Foreground = ActiveBrush;
-                    CloudConsentCheckBox.IsEnabled = true;
-                }
-                else
-                {
-                    _selectedWindow = null;
-                    _cloudAuthorization.Revoke();
-                    CloudConsentCheckBox.IsChecked = false;
-                    CloudConsentCheckBox.IsEnabled = false;
-                    SelectedWindowText.Text = "尚未选择（刚才已取消）";
-                    SelectedWindowText.Foreground = IdleBrush;
-                }
-                return;
-            }
+        var result = System.Windows.MessageBox.Show(
+            "当你主动询问“这个界面、按钮或报错”时，贾维斯是否可以读取当时前台软件的一帧画面并发送到阿里百炼？\n\n"
+            + "普通问题不会截图；不会读取整个桌面；截图不保存；授权只在本次运行有效。",
+            "允许贾维斯理解当前窗口吗？",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Question,
+            MessageBoxResult.No);
 
-            _selectedWindow = result;
-            CloudConsentCheckBox.IsChecked = false;
-            CloudConsentCheckBox.IsEnabled = false;
-            _cloudAuthorization.Revoke();
-            if (!result.CanCapture)
-            {
-                SelectedWindowText.Text = $"{result.DisplayName}（无法准确定位，请恢复窗口后重选）";
-                SelectedWindowText.Foreground = new SolidColorBrush(System.Windows.Media.Color.FromRgb(160, 79, 20));
-                return;
-            }
+        CloudConsentCheckBox.IsChecked = result == MessageBoxResult.Yes;
+    }
 
-            SelectedWindowText.Text = $"✓ {result.DisplayName}";
-            SelectedWindowText.Foreground = ActiveBrush;
-            CloudConsentCheckBox.IsEnabled = true;
-            PrivacyScopeText.Text = "已选择窗口；只有勾选下方授权且问题需要看屏幕时，才会读取一帧。";
-        }
-        catch (Exception exception)
+    private void RememberCurrentExternalWindow()
+    {
+        var currentWindow = _foregroundWindow.GetCurrent();
+        if (currentWindow.CanCapture && !currentWindow.BelongsToCurrentProcess)
         {
-            _selectedWindow = null;
-            SelectedWindowText.Text = $"选择失败：{exception.Message}";
-            SelectedWindowText.Foreground = new SolidColorBrush(System.Windows.Media.Color.FromRgb(160, 79, 20));
-        }
-        finally
-        {
-            SelectWindowButton.IsEnabled = true;
+            _windowAtWake = currentWindow;
         }
     }
 
     private void CloudConsentCheckBox_Changed(object sender, RoutedEventArgs e)
     {
-        if (CloudConsentCheckBox.IsChecked == true && _selectedWindow is { CanCapture: true })
+        if (CloudConsentCheckBox.IsChecked == true)
         {
-            _cloudAuthorization.GrantForWindow(_selectedWindow.DisplayName);
+            _cloudAuthorization.GrantForForegroundWindowSession();
         }
         else
         {
             _cloudAuthorization.Revoke();
-            if (_selectedWindow is not { CanCapture: true } && CloudConsentCheckBox.IsChecked == true)
-            {
-                CloudConsentCheckBox.IsChecked = false;
-            }
         }
 
         PrivacyScopeText.Text = _cloudAuthorization.IsGranted
-            ? "授权已开启：只有屏幕问题读取一帧；麦克风音频仍不上传，截图不写入硬盘。"
-            : _selectedWindow is { CanCapture: true }
-                ? "授权未开启：已选窗口，但程序不会读取或发送画面。"
-                : "请先成功选择一个软件窗口，之后才能勾选上传授权。";
-    }
-
-    private void WindowPicker_SelectedTargetClosed(object? sender, EventArgs e)
-    {
-        Dispatcher.BeginInvoke(() =>
-        {
-            _selectedWindow = null;
-            _cloudAuthorization.Revoke();
-            CloudConsentCheckBox.IsChecked = false;
-            CloudConsentCheckBox.IsEnabled = false;
-            SelectedWindowText.Text = "原授权窗口已关闭，请重新选择";
-            SelectedWindowText.Foreground = new SolidColorBrush(System.Windows.Media.Color.FromRgb(160, 79, 20));
-        });
+            ? "本次运行已授权：屏幕问题自动读取当时前台窗口的一帧；切换软件无需重新选择。"
+            : "当前未授权：普通语音问答仍可使用；任何软件窗口都不会被读取或上传。";
     }
 
     private void ConfigureCloudServices()
@@ -1017,7 +979,6 @@ public partial class MainWindow : Window
         _voiceAssistant.QuestionRecognized -= VoiceAssistant_QuestionRecognized;
         _voiceAssistant.StatusChanged -= VoiceAssistant_StatusChanged;
         _voiceAssistant.Failed -= VoiceAssistant_Failed;
-        _windowPicker.SelectedTargetClosed -= WindowPicker_SelectedTargetClosed;
         _overlay.SettingsRequested -= Overlay_SettingsRequested;
         _overlay.StartVoiceRequested -= Overlay_StartVoiceRequested;
         _overlay.StopVoiceRequested -= Overlay_StopVoiceRequested;
@@ -1025,7 +986,6 @@ public partial class MainWindow : Window
         _hotkeys.VoiceRequested -= Hotkeys_VoiceRequested;
         _hotkeys.StopRequested -= Hotkeys_StopRequested;
         _hotkeys.Dispose();
-        _windowPicker.Dispose();
         _backgroundCancellation?.Cancel();
         _voiceAssistant.StopAsync().GetAwaiter().GetResult();
         _backgroundCancellation?.Dispose();

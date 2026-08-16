@@ -43,7 +43,7 @@
             <Border Grid.Column="1" Background="#E8F7F1" CornerRadius="16" Padding="14,8" VerticalAlignment="Center">
                 <StackPanel Orientation="Horizontal">
                     <Ellipse Width="8" Height="8" Fill="{StaticResource SafeBrush}" Margin="0,0,8,0" />
-                    <TextBlock Text="唤醒与识别留在本机；普通问题不传图，屏幕问题按授权发送"
+                    <TextBlock Text="后台常驻；自动跟随当前软件；仅屏幕问题按授权发送一帧"
                                Foreground="{StaticResource SafeBrush}" FontWeight="SemiBold" FontSize="13" />
                 </StackPanel>
             </Border>
@@ -66,7 +66,7 @@
                         <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
 
-                    <TextBlock Text="后台陪练状态" FontSize="14" Foreground="{StaticResource MutedBrush}" FontWeight="SemiBold" />
+                    <TextBlock Text="贾维斯运行状态" FontSize="14" Foreground="{StaticResource MutedBrush}" FontWeight="SemiBold" />
 
                     <Grid Grid.Row="2">
                         <Grid.ColumnDefinitions>
@@ -89,7 +89,7 @@
 
                     <StackPanel Grid.Row="4">
                         <Button x:Name="StartBackgroundButton" Style="{StaticResource PrimaryButton}"
-                                Content="开始后台陪练并隐藏" Click="StartBackgroundButton_Click" />
+                                Content="启动贾维斯并隐藏设置" Click="StartBackgroundButton_Click" />
                         <Button x:Name="StopBackgroundButton" Style="{StaticResource QuietButton}"
                                 Content="停止后台陪练" IsEnabled="False" Margin="0,10,0,0"
                                 Click="StopBackgroundButton_Click" />
@@ -111,7 +111,7 @@
                     </Grid.RowDefinitions>
 
                     <StackPanel>
-                        <TextBlock Text="无需切换窗口的语音流程"
+                        <TextBlock Text="设置与故障排查（平时无需打开）"
                                    Foreground="{StaticResource MutedBrush}" FontSize="14" FontWeight="SemiBold" />
                         <TextBlock Text="说“你好贾维斯”，然后直接提问"
                                    FontSize="28" FontWeight="Bold" Margin="0,7,0,0" />
@@ -134,8 +134,8 @@
                                     <TextBlock Text="1" Foreground="{StaticResource GuideBrush}" FontWeight="Bold"
                                                HorizontalAlignment="Center" VerticalAlignment="Center" />
                                 </Border>
-                                <TextBlock Text="留在原软件" FontWeight="Bold" FontSize="15" Margin="0,10,0,0" />
-                                <TextBlock Text="不打开陪练窗口" Foreground="{StaticResource MutedBrush}"
+                                <TextBlock Text="停留在任何软件" FontWeight="Bold" FontSize="15" Margin="0,10,0,0" />
+                                <TextBlock Text="启动后自动后台待命" Foreground="{StaticResource MutedBrush}"
                                            FontSize="12" Margin="0,4,0,0" />
                             </StackPanel>
 
@@ -156,8 +156,8 @@
                                     <TextBlock Text="3" Foreground="{StaticResource SafeBrush}" FontWeight="Bold"
                                                HorizontalAlignment="Center" VerticalAlignment="Center" />
                                 </Border>
-                                <TextBlock Text="直接说出问题" FontWeight="Bold" FontSize="15" Margin="0,10,0,0" />
-                                <TextBlock Text="回答后自动继续待命" Foreground="{StaticResource MutedBrush}"
+                                <TextBlock Text="自动理解当前软件" FontWeight="Bold" FontSize="15" Margin="0,10,0,0" />
+                                <TextBlock Text="切换软件无需重新选择" Foreground="{StaticResource MutedBrush}"
                                            FontSize="12" Margin="0,4,0,0" />
                             </StackPanel>
                         </Grid>
@@ -175,7 +175,26 @@
 
                                 <Separator Margin="0,15" />
 
-                                <TextBlock Text="2. 连接阿里百炼模型" FontSize="15" FontWeight="Bold" />
+                                <TextBlock Text="2. 当前软件单帧授权" FontSize="15" FontWeight="Bold" />
+                                <TextBlock Text="不再绑定固定软件。每次唤醒时，贾维斯会记住你当时正在使用的前台窗口；切换软件后，下次提问自动跟随。"
+                                           Foreground="{StaticResource MutedBrush}" FontSize="12"
+                                           Margin="0,7,0,0" TextWrapping="Wrap" />
+                                <CheckBox x:Name="CloudConsentCheckBox" Margin="0,11,0,0"
+                                          Checked="CloudConsentCheckBox_Changed"
+                                          Unchecked="CloudConsentCheckBox_Changed">
+                                    <TextBlock TextWrapping="Wrap" FontSize="12"
+                                               Text="我同意：仅当我主动询问当前界面、按钮或报错时，读取当时前台软件的一帧画面，并把画面和问题文字发送到阿里百炼。本授权只在本次运行有效。" />
+                                </CheckBox>
+
+                                <Border Background="#E8F7F1" CornerRadius="10" Padding="14,11" Margin="0,14,0,0">
+                                    <TextBlock x:Name="PrivacyScopeText"
+                                               Text="麦克风音频仍不上传；截图只在内存中处理，不保存到硬盘。"
+                                               Foreground="{StaticResource SafeBrush}" FontSize="12" TextWrapping="Wrap" />
+                                </Border>
+
+                                <Separator Margin="0,15" />
+
+                                <TextBlock Text="3. 连接阿里百炼模型" FontSize="15" FontWeight="Bold" />
                                 <TextBlock Text="API Key 只保存到 Windows 凭据管理器；测试会发起一次不含画面的最小调用，可能按量计费。"
                                            Foreground="{StaticResource MutedBrush}" FontSize="12" Margin="0,5,0,0" />
                                 <Border Background="#F3F7FF" BorderBrush="#D9E4FA" BorderThickness="1"
@@ -208,34 +227,6 @@
                                            Foreground="{StaticResource MutedBrush}" FontSize="12"
                                            Margin="0,7,0,0" TextWrapping="Wrap" />
 
-                                <Separator Margin="0,15" />
-
-                                <TextBlock Text="3. 授权一个要观察的窗口" FontSize="15" FontWeight="Bold" />
-                                <Grid Margin="0,10,0,0">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="Auto" />
-                                        <ColumnDefinition Width="12" />
-                                        <ColumnDefinition Width="*" />
-                                    </Grid.ColumnDefinitions>
-                                    <Button x:Name="SelectWindowButton" Content="选择软件窗口"
-                                            Style="{StaticResource QuietButton}" Padding="18,8"
-                                            Click="SelectWindowButton_Click" />
-                                    <TextBlock x:Name="SelectedWindowText" Grid.Column="2" Text="尚未选择"
-                                               VerticalAlignment="Center" Foreground="{StaticResource MutedBrush}"
-                                               FontSize="12" TextTrimming="CharacterEllipsis" />
-                                </Grid>
-                                <CheckBox x:Name="CloudConsentCheckBox" Margin="0,11,0,0" IsEnabled="False"
-                                          Checked="CloudConsentCheckBox_Changed"
-                                          Unchecked="CloudConsentCheckBox_Changed">
-                                    <TextBlock TextWrapping="Wrap" FontSize="12"
-                                               Text="我同意：仅当问题需要查看屏幕时，读取所选窗口的一帧画面，并把该画面和问题文字发送到阿里百炼。" />
-                                </CheckBox>
-
-                                <Border Background="#E8F7F1" CornerRadius="10" Padding="14,11" Margin="0,14,0,0">
-                                    <TextBlock x:Name="PrivacyScopeText"
-                                               Text="麦克风音频仍不上传；截图只在内存中处理，不保存到硬盘。"
-                                               Foreground="{StaticResource SafeBrush}" FontSize="12" TextWrapping="Wrap" />
-                                </Border>
                             </StackPanel>
                         </ScrollViewer>
                     </Border>
@@ -244,7 +235,7 @@
         </Grid>
 
         <Border Grid.Row="4" Background="#EAF0FF" CornerRadius="10" Padding="15,10">
-            <TextBlock Text="隐私提示：音频不保存、不上传；普通问题只发送文字；屏幕问题仅在授权后发送所选窗口的一帧画面。"
+            <TextBlock Text="隐私提示：音频不保存、不上传；普通问题只发送文字；屏幕问题仅在本次运行授权后发送当前前台窗口的一帧。"
                        Foreground="{StaticResource GuideBrush}" FontSize="13" TextAlignment="Center" />
         </Border>
     </Grid>
