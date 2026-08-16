@@ -285,7 +285,7 @@ internal sealed class BailianCosyVoiceService : ICloudSpeechService
                 return index;
             }
 
-            if (index >= 42 && text[index] is ('，' or ',' or '、'))
+            if (index >= 24 && text[index] is ('，' or ',' or '、'))
             {
                 return index;
             }

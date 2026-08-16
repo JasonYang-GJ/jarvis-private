@@ -12,8 +12,8 @@ internal sealed record CapturedWindowFrame(byte[] JpegBytes, int PixelWidth, int
 internal sealed class SelectedWindowCaptureService
 {
     private const uint PrintWindowRenderFullContent = 0x00000002;
-    private const int MaxWidth = 1600;
-    private const int MaxHeight = 1200;
+    private const int MaxWidth = 1280;
+    private const int MaxHeight = 900;
 
     public CapturedWindowFrame CaptureOnce(WindowSelectionResult selectedWindow)
     {
@@ -55,7 +55,7 @@ internal sealed class SelectedWindowCaptureService
         using var output = new MemoryStream();
         var jpegEncoder = ImageCodecInfo.GetImageEncoders().First(codec => codec.FormatID == ImageFormat.Jpeg.Guid);
         using var encoderParameters = new EncoderParameters(1);
-        encoderParameters.Param[0] = new EncoderParameter(System.Drawing.Imaging.Encoder.Quality, 78L);
+        encoderParameters.Param[0] = new EncoderParameter(System.Drawing.Imaging.Encoder.Quality, 75L);
         prepared.Save(output, jpegEncoder, encoderParameters);
 
         return new CapturedWindowFrame(output.ToArray(), prepared.Width, prepared.Height);

@@ -5,17 +5,20 @@ namespace ScreenGuide.App.Services;
 
 internal sealed record BailianConfiguration(
     string ApiHost,
+    string TextModel,
     string VisionModel,
     string VoiceModel,
     string VoiceName)
 {
     public const string DefaultApiHost = "https://dashscope.aliyuncs.com";
+    public const string DefaultTextModel = "deepseek-v4-flash";
     public const string DefaultVisionModel = "qwen3-vl-flash";
     public const string DefaultVoiceModel = "qwen-audio-3.0-tts-flash";
     public const string DefaultVoiceName = "longanlingxi";
 
     public static BailianConfiguration Default { get; } = new(
         DefaultApiHost,
+        DefaultTextModel,
         DefaultVisionModel,
         DefaultVoiceModel,
         DefaultVoiceName);
@@ -98,6 +101,9 @@ internal sealed class BailianConfigurationStore
         return configuration with
         {
             ApiHost = host,
+            TextModel = string.IsNullOrWhiteSpace(configuration.TextModel)
+                ? BailianConfiguration.DefaultTextModel
+                : configuration.TextModel.Trim(),
             VisionModel = string.IsNullOrWhiteSpace(configuration.VisionModel)
                 ? BailianConfiguration.DefaultVisionModel
                 : configuration.VisionModel.Trim(),

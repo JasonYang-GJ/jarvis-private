@@ -9,4 +9,6 @@ namespace ScreenGuide.App;
 /// </summary>
 public partial class App : System.Windows.Application
 {
+    public static bool ShowSettingsOnStartup => Environment.GetCommandLineArgs()
+        .Any(argument => string.Equals(argument, "--settings", StringComparison.OrdinalIgnoreCase));
 }

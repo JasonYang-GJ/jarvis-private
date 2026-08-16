@@ -49,6 +49,8 @@ public partial class MainWindow : Window
     private IGuidanceProvider? _guidanceProvider;
     private ICloudSpeechService? _cloudSpeech;
     private WindowSelectionResult? _selectedWindow;
+    private Stopwatch? _recognitionTimer;
+    private TimeSpan? _lastRecognitionElapsed;
 
     public MainWindow()
     {
@@ -97,9 +99,18 @@ public partial class MainWindow : Window
 
         Dispatcher.BeginInvoke(() =>
         {
-            Hide();
             _overlay.ShowStopped();
-            _overlay.ShowAvatar(expanded: true);
+            if (App.ShowSettingsOnStartup)
+            {
+                Show();
+                Activate();
+                _overlay.HideToTray();
+            }
+            else
+            {
+                Hide();
+                _overlay.ShowAvatar(expanded: true);
+            }
         });
     }
 
@@ -249,6 +260,7 @@ public partial class MainWindow : Window
     private void VoiceAssistant_WakeWordDetected(object? sender, EventArgs e)
     {
         _windowAtWake = _foregroundWindow.GetCurrent();
+        _recognitionTimer = Stopwatch.StartNew();
         Dispatcher.BeginInvoke(() =>
         {
             SystemSounds.Asterisk.Play();
@@ -262,6 +274,9 @@ public partial class MainWindow : Window
 
     private void VoiceAssistant_QuestionRecognized(object? sender, VoiceQuestionEventArgs e)
     {
+        _recognitionTimer?.Stop();
+        _lastRecognitionElapsed = _recognitionTimer?.Elapsed;
+        _recognitionTimer = null;
         Dispatcher.BeginInvoke(async () => await HandleRecognizedQuestionAsync(e.Text));
     }
 
@@ -282,6 +297,7 @@ public partial class MainWindow : Window
         using var turnCancellation = CancellationTokenSource.CreateLinkedTokenSource(sessionToken);
         turnCancellation.CancelAfter(_turnRecoveryPolicy.TurnTimeout);
         var turnToken = turnCancellation.Token;
+        var turnTimer = Stopwatch.StartNew();
 
         _overlay.ShowRecognized($"你说：{recognizedText}");
         LastVoiceStatusText.Text = $"刚刚听到：{recognizedText}";
@@ -296,10 +312,17 @@ public partial class MainWindow : Window
             {
                 _overlay.ShowAnswer(localReply);
                 await _speech.SpeakChineseAsync(localReply, turnToken);
+                turnTimer.Stop();
+                LastPerformanceText.Text = BuildPerformanceSummary(
+                    "本机快速回答",
+                    null,
+                    null,
+                    null,
+                    turnTimer.Elapsed);
             }
             else
             {
-                await AskBailianAndSpeakAsync(recognizedText, turnToken);
+                await AskBailianAndSpeakAsync(recognizedText, turnTimer, turnToken);
             }
         }
         catch (OperationCanceledException) when (_turnRecoveryPolicy.IsTurnTimeout(
@@ -389,31 +412,68 @@ public partial class MainWindow : Window
         return null;
     }
 
-    private async Task AskBailianAndSpeakAsync(string recognizedText, CancellationToken cancellationToken)
+    private async Task AskBailianAndSpeakAsync(
+        string recognizedText,
+        Stopwatch turnTimer,
+        CancellationToken cancellationToken)
     {
-        if (_guidanceProvider is null || _cloudSpeech is null || _selectedWindow is null)
+        if (_guidanceProvider is null || _cloudSpeech is null)
         {
-            throw new InvalidOperationException("阿里百炼或授权窗口尚未准备好。");
+            throw new InvalidOperationException("阿里百炼尚未准备好。");
         }
 
-        if (!_cloudAuthorization.CanShareFrameFrom(_selectedWindow.DisplayName))
+        var route = GuidanceRouteClassifier.Classify(recognizedText);
+        CapturedWindowFrame? frame = null;
+        TimeSpan? captureElapsed = null;
+        var windowTitle = _windowAtWake == ForegroundWindowContext.Unknown
+            ? "未提供画面"
+            : _windowAtWake.Title;
+
+        if (route == GuidanceRoute.Vision)
         {
-            throw new InvalidOperationException("发送画面前需要在设置中勾选明确授权。");
+            if (_selectedWindow is not { CanCapture: true })
+            {
+                const string missingWindow = "这个问题需要查看屏幕。请先打开贾维斯设置，选择要观察的软件窗口。";
+                _overlay.ShowProblem(missingWindow);
+                LastPerformanceText.Text = "已判断为屏幕问题；没有读取或上传画面。";
+                await _speech.SpeakChineseAsync(missingWindow, cancellationToken);
+                return;
+            }
+
+            if (!_cloudAuthorization.CanShareFrameFrom(_selectedWindow.DisplayName))
+            {
+                const string missingConsent = "这个问题需要查看屏幕。请先在设置中勾选单帧画面授权。";
+                _overlay.ShowProblem(missingConsent);
+                LastPerformanceText.Text = "已判断为屏幕问题；授权未开启，没有读取或上传画面。";
+                await _speech.SpeakChineseAsync(missingConsent, cancellationToken);
+                return;
+            }
+
+            _overlay.ShowProcessing("正在读取授权窗口", $"只读取一次：{_selectedWindow.DisplayName}");
+            StatusTitle.Text = "正在读取一次画面";
+            StatusDescription.Text = $"目标：{_selectedWindow.DisplayName}。截图不保存到硬盘。";
+
+            var captureTimer = Stopwatch.StartNew();
+            frame = await Task.Run(() => _windowCapture.CaptureOnce(_selectedWindow), cancellationToken);
+            captureTimer.Stop();
+            captureElapsed = captureTimer.Elapsed;
+            windowTitle = _selectedWindow.DisplayName;
+
+            _overlay.ShowProcessing("正在请千问分析", $"已取得 {frame.PixelWidth}×{frame.PixelHeight} 画面；正在流式回答");
+            StatusTitle.Text = "千问正在分析画面";
+            StatusDescription.Text = "只把本次授权画面和问题文字发送到百炼；音频没有上传。";
         }
-
-        _overlay.ShowProcessing("正在读取授权窗口", $"只读取一次：{_selectedWindow.DisplayName}");
-        StatusTitle.Text = "正在读取一次画面";
-        StatusDescription.Text = $"目标：{_selectedWindow.DisplayName}。截图不保存到硬盘。";
-
-        var captureTimer = Stopwatch.StartNew();
-        var frame = await Task.Run(() => _windowCapture.CaptureOnce(_selectedWindow), cancellationToken);
-        captureTimer.Stop();
-
-        _overlay.ShowProcessing("正在请千问分析", $"已取得 {frame.PixelWidth}×{frame.PixelHeight} 画面；正在流式回答");
-        StatusTitle.Text = "千问正在分析画面";
-        StatusDescription.Text = "画面和问题文字已发送到华北2（北京）百炼；音频没有上传。";
+        else
+        {
+            _overlay.ShowProcessing("正在请 DeepSeek 回答", "普通问题不读取屏幕，正在流式生成");
+            StatusTitle.Text = "DeepSeek 正在快速回答";
+            StatusDescription.Text = "本次只发送问题文字，不读取、不上传屏幕画面。";
+        }
 
         var answer = new StringBuilder();
+        var modelTimer = Stopwatch.StartNew();
+        TimeSpan? firstTokenElapsed = null;
+        TimeSpan? firstAudioElapsed = null;
         var textChannel = Channel.CreateUnbounded<string>(new UnboundedChannelOptions
         {
             SingleReader = true,
@@ -425,6 +485,11 @@ public partial class MainWindow : Window
             cancellationToken,
             progress => Dispatcher.BeginInvoke(() =>
             {
+                if (firstAudioElapsed is null
+                    && progress.Contains("正在用百炼语音回答", StringComparison.Ordinal))
+                {
+                    firstAudioElapsed = turnTimer.Elapsed;
+                }
                 StatusTitle.Text = progress;
                 _overlay.ShowProcessing(progress, ShortenForOverlay(answer.ToString()));
             }));
@@ -434,13 +499,15 @@ public partial class MainWindow : Window
         try
         {
             await foreach (var chunk in _guidanceProvider.StreamAnswerAsync(
-                               new GuidanceRequest(recognizedText, _selectedWindow.DisplayName, frame.JpegBytes),
+                               new GuidanceRequest(recognizedText, windowTitle, frame?.JpegBytes),
                                cancellationToken))
             {
+                firstTokenElapsed ??= modelTimer.Elapsed;
                 answer.Append(chunk);
                 await textChannel.Writer.WriteAsync(chunk, cancellationToken);
-                _overlay.ShowProcessing("千问正在回答", ShortenForOverlay(answer.ToString()));
-                LastVoiceStatusText.Text = $"千问：{ShortenForOverlay(answer.ToString())}";
+                var providerName = route == GuidanceRoute.Vision ? "千问视觉" : "DeepSeek";
+                _overlay.ShowProcessing($"{providerName} 正在回答", ShortenForOverlay(answer.ToString()));
+                LastVoiceStatusText.Text = $"{providerName}：{ShortenForOverlay(answer.ToString())}";
             }
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
@@ -449,6 +516,7 @@ public partial class MainWindow : Window
         }
         finally
         {
+            modelTimer.Stop();
             textChannel.Writer.TryComplete();
         }
 
@@ -473,15 +541,52 @@ public partial class MainWindow : Window
         }
 
         _overlay.ShowAnswer(finalAnswer);
+        turnTimer.Stop();
+        var routeName = route == GuidanceRoute.Vision ? "屏幕问题 · 千问视觉" : "普通问题 · DeepSeek";
+        var performanceSummary = BuildPerformanceSummary(
+            routeName,
+            captureElapsed,
+            firstTokenElapsed,
+            firstAudioElapsed,
+            turnTimer.Elapsed);
         StatusLight.Fill = ActiveBrush;
         StatusTitle.Text = "回答完成";
-        StatusDescription.Text = $"画面读取耗时 {captureTimer.Elapsed.TotalSeconds:0.0} 秒；截图只在内存中使用。";
+        StatusDescription.Text = performanceSummary;
+        LastPerformanceText.Text = performanceSummary;
 
         if (speechFailure is not null)
         {
-            LastVoiceStatusText.Text = $"千问已回答，但百炼语音失败：{speechFailure.Message}；已改用 Windows 中文声音。";
+            LastVoiceStatusText.Text = $"模型已回答，但百炼语音失败：{speechFailure.Message}；已改用 Windows 中文声音。";
             await _speech.SpeakChineseAsync(finalAnswer, cancellationToken);
         }
+    }
+
+    private string BuildPerformanceSummary(
+        string routeName,
+        TimeSpan? captureElapsed,
+        TimeSpan? firstTokenElapsed,
+        TimeSpan? firstAudioElapsed,
+        TimeSpan totalElapsed)
+    {
+        var parts = new List<string> { routeName };
+        if (_lastRecognitionElapsed is { } recognition)
+        {
+            parts.Add($"听写完成 {recognition.TotalSeconds:0.0}秒");
+        }
+        if (captureElapsed is { } capture)
+        {
+            parts.Add($"截屏 {capture.TotalSeconds:0.0}秒");
+        }
+        if (firstTokenElapsed is { } firstToken)
+        {
+            parts.Add($"模型首字 {firstToken.TotalSeconds:0.0}秒");
+        }
+        if (firstAudioElapsed is { } firstAudio)
+        {
+            parts.Add($"开始说话 {firstAudio.TotalSeconds:0.0}秒");
+        }
+        parts.Add($"本轮 {totalElapsed.TotalSeconds:0.0}秒");
+        return string.Join(" · ", parts);
     }
 
     private static string ShortenForOverlay(string text)
@@ -527,6 +632,7 @@ public partial class MainWindow : Window
     private void LoadBailianConfiguration()
     {
         _bailianConfiguration = _bailianStore.Load();
+        ModelRoutingText.Text = $"普通问题：{_bailianConfiguration.TextModel}（关闭思考）\n屏幕问题：{_bailianConfiguration.VisionModel}（按需单帧）";
         try
         {
             _bailianApiKey = _bailianStore.ReadApiKey();
@@ -546,7 +652,7 @@ public partial class MainWindow : Window
         }
         else
         {
-            BailianStatusText.Text = $"✓ 密钥已安全保存在本机；模型：{_bailianConfiguration.VisionModel}";
+            BailianStatusText.Text = $"✓ 密钥已安全保存在本机；文字：{_bailianConfiguration.TextModel}；视觉：{_bailianConfiguration.VisionModel}";
             BailianStatusText.Foreground = ActiveBrush;
         }
     }
@@ -589,7 +695,7 @@ public partial class MainWindow : Window
                 throw new InvalidOperationException("百炼没有返回测试结果。");
             }
 
-            BailianStatusText.Text = $"✓ 百炼连接成功；模型：{_bailianConfiguration.VisionModel}";
+            BailianStatusText.Text = $"✓ 百炼连接成功；文字：{_bailianConfiguration.TextModel}；视觉：{_bailianConfiguration.VisionModel}";
             BailianStatusText.Foreground = ActiveBrush;
         }
         catch (Exception exception)
@@ -643,7 +749,7 @@ public partial class MainWindow : Window
             SelectedWindowText.Text = $"✓ {result.DisplayName}";
             SelectedWindowText.Foreground = ActiveBrush;
             CloudConsentCheckBox.IsEnabled = true;
-            PrivacyScopeText.Text = "已选择窗口，但只有勾选下方授权后，每次提问才会读取一帧。";
+            PrivacyScopeText.Text = "已选择窗口；只有勾选下方授权且问题需要看屏幕时，才会读取一帧。";
         }
         catch (Exception exception)
         {
@@ -673,7 +779,7 @@ public partial class MainWindow : Window
         }
 
         PrivacyScopeText.Text = _cloudAuthorization.IsGranted
-            ? "授权已开启：每次提问只读取一帧；麦克风音频仍不上传，截图不写入硬盘。"
+            ? "授权已开启：只有屏幕问题读取一帧；麦克风音频仍不上传，截图不写入硬盘。"
             : _selectedWindow is { CanCapture: true }
                 ? "授权未开启：已选窗口，但程序不会读取或发送画面。"
                 : "请先成功选择一个软件窗口，之后才能勾选上传授权。";
@@ -701,7 +807,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        _guidanceProvider = new BailianVisionGuideService(_bailianConfiguration, _bailianApiKey);
+        _guidanceProvider = new BailianHybridGuideService(_bailianConfiguration, _bailianApiKey);
         _cloudSpeech = new BailianCosyVoiceService(_bailianConfiguration, _bailianApiKey);
     }
 
@@ -710,16 +816,6 @@ public partial class MainWindow : Window
         if (_guidanceProvider is null || _cloudSpeech is null)
         {
             return "请先在右侧粘贴阿里百炼 API Key，并点击“保存并测试”。";
-        }
-
-        if (_selectedWindow is not { CanCapture: true })
-        {
-            return "请先点击“选择软件窗口”，选择你希望我观察的软件。";
-        }
-
-        if (!_cloudAuthorization.CanShareFrameFrom(_selectedWindow.DisplayName))
-        {
-            return "请阅读并勾选窗口单帧上传授权。没有明确授权，程序不会读取画面。";
         }
 
         return null;

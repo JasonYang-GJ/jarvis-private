@@ -1,27 +1,34 @@
+using System.IO;
 using System.Net.Http;
 using System.Net.Http.Headers;
-using System.IO;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
 
 namespace ScreenGuide.App.Services;
 
-internal sealed class BailianVisionGuideService : IGuidanceProvider
+internal sealed class BailianHybridGuideService : IGuidanceProvider
 {
-    private const string SystemPrompt = """
+    private const string TextSystemPrompt = """
+        你叫贾维斯，是一个面向 Windows 新手的中文语音助手。当前请求没有提供屏幕画面，不得声称看到了用户的电脑。
+        先直接回答结论，再补充最必要的说明。使用自然、清楚、简短的口语，不使用 Markdown 表格。
+        第一句话必须在 28 个汉字以内并以句号结束，让语音能够尽快开口；全文尽量控制在 120 个汉字内。
+        遇到付款、删除、发布、提交、授权或隐私相关操作，必须提醒用户先确认。
+        """;
+
+    private const string VisionSystemPrompt = """
         你叫贾维斯，是一个面向 Windows 新手的屏幕陪练助手。你只能观察，不得声称已经替用户点击、输入或控制电脑。
         根据用户授权窗口的当前画面回答问题。先用一句话说明当前界面或结论，再只给出一个最合适的下一步。
         指导必须使用清楚、简短的中文，指出按钮或区域的可见名称；不确定时直接说不确定并要求用户核对。
         遇到付款、删除、发布、提交、授权或隐私相关操作，必须提醒用户先确认，不能催促操作。
-        回答适合语音朗读，不使用 Markdown 表格，尽量控制在 120 个汉字内。
+        第一句话必须在 28 个汉字以内并以句号结束；回答适合语音朗读，不使用 Markdown 表格，尽量控制在 120 个汉字内。
         """;
 
     private readonly HttpClient _httpClient;
     private readonly BailianConfiguration _configuration;
     private readonly string _apiKey;
 
-    public BailianVisionGuideService(
+    public BailianHybridGuideService(
         BailianConfiguration configuration,
         string apiKey,
         HttpClient? httpClient = null)
@@ -35,38 +42,45 @@ internal sealed class BailianVisionGuideService : IGuidanceProvider
         GuidanceRequest request,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        var userContent = new List<object>();
-        if (request.JpegImage is { Length: > 0 })
+        var hasImage = request.JpegImage is { Length: > 0 };
+        object userContent;
+        if (hasImage)
         {
-            userContent.Add(new
+            userContent = new object[]
             {
-                type = "image_url",
-                image_url = new
+                new
                 {
-                    url = $"data:image/jpeg;base64,{Convert.ToBase64String(request.JpegImage)}"
+                    type = "image_url",
+                    image_url = new
+                    {
+                        url = $"data:image/jpeg;base64,{Convert.ToBase64String(request.JpegImage!)}"
+                    },
+                    max_pixels = 1_048_576
                 },
-                max_pixels = 1_572_864
-            });
+                new
+                {
+                    type = "text",
+                    text = $"授权窗口标题：{request.WindowTitle}\n用户问题：{request.Question}"
+                }
+            };
         }
-
-        userContent.Add(new
+        else
         {
-            type = "text",
-            text = $"授权窗口标题：{request.WindowTitle}\n用户问题：{request.Question}"
-        });
+            userContent = $"用户问题：{request.Question}";
+        }
 
         var body = new
         {
-            model = _configuration.VisionModel,
+            model = hasImage ? _configuration.VisionModel : _configuration.TextModel,
             messages = new object[]
             {
-                new { role = "system", content = SystemPrompt },
+                new { role = "system", content = hasImage ? VisionSystemPrompt : TextSystemPrompt },
                 new { role = "user", content = userContent }
             },
             stream = true,
             stream_options = new { include_usage = true },
             enable_thinking = false,
-            temperature = 0.2,
+            temperature = hasImage ? 0.2 : 0.35,
             max_tokens = 320
         };
 
