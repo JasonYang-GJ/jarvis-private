@@ -31,6 +31,7 @@ internal sealed class SherpaVoiceAssistantService : IAsyncDisposable
     private volatile VoiceListeningState _state = VoiceListeningState.Stopped;
     private readonly Stopwatch _questionTimer = new();
     private int _microphoneSignalReported;
+    private bool _continuousQuestionMode;
 
     public SherpaVoiceAssistantService(LocalVoiceModelPaths paths)
     {
@@ -125,6 +126,7 @@ internal sealed class SherpaVoiceAssistantService : IAsyncDisposable
             _recognizer?.Reset(_recognitionStream!);
             _keywordSpotter?.Reset(_keywordStream!);
             _questionTimer.Reset();
+            _continuousQuestionMode = false;
             Interlocked.Exchange(ref _microphoneSignalReported, 0);
             _state = VoiceListeningState.WaitingForWakeWord;
         }
@@ -148,11 +150,38 @@ internal sealed class SherpaVoiceAssistantService : IAsyncDisposable
             _state = VoiceListeningState.Paused;
             _recognizer?.Reset(_recognitionStream!);
             _questionTimer.Restart();
+            _continuousQuestionMode = true;
             _state = VoiceListeningState.ListeningForQuestion;
         }
 
         WakeWordDetected?.Invoke(this, EventArgs.Empty);
         RaiseStatus("已开始听，请直接说问题");
+    }
+
+    public void BeginFollowUpListening()
+    {
+        if (_state is VoiceListeningState.Stopped or VoiceListeningState.Starting)
+        {
+            return;
+        }
+
+        lock (_modelLock)
+        {
+            _recognizer?.Reset(_recognitionStream!);
+            _questionTimer.Restart();
+            _continuousQuestionMode = true;
+            _state = VoiceListeningState.ListeningForQuestion;
+        }
+
+        RaiseStatus("连续对话中，请直接说下一句话");
+    }
+
+    public void EndContinuousConversation()
+    {
+        lock (_modelLock)
+        {
+            _continuousQuestionMode = false;
+        }
     }
 
     public async Task StopAsync()
@@ -410,6 +439,7 @@ internal sealed class SherpaVoiceAssistantService : IAsyncDisposable
         _keywordSpotter!.Reset(_keywordStream!);
         _recognizer!.Reset(_recognitionStream!);
         _questionTimer.Restart();
+        _continuousQuestionMode = true;
         _state = VoiceListeningState.ListeningForQuestion;
         WakeWordDetected?.Invoke(this, EventArgs.Empty);
         RaiseStatus("已唤醒，请直接说问题");
@@ -437,9 +467,18 @@ internal sealed class SherpaVoiceAssistantService : IAsyncDisposable
 
         if (string.IsNullOrWhiteSpace(result))
         {
-            _keywordSpotter!.Reset(_keywordStream!);
-            _state = VoiceListeningState.WaitingForWakeWord;
-            RaiseStatus("没有听清，已继续等待“你好贾维斯”");
+            if (_continuousQuestionMode)
+            {
+                _questionTimer.Restart();
+                _state = VoiceListeningState.ListeningForQuestion;
+                RaiseStatus("连续对话中，仍在等待你说话");
+            }
+            else
+            {
+                _keywordSpotter!.Reset(_keywordStream!);
+                _state = VoiceListeningState.WaitingForWakeWord;
+                RaiseStatus("没有听清，已继续等待“你好贾维斯”");
+            }
             return;
         }
 

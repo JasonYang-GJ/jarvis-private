@@ -39,6 +39,7 @@ public partial class MainWindow : Window
     private bool _hotkeysReady;
     private bool _allowExit;
     private bool _initialized;
+    private volatile bool _continuousConversationActive;
     private int _questionTurnInProgress;
     private ForegroundWindowContext _windowAtWake = ForegroundWindowContext.Unknown;
     private BailianConfiguration _bailianConfiguration = BailianConfiguration.Default;
@@ -269,6 +270,7 @@ public partial class MainWindow : Window
 
     private void VoiceAssistant_WakeWordDetected(object? sender, EventArgs e)
     {
+        _continuousConversationActive = true;
         RememberCurrentExternalWindow();
         _recognitionTimer = Stopwatch.StartNew();
         Dispatcher.BeginInvoke(() =>
@@ -317,6 +319,17 @@ public partial class MainWindow : Window
 
         try
         {
+            if (ConversationExitPhraseMatcher.IsMatch(recognizedText))
+            {
+                _continuousConversationActive = false;
+                _voiceAssistant.EndContinuousConversation();
+                StatusLight.Fill = ActiveBrush;
+                StatusTitle.Text = "连续对话已结束";
+                StatusDescription.Text = "已安静退下；需要时再次说“你好贾维斯”。";
+                LastVoiceStatusText.Text = "连续对话已结束，正在本机等待唤醒词。";
+                return;
+            }
+
             var localReply = TryBuildLocalReply(recognizedText);
             if (localReply is not null)
             {
@@ -387,10 +400,31 @@ public partial class MainWindow : Window
                     _backgroundEnabled,
                     sessionToken.IsCancellationRequested))
             {
-                _voiceAssistant.ResumeWakeWordListening();
-                ShowWaitingState();
+                if (_continuousConversationActive)
+                {
+                    _voiceAssistant.BeginFollowUpListening();
+                    ShowContinuousConversationState();
+                }
+                else
+                {
+                    _voiceAssistant.ResumeWakeWordListening();
+                    ShowWaitingState();
+                }
             }
         }
+    }
+
+    private void ShowContinuousConversationState()
+    {
+        StatusLight.Fill = ListeningBrush;
+        StatusTitle.Text = "连续对话中";
+        StatusDescription.Text = "直接说下一句话；单独说“你退下吧”或“退出”即可安静结束。";
+        LastVoiceStatusText.Text = "麦克风正在本机等待你的下一句话。";
+        if (_notifyIcon is not null)
+        {
+            _notifyIcon.Text = "贾维斯（连续对话中）";
+        }
+        _overlay.ShowContinuousConversation();
     }
 
     private void ShowWaitingState()
@@ -808,6 +842,7 @@ public partial class MainWindow : Window
     private async Task StopBackgroundModeAsync(bool showSettings)
     {
         _backgroundEnabled = false;
+        _continuousConversationActive = false;
         _overlay.SetVoiceActive(false);
         _backgroundCancellation?.Cancel();
         await _voiceAssistant.StopAsync();

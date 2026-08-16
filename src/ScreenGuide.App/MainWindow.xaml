@@ -113,7 +113,7 @@
                     <StackPanel>
                         <TextBlock Text="设置与故障排查（平时无需打开）"
                                    Foreground="{StaticResource MutedBrush}" FontSize="14" FontWeight="SemiBold" />
-                        <TextBlock Text="说“你好贾维斯”，然后直接提问"
+                        <TextBlock Text="叫我一次，之后可以连续对话"
                                    FontSize="28" FontWeight="Bold" Margin="0,7,0,0" />
                     </StackPanel>
 
@@ -156,8 +156,8 @@
                                     <TextBlock Text="3" Foreground="{StaticResource SafeBrush}" FontWeight="Bold"
                                                HorizontalAlignment="Center" VerticalAlignment="Center" />
                                 </Border>
-                                <TextBlock Text="自动理解当前软件" FontWeight="Bold" FontSize="15" Margin="0,10,0,0" />
-                                <TextBlock Text="切换软件无需重新选择" Foreground="{StaticResource MutedBrush}"
+                                <TextBlock Text="连续说下一句" FontWeight="Bold" FontSize="15" Margin="0,10,0,0" />
+                                <TextBlock Text="说“你退下吧”结束" Foreground="{StaticResource MutedBrush}"
                                            FontSize="12" Margin="0,4,0,0" />
                             </StackPanel>
                         </Grid>

@@ -115,6 +115,15 @@ public partial class OverlayWindow : Window
             ParticleHelmetState.Listening);
     }
 
+    public void ShowContinuousConversation()
+    {
+        ShowStatus(
+            "连续对话中",
+            "直接说下一句；说“你退下吧”或“退出”即可结束",
+            System.Windows.Media.Color.FromRgb(72, 231, 255),
+            ParticleHelmetState.Waiting);
+    }
+
     public void ShowRecognized(string text)
     {
         ShowStatus(
