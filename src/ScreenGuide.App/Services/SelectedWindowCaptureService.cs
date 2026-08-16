@@ -51,6 +51,8 @@ internal sealed class SelectedWindowCaptureService
             }
         }
 
+        DrawCursorMarkerIfInside(bitmap, rectangle);
+
         using var prepared = ResizeIfNeeded(bitmap);
         using var output = new MemoryStream();
         var jpegEncoder = ImageCodecInfo.GetImageEncoders().First(codec => codec.FormatID == ImageFormat.Jpeg.Guid);
@@ -75,6 +77,34 @@ internal sealed class SelectedWindowCaptureService
         return resized;
     }
 
+    private static void DrawCursorMarkerIfInside(Bitmap bitmap, NativeRectangle windowRectangle)
+    {
+        if (!GetCursorPos(out var cursor))
+        {
+            return;
+        }
+
+        var x = cursor.X - windowRectangle.Left;
+        var y = cursor.Y - windowRectangle.Top;
+        if (x < 0 || y < 0 || x >= bitmap.Width || y >= bitmap.Height)
+        {
+            return;
+        }
+
+        const int radius = 30;
+        using var graphics = Graphics.FromImage(bitmap);
+        graphics.SmoothingMode = SmoothingMode.AntiAlias;
+        using var whitePen = new Pen(Color.White, 8F);
+        using var redPen = new Pen(Color.FromArgb(230, 220, 32, 32), 4F);
+        var marker = new Rectangle(x - radius, y - radius, radius * 2, radius * 2);
+        graphics.DrawEllipse(whitePen, marker);
+        graphics.DrawEllipse(redPen, marker);
+        graphics.DrawLine(whitePen, x - 12, y, x + 12, y);
+        graphics.DrawLine(whitePen, x, y - 12, x, y + 12);
+        graphics.DrawLine(redPen, x - 12, y, x + 12, y);
+        graphics.DrawLine(redPen, x, y - 12, x, y + 12);
+    }
+
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool PrintWindow(IntPtr windowHandle, IntPtr deviceContext, uint flags);
@@ -87,6 +117,10 @@ internal sealed class SelectedWindowCaptureService
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool IsWindow(IntPtr windowHandle);
 
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetCursorPos(out NativePoint point);
+
     [StructLayout(LayoutKind.Sequential)]
     private struct NativeRectangle
     {
@@ -94,5 +128,12 @@ internal sealed class SelectedWindowCaptureService
         public int Top;
         public int Right;
         public int Bottom;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativePoint
+    {
+        public int X;
+        public int Y;
     }
 }

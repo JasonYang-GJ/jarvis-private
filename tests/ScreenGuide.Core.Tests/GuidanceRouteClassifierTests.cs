@@ -13,6 +13,8 @@ public sealed class GuidanceRouteClassifierTests
     [InlineData("这是什么网站")]
     [InlineData("告诉我图片是什么界面")]
     [InlineData("当前是什么软件")]
+    [InlineData("我鼠标指着的这道题怎么写")]
+    [InlineData("这一题怎么做")]
     public void ScreenQuestions_UseVision(string question)
     {
         Assert.Equal(GuidanceRoute.Vision, GuidanceRouteClassifier.Classify(question));

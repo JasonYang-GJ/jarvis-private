@@ -43,7 +43,7 @@
             <Border Grid.Column="1" Background="#E8F7F1" CornerRadius="16" Padding="14,8" VerticalAlignment="Center">
                 <StackPanel Orientation="Horizontal">
                     <Ellipse Width="8" Height="8" Fill="{StaticResource SafeBrush}" Margin="0,0,8,0" />
-                    <TextBlock Text="后台常驻；自动跟随当前软件；仅屏幕问题按授权发送一帧"
+                    <TextBlock Text="后台常驻；按授权看一帧；操作只执行明确的单条指令"
                                Foreground="{StaticResource SafeBrush}" FontWeight="SemiBold" FontSize="13" />
                 </StackPanel>
             </Border>
@@ -235,7 +235,7 @@
         </Grid>
 
         <Border Grid.Row="4" Background="#EAF0FF" CornerRadius="10" Padding="15,10">
-            <TextBlock Text="隐私提示：音频不保存、不上传；普通问题只发送文字；屏幕问题仅在本次运行授权后发送当前前台窗口的一帧。"
+            <TextBlock Text="隐私提示：音频不保存、不上传；屏幕问题按本次运行授权发送一帧；发布、付款、删除、密码等操作不会执行。"
                        Foreground="{StaticResource GuideBrush}" FontSize="13" TextAlignment="Center" />
         </Border>
     </Grid>

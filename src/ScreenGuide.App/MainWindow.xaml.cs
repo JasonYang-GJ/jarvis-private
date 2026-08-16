@@ -25,6 +25,7 @@ public partial class MainWindow : Window
     private readonly SherpaVoiceAssistantService _voiceAssistant = new(LocalVoiceModelPaths.Create());
     private readonly ForegroundWindowContextService _foregroundWindow = new();
     private readonly SelectedWindowCaptureService _windowCapture = new();
+    private readonly SafeDesktopActionService _desktopActions = new();
     private readonly BailianConfigurationStore _bailianStore = new();
     private readonly CloudSharingAuthorization _cloudAuthorization = new();
     private readonly VoiceTurnRecoveryPolicy _turnRecoveryPolicy = VoiceTurnRecoveryPolicy.Default;
@@ -330,6 +331,38 @@ public partial class MainWindow : Window
                 return;
             }
 
+            if (DesktopActionIntentParser.TryParse(recognizedText, out var actionIntent)
+                && actionIntent is not null)
+            {
+                _overlay.ShowProcessing("正在执行你刚才说的操作", recognizedText);
+                StatusTitle.Text = "正在执行明确指令";
+                StatusDescription.Text = "只执行这一条语音指令；找不到可靠控件时不会盲目点击或输入。";
+                var actionResult = await _desktopActions.ExecuteAsync(actionIntent, _windowAtWake, turnToken);
+                if (actionResult.Succeeded)
+                {
+                    _overlay.ShowAnswer(actionResult.Message);
+                    StatusLight.Fill = ActiveBrush;
+                    StatusTitle.Text = "操作已完成";
+                }
+                else
+                {
+                    _overlay.ShowProblem(actionResult.Message);
+                    StatusTitle.Text = "为了安全没有执行";
+                }
+
+                StatusDescription.Text = actionResult.Message;
+                LastVoiceStatusText.Text = actionResult.Message;
+                await SpeakAssistantTextAsync(actionResult.Message, turnToken);
+                turnTimer.Stop();
+                LastPerformanceText.Text = BuildPerformanceSummary(
+                    "本机安全操作",
+                    null,
+                    null,
+                    null,
+                    turnTimer.Elapsed);
+                return;
+            }
+
             await AskBailianAndSpeakAsync(recognizedText, turnTimer, turnToken);
         }
         catch (OperationCanceledException) when (_turnRecoveryPolicy.IsTurnTimeout(
@@ -571,6 +604,34 @@ public partial class MainWindow : Window
         {
             LastVoiceStatusText.Text = $"模型已回答，但百炼语音失败：{speechFailure.Message}；已改用 Windows 中文声音。";
             await _speech.SpeakChineseAsync(finalAnswer, cancellationToken);
+        }
+    }
+
+    private async Task SpeakAssistantTextAsync(string text, CancellationToken cancellationToken)
+    {
+        if (_cloudSpeech is null)
+        {
+            await _speech.SpeakChineseAsync(text, cancellationToken);
+            return;
+        }
+
+        var channel = Channel.CreateUnbounded<string>(new UnboundedChannelOptions
+        {
+            SingleReader = true,
+            SingleWriter = true
+        });
+        channel.Writer.TryWrite(text);
+        channel.Writer.TryComplete();
+        try
+        {
+            await _cloudSpeech.SpeakStreamAsync(
+                channel.Reader.ReadAllAsync(cancellationToken),
+                cancellationToken);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            LastVoiceStatusText.Text = $"云端语音失败：{exception.Message}；已改用 Windows 中文声音。";
+            await _speech.SpeakChineseAsync(text, cancellationToken);
         }
     }
 
