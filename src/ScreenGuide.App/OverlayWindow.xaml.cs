@@ -103,6 +103,38 @@ public partial class OverlayWindow : Window
         });
     }
 
+    public void ShowCompact()
+    {
+        Dispatcher.Invoke(() =>
+        {
+            _userHidden = false;
+            _hideRequestVersion++;
+            LargeParticleHelmet.CancelDissolve();
+            CompactParticleHelmet.CancelDissolve();
+            if (!IsVisible)
+            {
+                Show();
+            }
+            SetCompactMode(true);
+        });
+    }
+
+    public void ShowExpanded()
+    {
+        Dispatcher.Invoke(() =>
+        {
+            _userHidden = false;
+            _hideRequestVersion++;
+            LargeParticleHelmet.CancelDissolve();
+            CompactParticleHelmet.CancelDissolve();
+            if (!IsVisible)
+            {
+                Show();
+            }
+            SetCompactMode(false);
+        });
+    }
+
     public void ShowReady() => ShowWaitingForWakeWord();
 
     public void ShowWaitingForWakeWord()
@@ -180,7 +212,7 @@ public partial class OverlayWindow : Window
         SetVoiceActive(false);
         ShowStatus(
             "语音尚未启动",
-            "右键选择“启动语音陪伴”；设置和退出也都在右键菜单中",
+            "右键可启动语音；启动后直接说“设置”“缩小”或“退出贾维斯”",
             System.Windows.Media.Color.FromRgb(104, 155, 177),
             ParticleHelmetState.Offline);
     }

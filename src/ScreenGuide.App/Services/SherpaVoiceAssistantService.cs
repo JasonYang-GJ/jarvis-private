@@ -422,6 +422,16 @@ internal sealed class SherpaVoiceAssistantService : IAsyncDisposable
         }
 
         var recognizedText = _recognizer.GetResult(_recognitionStream).Text;
+        if (AssistantUiCommandParser.TryParse(recognizedText, out _))
+        {
+            _recognizer.Reset(_recognitionStream);
+            _keywordSpotter!.Reset(_keywordStream!);
+            _state = VoiceListeningState.Paused;
+            RaiseStatus($"听到语音控制指令：{recognizedText}");
+            QuestionRecognized?.Invoke(this, new VoiceQuestionEventArgs(recognizedText));
+            return;
+        }
+
         if (WakePhraseMatcher.IsMatch(recognizedText))
         {
             ActivateQuestionListening();

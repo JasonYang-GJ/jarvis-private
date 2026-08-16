@@ -111,7 +111,6 @@ public partial class MainWindow : Window
                 _overlay.ShowAvatar(expanded: true);
                 if (GetCloudReadinessProblem() is null && _speechCapabilities is { IsReady: true })
                 {
-                    RequestForegroundCaptureConsentForSession();
                     StartBackgroundButton_Click(StartBackgroundButton, new RoutedEventArgs());
                 }
                 else
@@ -135,11 +134,6 @@ public partial class MainWindow : Window
             if (readinessProblem is not null || _speechCapabilities is not { IsReady: true })
             {
                 OpenSettings();
-            }
-
-            if (!_cloudAuthorization.IsGranted)
-            {
-                RequestForegroundCaptureConsentForSession();
             }
 
             StartBackgroundButton_Click(StartBackgroundButton, new RoutedEventArgs());
@@ -322,6 +316,12 @@ public partial class MainWindow : Window
 
         try
         {
+            if (AssistantUiCommandParser.TryParse(recognizedText, out var uiCommand))
+            {
+                await ExecuteAssistantUiCommandAsync(uiCommand, turnToken);
+                return;
+            }
+
             if (ConversationExitPhraseMatcher.IsMatch(recognizedText))
             {
                 _continuousConversationActive = false;
@@ -430,6 +430,39 @@ public partial class MainWindow : Window
                     ShowWaitingState();
                 }
             }
+        }
+    }
+
+    private async Task ExecuteAssistantUiCommandAsync(
+        AssistantUiCommand command,
+        CancellationToken cancellationToken)
+    {
+        switch (command)
+        {
+            case AssistantUiCommand.OpenSettings:
+                OpenSettings();
+                LastVoiceStatusText.Text = "语音指令已执行：打开设置。";
+                await SpeakAssistantTextAsync("设置已打开。", cancellationToken);
+                break;
+            case AssistantUiCommand.Compact:
+                _overlay.ShowCompact();
+                LastVoiceStatusText.Text = "语音指令已执行：缩小贾维斯。";
+                await SpeakAssistantTextAsync("已经缩小。", cancellationToken);
+                break;
+            case AssistantUiCommand.Expand:
+                _overlay.ShowExpanded();
+                LastVoiceStatusText.Text = "语音指令已执行：展开贾维斯。";
+                await SpeakAssistantTextAsync("已经展开。", cancellationToken);
+                break;
+            case AssistantUiCommand.Hide:
+                _overlay.HideToTray();
+                LastVoiceStatusText.Text = "语音指令已执行：隐藏贾维斯，语音仍在后台运行。";
+                await SpeakAssistantTextAsync("已经隐藏，我仍在后台。", cancellationToken);
+                break;
+            case AssistantUiCommand.ExitApplication:
+                LastVoiceStatusText.Text = "语音指令已执行：退出贾维斯。";
+                await ExitApplicationAsync();
+                break;
         }
     }
 

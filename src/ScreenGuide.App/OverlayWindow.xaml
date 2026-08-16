@@ -92,7 +92,7 @@
                                    FontWeight="SemiBold" />
                     </StackPanel>
                     <TextBlock x:Name="OverlayDetail"
-                               Text="右键可以启动语音、缩小或打开设置"
+                               Text="直接说“缩小”“设置”或“隐藏贾维斯”"
                                Width="330"
                                Margin="0,4,0,0"
                                TextAlignment="Center"
@@ -104,6 +104,7 @@
             </Border>
 
             <StackPanel x:Name="HoverControls"
+                        Visibility="Collapsed"
                         Orientation="Horizontal"
                         HorizontalAlignment="Right"
                         VerticalAlignment="Top"
@@ -128,7 +129,7 @@
               Height="112"
               HorizontalAlignment="Center"
               VerticalAlignment="Center"
-              ToolTip="双击展开，右键打开菜单">
+              ToolTip="说“展开贾维斯”恢复；右键菜单是备用操作">
             <controls:ParticleHelmetControl x:Name="CompactParticleHelmet"
                                             ParticleCount="780"
                                             Compact="True"
