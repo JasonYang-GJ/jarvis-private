@@ -1,9 +1,10 @@
 <Window x:Class="ScreenGuide.App.OverlayWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="贾维斯悬浮助手"
-        Width="410"
-        Height="500"
+        xmlns:controls="clr-namespace:ScreenGuide.App.Controls"
+        Title="贾维斯粒子助手"
+        Width="430"
+        Height="455"
         WindowStyle="None"
         ResizeMode="NoResize"
         AllowsTransparency="True"
@@ -11,14 +12,18 @@
         ShowInTaskbar="False"
         Topmost="True"
         Loaded="Window_Loaded"
+        MouseEnter="Window_MouseEnter"
+        MouseLeave="Window_MouseLeave"
         MouseLeftButtonDown="Window_MouseLeftButtonDown">
     <Window.Resources>
-        <Style x:Key="AvatarChromeButton" TargetType="Button">
-            <Setter Property="Foreground" Value="#DDEEFF" />
-            <Setter Property="Background" Value="#B20B1724" />
-            <Setter Property="BorderBrush" Value="#6A42D8FF" />
+        <Style x:Key="HoverActionButton" TargetType="Button">
+            <Setter Property="Foreground" Value="#EAFBFF" />
+            <Setter Property="Background" Value="#C9091721" />
+            <Setter Property="BorderBrush" Value="#7148E7FF" />
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="FontFamily" Value="Microsoft YaHei UI" />
+            <Setter Property="FontSize" Value="11" />
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="Button">
@@ -26,17 +31,17 @@
                                 Background="{TemplateBinding Background}"
                                 BorderBrush="{TemplateBinding BorderBrush}"
                                 BorderThickness="{TemplateBinding BorderThickness}"
-                                CornerRadius="15"
+                                CornerRadius="14"
                                 Padding="{TemplateBinding Padding}">
                             <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="Chrome" Property="Background" Value="#DE13293B" />
-                                <Setter TargetName="Chrome" Property="BorderBrush" Value="#C542D8FF" />
+                                <Setter TargetName="Chrome" Property="Background" Value="#EE102C3D" />
+                                <Setter TargetName="Chrome" Property="BorderBrush" Value="#D048E7FF" />
                             </Trigger>
                             <Trigger Property="IsPressed" Value="True">
-                                <Setter TargetName="Chrome" Property="Opacity" Value="0.72" />
+                                <Setter TargetName="Chrome" Property="Opacity" Value="0.65" />
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -44,6 +49,7 @@
             </Setter>
         </Style>
     </Window.Resources>
+
     <Grid x:Name="AvatarRoot" Background="Transparent">
         <Grid.ContextMenu>
             <ContextMenu FontFamily="Microsoft YaHei UI" FontSize="13">
@@ -59,122 +65,84 @@
         </Grid.ContextMenu>
 
         <Grid x:Name="LargeAvatarView">
-            <Grid.RowDefinitions>
-                <RowDefinition Height="*" />
-                <RowDefinition Height="Auto" />
-            </Grid.RowDefinitions>
+            <controls:ParticleHelmetControl x:Name="LargeParticleHelmet"
+                                            ParticleCount="4200"
+                                            Width="420"
+                                            Height="410"
+                                            HorizontalAlignment="Center"
+                                            VerticalAlignment="Top"
+                                            Margin="0,3,0,0" />
 
-            <Canvas IsHitTestVisible="False" ClipToBounds="False">
-                <Ellipse Width="9" Height="9" Canvas.Left="46" Canvas.Top="162" Fill="#B7FF344F" />
-                <Ellipse Width="5" Height="5" Canvas.Left="82" Canvas.Top="92" Fill="#A65DE7FF" />
-                <Ellipse Width="7" Height="7" Canvas.Left="324" Canvas.Top="126" Fill="#A9FF5B66" />
-                <Ellipse Width="4" Height="4" Canvas.Left="348" Canvas.Top="238" Fill="#B267E8FF" />
-                <Ellipse Width="6" Height="6" Canvas.Left="71" Canvas.Top="310" Fill="#9DFF6A6A" />
-                <Ellipse Width="4" Height="4" Canvas.Left="316" Canvas.Top="330" Fill="#A760DAFF" />
-            </Canvas>
-
-            <Grid Width="350" Height="390" HorizontalAlignment="Center" VerticalAlignment="Center">
-                <Ellipse x:Name="OuterRing" Width="340" Height="340"
-                         Stroke="#65F43F4F" StrokeThickness="2" StrokeDashArray="2,9"
-                         RenderTransformOrigin="0.5,0.5">
-                    <Ellipse.RenderTransform>
-                        <RotateTransform x:Name="OuterRingRotation" />
-                    </Ellipse.RenderTransform>
-                </Ellipse>
-                <Ellipse Width="310" Height="310" Stroke="#5147D9FF" StrokeThickness="1.5"
-                         StrokeDashArray="13,5" RenderTransformOrigin="0.5,0.5">
-                    <Ellipse.RenderTransform>
-                        <RotateTransform x:Name="InnerRingRotation" />
-                    </Ellipse.RenderTransform>
-                </Ellipse>
-                <Ellipse x:Name="StateHalo" Width="286" Height="286" Stroke="#FF42D8FF" StrokeThickness="9" Opacity="0.33">
-                    <Ellipse.Effect>
-                        <DropShadowEffect x:Name="HaloShadow" Color="#42D8FF" BlurRadius="36" ShadowDepth="0" Opacity="0.95" />
-                    </Ellipse.Effect>
-                </Ellipse>
-
-                <Grid Width="274" Height="300">
-                    <Grid.Effect>
-                        <DropShadowEffect Color="#B0000000" BlurRadius="30" ShadowDepth="12" Opacity="0.85" />
-                    </Grid.Effect>
-                    <Ellipse Stroke="#8AFFFFFF" StrokeThickness="1.5">
-                        <Ellipse.Fill>
-                            <ImageBrush x:Name="LargeAvatarBrush" Stretch="UniformToFill" />
-                        </Ellipse.Fill>
-                    </Ellipse>
-                    <Ellipse Stroke="#5B42D8FF" StrokeThickness="1">
-                        <Ellipse.Fill>
-                            <RadialGradientBrush Center="0.5,0.42" GradientOrigin="0.5,0.42" RadiusX="0.72" RadiusY="0.72">
-                                <GradientStop Color="#00000000" Offset="0.54" />
-                                <GradientStop Color="#3A01070E" Offset="0.78" />
-                                <GradientStop Color="#B801070E" Offset="1" />
-                            </RadialGradientBrush>
-                        </Ellipse.Fill>
-                    </Ellipse>
-                </Grid>
-
-                <Grid Width="286" Height="286" IsHitTestVisible="False">
-                    <Rectangle Height="2" Width="78" HorizontalAlignment="Left" Margin="-14,0,0,34"
-                               VerticalAlignment="Center" Fill="#7AFF344F" />
-                    <Rectangle Height="2" Width="78" HorizontalAlignment="Right" Margin="0,0,-14,34"
-                               VerticalAlignment="Center" Fill="#7A42D8FF" />
-                </Grid>
-
-                <StackPanel HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,10">
-                    <Border Background="#D9050B14" BorderBrush="#5942D8FF" BorderThickness="1"
-                            CornerRadius="18" Padding="16,8">
-                        <StackPanel Orientation="Horizontal">
-                            <Ellipse x:Name="StatusDot" Width="8" Height="8" Fill="#42D8FF" Margin="0,0,8,0" />
-                            <TextBlock x:Name="OverlayTitle" Text="贾维斯已就绪"
-                                       FontFamily="Microsoft YaHei UI" FontSize="13" FontWeight="SemiBold"
-                                       Foreground="#F4FAFF" />
-                        </StackPanel>
-                    </Border>
-                    <TextBlock x:Name="OverlayDetail" Text="右键可以启动语音、缩小或打开设置"
-                               Width="300" Margin="0,9,0,0" TextAlignment="Center"
-                               FontFamily="Microsoft YaHei UI" FontSize="11" Foreground="#A9C4D8"
-                               TextWrapping="Wrap" />
+            <Border x:Name="StatusPill"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Bottom"
+                    Margin="22,0,22,22"
+                    Padding="14,8"
+                    Background="#B8051018"
+                    BorderBrush="#6048E7FF"
+                    BorderThickness="1"
+                    CornerRadius="18"
+                    Opacity="0">
+                <StackPanel>
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                        <Border x:Name="StateAccentBorder" Width="7" Height="7" CornerRadius="4"
+                                Background="#48E7FF" Margin="0,0,8,0" VerticalAlignment="Center" />
+                        <TextBlock x:Name="OverlayTitle"
+                                   Text="贾维斯已就绪"
+                                   Foreground="#EAFBFF"
+                                   FontFamily="Microsoft YaHei UI"
+                                   FontSize="12"
+                                   FontWeight="SemiBold" />
+                    </StackPanel>
+                    <TextBlock x:Name="OverlayDetail"
+                               Text="右键可以启动语音、缩小或打开设置"
+                               Width="330"
+                               Margin="0,4,0,0"
+                               TextAlignment="Center"
+                               TextTrimming="CharacterEllipsis"
+                               Foreground="#91B7C9"
+                               FontFamily="Microsoft YaHei UI"
+                               FontSize="10.5" />
                 </StackPanel>
-            </Grid>
+            </Border>
 
-            <StackPanel Grid.Row="0" Orientation="Horizontal" HorizontalAlignment="Right"
-                        VerticalAlignment="Top" Margin="0,14,14,0">
+            <StackPanel x:Name="HoverControls"
+                        Orientation="Horizontal"
+                        HorizontalAlignment="Right"
+                        VerticalAlignment="Top"
+                        Margin="0,14,14,0"
+                        Opacity="0">
                 <Button Content="设置" ToolTip="打开设置" Click="SettingsButton_Click"
-                        Style="{StaticResource AvatarChromeButton}"
-                        Height="30" Padding="11,0" Margin="0,0,7,0" Cursor="Hand"
-                        FontFamily="Microsoft YaHei UI" FontSize="11" />
-                <Button Content="－" ToolTip="缩小成悬浮图标" Click="CompactButton_Click"
-                        Style="{StaticResource AvatarChromeButton}"
-                        Width="30" Height="30" Margin="0,0,7,0" FontSize="17" />
-                <Button Content="×" ToolTip="隐藏到右下角任务栏，语音继续运行" Click="HideButton_Click"
-                        Style="{StaticResource AvatarChromeButton}"
-                        Width="30" Height="30" FontSize="17"
-                        Foreground="#FFD5D9" Background="#B21D0B13"
-                        BorderBrush="#69FF344F" BorderThickness="1" />
+                        Style="{StaticResource HoverActionButton}"
+                        Height="28" Padding="10,0" Margin="0,0,6,0" />
+                <Button Content="－" ToolTip="缩小成粒子核心" Click="CompactButton_Click"
+                        Style="{StaticResource HoverActionButton}"
+                        Width="28" Height="28" Margin="0,0,6,0" FontSize="16" />
+                <Button Content="×" ToolTip="隐藏到任务栏，语音继续运行" Click="HideButton_Click"
+                        Style="{StaticResource HoverActionButton}"
+                        Width="28" Height="28" FontSize="16"
+                        Foreground="#FFD6DC" BorderBrush="#78E93045" />
             </StackPanel>
-
-            <TextBlock Grid.Row="1" Text="拖动可以移动 · 双击可以缩小 · 右键打开菜单"
-                       HorizontalAlignment="Center" Margin="0,0,0,8"
-                       FontFamily="Microsoft YaHei UI" FontSize="10" Foreground="#7891A5" />
         </Grid>
 
-        <Grid x:Name="CompactAvatarView" Visibility="Collapsed" Width="104" Height="104"
-              HorizontalAlignment="Center" VerticalAlignment="Center" ToolTip="双击展开，右键打开菜单">
-            <Ellipse x:Name="CompactOuterRing" Width="102" Height="102" Stroke="#A142D8FF"
-                     StrokeThickness="2.5" StrokeDashArray="3,4" />
-            <Ellipse x:Name="CompactHalo" Width="90" Height="90" Stroke="#FF42D8FF" StrokeThickness="6" Opacity="0.38">
-                <Ellipse.Effect>
-                    <DropShadowEffect x:Name="CompactHaloShadow" Color="#42D8FF" BlurRadius="20" ShadowDepth="0" Opacity="0.9" />
-                </Ellipse.Effect>
-            </Ellipse>
-            <Ellipse Width="82" Height="82" Stroke="#96FFFFFF" StrokeThickness="1">
-                <Ellipse.Fill>
-                    <ImageBrush x:Name="CompactAvatarBrush" Stretch="UniformToFill" />
-                </Ellipse.Fill>
-            </Ellipse>
-            <Ellipse x:Name="CompactStatusDot" Width="13" Height="13" Fill="#42D8FF"
-                     Stroke="#FF06101A" StrokeThickness="3" HorizontalAlignment="Right"
-                     VerticalAlignment="Bottom" Margin="0,0,8,8" />
+        <Grid x:Name="CompactAvatarView"
+              Visibility="Collapsed"
+              Width="112"
+              Height="112"
+              HorizontalAlignment="Center"
+              VerticalAlignment="Center"
+              ToolTip="双击展开，右键打开菜单">
+            <controls:ParticleHelmetControl x:Name="CompactParticleHelmet"
+                                            ParticleCount="1200"
+                                            Compact="True"
+                                            Width="112"
+                                            Height="112" />
+            <Border x:Name="CompactStateAccent"
+                    Width="9" Height="9" CornerRadius="5"
+                    Background="#48E7FF"
+                    BorderBrush="#E5030A0F" BorderThickness="2"
+                    HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                    Margin="0,0,8,8" />
         </Grid>
     </Grid>
 </Window>

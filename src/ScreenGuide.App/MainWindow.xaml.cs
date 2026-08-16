@@ -862,7 +862,6 @@ public partial class MainWindow : Window
         BrandImage.Visibility = Visibility.Visible;
         BrandFallback.Visibility = Visibility.Collapsed;
         Icon = image;
-        _overlay.SetAvatarImage(image);
     }
 
     private void OpenSettings()

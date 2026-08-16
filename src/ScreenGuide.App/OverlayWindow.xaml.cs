@@ -4,7 +4,8 @@ using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
-using System.Windows.Media.Imaging;
+using System.Windows.Threading;
+using ScreenGuide.App.Controls;
 
 namespace ScreenGuide.App;
 
@@ -17,9 +18,11 @@ public partial class OverlayWindow : Window
     private bool _isCompact;
     private bool _userHidden;
     private bool _voiceActive;
+    private int _hideRequestVersion;
     private string _lastTitle = "贾维斯已就绪";
     private string _lastDetail = "右键可以启动语音、缩小或打开设置";
-    private System.Windows.Media.Color _lastAccent = System.Windows.Media.Color.FromRgb(66, 216, 255);
+    private System.Windows.Media.Color _lastAccent = System.Windows.Media.Color.FromRgb(72, 231, 255);
+    private ParticleHelmetState _lastVisualState = ParticleHelmetState.Offline;
 
     public event EventHandler? SettingsRequested;
     public event EventHandler? StartVoiceRequested;
@@ -37,12 +40,6 @@ public partial class OverlayWindow : Window
         _stopShortcut = stopShortcut;
     }
 
-    public void SetAvatarImage(BitmapSource image)
-    {
-        LargeAvatarBrush.ImageSource = image;
-        CompactAvatarBrush.ImageSource = image;
-    }
-
     public void SetVoiceActive(bool active)
     {
         _voiceActive = active;
@@ -55,10 +52,21 @@ public partial class OverlayWindow : Window
         Dispatcher.Invoke(() =>
         {
             _userHidden = false;
+            _hideRequestVersion++;
+            LargeParticleHelmet.CancelDissolve();
+            CompactParticleHelmet.CancelDissolve();
             SetCompactMode(!expanded && _isCompact);
             if (!IsVisible)
             {
                 Show();
+            }
+            if (_isCompact)
+            {
+                CompactParticleHelmet.TriggerAssembly(0.65);
+            }
+            else
+            {
+                LargeParticleHelmet.TriggerAssembly(2.2);
             }
             Activate();
         });
@@ -66,8 +74,24 @@ public partial class OverlayWindow : Window
 
     public void HideToTray()
     {
-        _userHidden = true;
-        Hide();
+        Dispatcher.Invoke(() =>
+        {
+            _userHidden = true;
+            var requestVersion = ++_hideRequestVersion;
+            LargeParticleHelmet.PlayDissolve();
+            CompactParticleHelmet.PlayDissolve();
+
+            var timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(350) };
+            timer.Tick += (_, _) =>
+            {
+                timer.Stop();
+                if (_userHidden && requestVersion == _hideRequestVersion)
+                {
+                    Hide();
+                }
+            };
+            timer.Start();
+        });
     }
 
     public void ShowReady() => ShowWaitingForWakeWord();
@@ -78,15 +102,17 @@ public partial class OverlayWindow : Window
         ShowStatus(
             "贾维斯正在待命",
             $"说“你好贾维斯”；备用 {_voiceShortcut}；{_stopShortcut} 停止",
-            System.Windows.Media.Color.FromRgb(66, 216, 255));
+            System.Windows.Media.Color.FromRgb(72, 231, 255),
+            ParticleHelmetState.Waiting);
     }
 
     public void ShowListening()
     {
         ShowStatus(
             "我在，请直接说",
-            "说完后停顿一下，系统会自动结束本次录音",
-            System.Windows.Media.Color.FromRgb(69, 229, 255));
+            "说完后停顿一下，我会自动开始处理",
+            System.Windows.Media.Color.FromRgb(72, 231, 255),
+            ParticleHelmetState.Listening);
     }
 
     public void ShowRecognized(string text)
@@ -94,7 +120,8 @@ public partial class OverlayWindow : Window
         ShowStatus(
             "已经听清",
             text,
-            System.Windows.Media.Color.FromRgb(52, 225, 181));
+            System.Windows.Media.Color.FromRgb(205, 232, 244),
+            ParticleHelmetState.Recognized);
     }
 
     public void ShowProcessing(string title, string detail)
@@ -102,7 +129,8 @@ public partial class OverlayWindow : Window
         ShowStatus(
             title,
             string.IsNullOrWhiteSpace(detail) ? "请稍候…" : detail,
-            System.Windows.Media.Color.FromRgb(255, 84, 92));
+            System.Windows.Media.Color.FromRgb(255, 112, 69),
+            ParticleHelmetState.Thinking);
     }
 
     public void ShowAnswer(string answer)
@@ -112,7 +140,8 @@ public partial class OverlayWindow : Window
         ShowStatus(
             "贾维斯正在回答",
             preview,
-            System.Windows.Media.Color.FromRgb(66, 216, 255));
+            System.Windows.Media.Color.FromRgb(72, 231, 255),
+            ParticleHelmetState.Speaking);
     }
 
     public void ShowProblem(string message)
@@ -120,7 +149,8 @@ public partial class OverlayWindow : Window
         ShowStatus(
             "这次没有完成",
             message,
-            System.Windows.Media.Color.FromRgb(255, 67, 79));
+            System.Windows.Media.Color.FromRgb(233, 48, 69),
+            ParticleHelmetState.Alert);
     }
 
     public void ShowStopped()
@@ -129,17 +159,24 @@ public partial class OverlayWindow : Window
         ShowStatus(
             "语音尚未启动",
             "右键选择“启动语音陪伴”；设置和退出也都在右键菜单中",
-            System.Windows.Media.Color.FromRgb(126, 149, 166));
+            System.Windows.Media.Color.FromRgb(104, 155, 177),
+            ParticleHelmetState.Offline);
     }
 
-    private void ShowStatus(string title, string detail, System.Windows.Media.Color accent)
+    private void ShowStatus(
+        string title,
+        string detail,
+        System.Windows.Media.Color accent,
+        ParticleHelmetState visualState)
     {
         Dispatcher.Invoke(() =>
         {
             _lastTitle = title;
             _lastDetail = detail;
             _lastAccent = accent;
+            _lastVisualState = visualState;
             ApplyStatus();
+            RevealStatusTemporarily();
 
             if (!_userHidden && !IsVisible)
             {
@@ -152,13 +189,13 @@ public partial class OverlayWindow : Window
     {
         OverlayTitle.Text = _lastTitle;
         OverlayDetail.Text = _lastDetail;
+        AvatarRoot.ToolTip = $"{_lastTitle}\n{_lastDetail}";
         var accentBrush = new SolidColorBrush(_lastAccent);
-        StatusDot.Fill = accentBrush;
-        CompactStatusDot.Fill = accentBrush;
-        StateHalo.Stroke = accentBrush;
-        CompactHalo.Stroke = accentBrush;
-        HaloShadow.Color = _lastAccent;
-        CompactHaloShadow.Color = _lastAccent;
+        StateAccentBorder.Background = accentBrush;
+        CompactStateAccent.Background = accentBrush;
+        StatusPill.BorderBrush = new SolidColorBrush(System.Windows.Media.Color.FromArgb(105, _lastAccent.R, _lastAccent.G, _lastAccent.B));
+        LargeParticleHelmet.SetState(_lastVisualState);
+        CompactParticleHelmet.SetState(_lastVisualState);
     }
 
     private void Window_Loaded(object sender, RoutedEventArgs e)
@@ -168,34 +205,34 @@ public partial class OverlayWindow : Window
         extendedStyle |= WsExToolWindow;
         SetWindowLongPtr(handle, GwlExStyle, new IntPtr(extendedStyle));
 
-        StartAmbientAnimation();
         SetCompactMode(false);
         ApplyStatus();
+        LargeParticleHelmet.TriggerAssembly(2.2);
     }
 
-    private void StartAmbientAnimation()
+    private void Window_MouseEnter(object sender, System.Windows.Input.MouseEventArgs e)
     {
-        OuterRingRotation.BeginAnimation(
-            System.Windows.Media.RotateTransform.AngleProperty,
-            new DoubleAnimation(0, 360, TimeSpan.FromSeconds(24))
-            {
-                RepeatBehavior = RepeatBehavior.Forever
-            });
-        InnerRingRotation.BeginAnimation(
-            System.Windows.Media.RotateTransform.AngleProperty,
-            new DoubleAnimation(360, 0, TimeSpan.FromSeconds(18))
-            {
-                RepeatBehavior = RepeatBehavior.Forever
-            });
+        HoverControls.BeginAnimation(OpacityProperty, new DoubleAnimation(1, TimeSpan.FromMilliseconds(150)));
+        StatusPill.BeginAnimation(OpacityProperty, new DoubleAnimation(1, TimeSpan.FromMilliseconds(150)));
+    }
 
-        var pulse = new DoubleAnimation(0.22, 0.5, TimeSpan.FromSeconds(1.4))
+    private void Window_MouseLeave(object sender, System.Windows.Input.MouseEventArgs e)
+    {
+        HoverControls.BeginAnimation(OpacityProperty, new DoubleAnimation(0, TimeSpan.FromMilliseconds(260)));
+        StatusPill.BeginAnimation(OpacityProperty, new DoubleAnimation(0, TimeSpan.FromMilliseconds(320)));
+    }
+
+    private void RevealStatusTemporarily()
+    {
+        var animation = new DoubleAnimation
         {
-            AutoReverse = true,
-            RepeatBehavior = RepeatBehavior.Forever,
-            EasingFunction = new SineEase { EasingMode = EasingMode.EaseInOut }
+            From = 1,
+            To = 0,
+            Duration = TimeSpan.FromMilliseconds(450),
+            BeginTime = TimeSpan.FromSeconds(2.4),
+            FillBehavior = FillBehavior.HoldEnd
         };
-        StateHalo.BeginAnimation(OpacityProperty, pulse);
-        CompactHalo.BeginAnimation(OpacityProperty, pulse);
+        StatusPill.BeginAnimation(OpacityProperty, animation);
     }
 
     private void SetCompactMode(bool compact)
@@ -205,19 +242,21 @@ public partial class OverlayWindow : Window
         {
             LargeAvatarView.Visibility = Visibility.Collapsed;
             CompactAvatarView.Visibility = Visibility.Visible;
-            Width = 118;
-            Height = 118;
+            Width = 122;
+            Height = 122;
             SizeMenuItem.Header = "展开贾维斯";
             PositionCompact();
+            CompactParticleHelmet.TriggerAssembly(0.62);
         }
         else
         {
             CompactAvatarView.Visibility = Visibility.Collapsed;
             LargeAvatarView.Visibility = Visibility.Visible;
-            Width = 410;
-            Height = 500;
+            Width = 430;
+            Height = 455;
             SizeMenuItem.Header = "缩小贾维斯";
             PositionLarge();
+            LargeParticleHelmet.TriggerAssembly(1.35);
         }
     }
 
