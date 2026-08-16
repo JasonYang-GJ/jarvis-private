@@ -12,8 +12,8 @@ namespace ScreenGuide.App.Services;
 internal sealed class SherpaVoiceAssistantService : IAsyncDisposable
 {
     private const int SampleRate = 16000;
-    private const int QuestionTimeoutSeconds = 10;
-    private const string WakeWordTokens = "n ǐ h ǎo j iǎ w éi s ī :2.0 #0.18 @你好贾维斯";
+    private const int QuestionTimeoutSeconds = 12;
+    private const string WakeWordTokens = "n ǐ h ǎo j iǎ w éi s ī :1.6 #0.12 @你好贾维斯";
 
     private readonly object _lifecycleLock = new();
     private readonly object _modelLock = new();
@@ -228,8 +228,8 @@ internal sealed class SherpaVoiceAssistantService : IAsyncDisposable
         keywordConfig.ModelConfig.Provider = "cpu";
         keywordConfig.ModelConfig.NumThreads = 2;
         keywordConfig.ModelConfig.Debug = 0;
-        keywordConfig.KeywordsThreshold = 0.18F;
-        keywordConfig.KeywordsScore = 2.0F;
+        keywordConfig.KeywordsThreshold = 0.12F;
+        keywordConfig.KeywordsScore = 1.6F;
         keywordConfig.KeywordsFile = LocalVoiceModelPaths.WakeKeywordFile;
 
         var recognizerConfig = new OnlineRecognizerConfig();
@@ -244,9 +244,9 @@ internal sealed class SherpaVoiceAssistantService : IAsyncDisposable
         recognizerConfig.ModelConfig.Debug = 0;
         recognizerConfig.DecodingMethod = "greedy_search";
         recognizerConfig.EnableEndpoint = 1;
-        recognizerConfig.Rule1MinTrailingSilence = 4.0F;
-        recognizerConfig.Rule2MinTrailingSilence = 1.0F;
-        recognizerConfig.Rule3MinUtteranceLength = 15.0F;
+        recognizerConfig.Rule1MinTrailingSilence = 2.0F;
+        recognizerConfig.Rule2MinTrailingSilence = 0.75F;
+        recognizerConfig.Rule3MinUtteranceLength = 18.0F;
 
         _keywordSpotter = new KeywordSpotter(keywordConfig);
         _recognizer = new OnlineRecognizer(recognizerConfig);
@@ -286,7 +286,7 @@ internal sealed class SherpaVoiceAssistantService : IAsyncDisposable
 
     private void WindowsWakeRecognizer_SpeechRecognized(object? sender, SpeechRecognizedEventArgs e)
     {
-        if (e.Result.Confidence >= 0.35F && WakePhraseMatcher.IsMatch(e.Result.Text))
+        if (e.Result.Confidence >= 0.22F && WakePhraseMatcher.IsMatch(e.Result.Text))
         {
             BeginQuestionListening();
         }
@@ -440,6 +440,14 @@ internal sealed class SherpaVoiceAssistantService : IAsyncDisposable
             _keywordSpotter!.Reset(_keywordStream!);
             _state = VoiceListeningState.WaitingForWakeWord;
             RaiseStatus("没有听清，已继续等待“你好贾维斯”");
+            return;
+        }
+
+        if (WakePhraseMatcher.IsOnlyWakePhrase(result))
+        {
+            _questionTimer.Restart();
+            _state = VoiceListeningState.ListeningForQuestion;
+            RaiseStatus("唤醒成功，请直接说问题");
             return;
         }
 

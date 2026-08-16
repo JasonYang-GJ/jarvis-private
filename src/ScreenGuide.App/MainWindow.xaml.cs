@@ -1,7 +1,6 @@
 using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
-using System.Media;
 using System.Text;
 using System.Threading.Channels;
 using System.Windows;
@@ -274,7 +273,6 @@ public partial class MainWindow : Window
         _recognitionTimer = Stopwatch.StartNew();
         Dispatcher.BeginInvoke(() =>
         {
-            SystemSounds.Asterisk.Play();
             StatusLight.Fill = ListeningBrush;
             StatusTitle.Text = "我在，请说";
             StatusDescription.Text = "说完后停顿一下；识别会自动结束。";
@@ -347,8 +345,6 @@ public partial class MainWindow : Window
             StatusLight.Fill = IdleBrush;
             StatusTitle.Text = "回答超时，正在恢复";
             StatusDescription.Text = "本轮云端请求和语音播放已取消，不会继续卡住麦克风。";
-            SystemSounds.Exclamation.Play();
-
             using var recoverySpeechCancellation = CancellationTokenSource.CreateLinkedTokenSource(sessionToken);
             recoverySpeechCancellation.CancelAfter(TimeSpan.FromSeconds(5));
             try
