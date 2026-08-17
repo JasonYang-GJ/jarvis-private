@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Microsoft.Data.Sqlite;
 using ScreenGuide.Core.Tasking;
 using TaskStatus = ScreenGuide.Core.Tasking.TaskStatus;
@@ -8,6 +9,10 @@ namespace ScreenGuide.Persistence.Sqlite;
 
 public sealed class SqliteTaskStore : ILocalTaskStore
 {
+    private static readonly JsonSerializerOptions EvidenceJsonOptions = new(JsonSerializerDefaults.Web)
+    {
+        Converters = { new JsonStringEnumConverter() }
+    };
     private readonly string _databasePath;
     private readonly string _connectionString;
 
@@ -56,17 +61,26 @@ public sealed class SqliteTaskStore : ILocalTaskStore
                 $"数据库版本 {storedVersion} 高于当前支持的版本 {V01Contract.SchemaVersion}。");
         }
 
-        command.CommandText = SqliteSchema.CreateVersion1;
-        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        if (storedVersion < 1)
+        {
+            command.CommandText = SqliteSchema.CreateVersion1;
+            await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            await RecordSchemaVersionAsync(connection, 1, cancellationToken).ConfigureAwait(false);
+        }
 
-        command.CommandText = """
-            INSERT OR IGNORE INTO schema_info(version, applied_at_utc)
-            VALUES ($version, $appliedAtUtc);
-            """;
-        command.Parameters.Clear();
-        command.Parameters.AddWithValue("$version", V01Contract.SchemaVersion);
-        command.Parameters.AddWithValue("$appliedAtUtc", ToDb(DateTimeOffset.UtcNow));
-        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        if (storedVersion < 2)
+        {
+            command.CommandText = SqliteSchema.CreateVersion2;
+            await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            await RecordSchemaVersionAsync(connection, 2, cancellationToken).ConfigureAwait(false);
+        }
+
+        if (storedVersion < 3)
+        {
+            command.CommandText = SqliteSchema.CreateVersion3;
+            await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            await RecordSchemaVersionAsync(connection, 3, cancellationToken).ConfigureAwait(false);
+        }
     }
 
     public async Task UpsertDeviceAsync(
@@ -176,12 +190,52 @@ public sealed class SqliteTaskStore : ILocalTaskStore
             ReadDevice,
             cancellationToken);
 
+    public async Task<DeviceRecord?> GetLocalHostDeviceAsync(
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT * FROM devices
+            WHERE device_type = $deviceType AND trust_state = $trustState
+            ORDER BY created_at_utc, id
+            LIMIT 1;
+            """;
+        command.Parameters.AddWithValue("$deviceType", DeviceType.WindowsHost.ToString());
+        command.Parameters.AddWithValue("$trustState", DeviceTrustState.Local.ToString());
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        return await reader.ReadAsync(cancellationToken).ConfigureAwait(false) ? ReadDevice(reader) : null;
+    }
+
     public Task<ProjectRecord?> GetProjectAsync(Guid projectId, CancellationToken cancellationToken = default) =>
         QuerySingleAsync(
             "SELECT * FROM projects WHERE id = $id;",
             projectId,
             ReadProject,
             cancellationToken);
+
+    public async Task<IReadOnlyList<ProjectRecord>> GetAuthorizedProjectsAsync(
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT * FROM projects
+            WHERE authorization_state = $authorizationState
+            ORDER BY name COLLATE NOCASE, id;
+            """;
+        command.Parameters.AddWithValue(
+            "$authorizationState",
+            ProjectAuthorizationState.Authorized.ToString());
+        var projects = new List<ProjectRecord>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            projects.Add(ReadProject(reader));
+        }
+
+        return projects;
+    }
 
     public Task<AgentTask?> GetTaskAsync(Guid taskId, CancellationToken cancellationToken = default) =>
         QuerySingleAsync(
@@ -196,6 +250,72 @@ public sealed class SqliteTaskStore : ILocalTaskStore
             commandId,
             ReadCommand,
             cancellationToken);
+
+    public Task<AgentRunRecord?> GetAgentRunByTaskAsync(
+        Guid taskId,
+        CancellationToken cancellationToken = default) =>
+        QuerySingleAsync(
+            "SELECT * FROM agent_runs WHERE task_id = $id;",
+            taskId,
+            ReadAgentRun,
+            cancellationToken);
+
+    public async Task<IReadOnlyList<AgentAttemptRecord>> GetAgentAttemptsAsync(
+        Guid taskId,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT * FROM agent_attempts
+            WHERE task_id = $taskId
+            ORDER BY attempt_number;
+            """;
+        Add(command, "$taskId", taskId);
+        var attempts = new List<AgentAttemptRecord>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            attempts.Add(ReadAgentAttempt(reader));
+        }
+
+        return attempts;
+    }
+
+    public async Task<DecisionRequestRecord?> GetPendingDecisionRequestAsync(
+        Guid taskId,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT * FROM decision_requests
+            WHERE task_id = $taskId AND status = $status
+            ORDER BY created_at_utc DESC
+            LIMIT 1;
+            """;
+        Add(command, "$taskId", taskId);
+        command.Parameters.AddWithValue("$status", DecisionRequestStatus.Pending.ToString());
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        return await reader.ReadAsync(cancellationToken).ConfigureAwait(false)
+            ? ReadDecisionRequest(reader)
+            : null;
+    }
+
+    public async Task<TaskEvidence?> GetTaskEvidenceAsync(
+        Guid taskId,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT evidence_json FROM task_evidence WHERE task_id = $taskId;";
+        Add(command, "$taskId", taskId);
+        var value = await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false) as string;
+        return value is null
+            ? null
+            : JsonSerializer.Deserialize<TaskEvidence>(value, EvidenceJsonOptions)
+              ?? throw new InvalidDataException("TaskEvidence JSON 无效。 ");
+    }
 
     public async Task<CommandRegistrationResult> RegisterCommandAsync(
         CommandRecord command,
@@ -370,6 +490,511 @@ public sealed class SqliteTaskStore : ILocalTaskStore
             JsonSerializer.Serialize(new { task.ProjectId, sourceCommandId }),
             cancellationToken).ConfigureAwait(false);
         transaction.Commit();
+    }
+
+    public async Task CreateAgentAttemptAsync(
+        AgentRunRecord run,
+        AgentAttemptRecord attempt,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(run);
+        ArgumentNullException.ThrowIfNull(attempt);
+        RequireText(run.ConnectorId, nameof(run.ConnectorId));
+        RequireText(run.Transport, nameof(run.Transport));
+        RequireText(attempt.InputHash, nameof(attempt.InputHash));
+        if (attempt.AgentRunId != run.Id || attempt.TaskId != run.TaskId)
+        {
+            throw new ArgumentException("Agent Attempt 与 Agent Run 不匹配。", nameof(attempt));
+        }
+
+        await using var connection = await OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+        await using var transaction = connection.BeginTransaction();
+        var task = await GetTaskInTransactionAsync(
+            connection,
+            transaction,
+            run.TaskId,
+            cancellationToken).ConfigureAwait(false)
+            ?? throw new InvalidOperationException("任务不存在。");
+        var existing = await GetAgentRunInTransactionAsync(
+            connection,
+            transaction,
+            run.TaskId,
+            cancellationToken).ConfigureAwait(false);
+
+        if (existing is null)
+        {
+            if (attempt.Operation != AgentAttemptOperation.Start || task.Status != TaskStatus.Pending)
+            {
+                throw new InvalidOperationException("首次 Agent Attempt 必须从 Pending 任务启动。");
+            }
+
+            await InsertAgentRunAsync(connection, transaction, run, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        else
+        {
+            if (existing.Id != run.Id
+                || !string.Equals(existing.ConnectorId, run.ConnectorId, StringComparison.OrdinalIgnoreCase)
+                || !string.Equals(existing.Transport, run.Transport, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException("任务已经关联到另一个 Agent Run。");
+            }
+
+            if (attempt.Operation != AgentAttemptOperation.Resume
+                || task.Status is not (TaskStatus.WaitingForUser or TaskStatus.Interrupted))
+            {
+                throw new InvalidOperationException("只有 WaitingForUser 或 Interrupted 任务可以续接 Agent Thread。");
+            }
+
+            await UpdateAgentRunForNewAttemptAsync(
+                connection,
+                transaction,
+                existing.Id,
+                attempt.StartedAtUtc,
+                cancellationToken).ConfigureAwait(false);
+        }
+
+        var expectedAttemptNumber = await GetNextAttemptNumberAsync(
+            connection,
+            transaction,
+            run.Id,
+            cancellationToken).ConfigureAwait(false);
+        if (attempt.AttemptNumber != expectedAttemptNumber)
+        {
+            throw new InvalidOperationException(
+                $"Agent Attempt 序号必须为 {expectedAttemptNumber}。");
+        }
+
+        await InsertAgentAttemptAsync(connection, transaction, attempt, cancellationToken)
+            .ConfigureAwait(false);
+        if (attempt.Operation == AgentAttemptOperation.Resume)
+        {
+            await MarkPendingDecisionAnsweredAsync(
+                connection,
+                transaction,
+                attempt.TaskId,
+                attempt.CommandId,
+                attempt.StartedAtUtc,
+                cancellationToken).ConfigureAwait(false);
+        }
+
+        await InsertAuditAsync(
+            connection,
+            transaction,
+            attempt.StartedAtUtc,
+            null,
+            "AgentAttemptCreated",
+            "Task",
+            attempt.TaskId.ToString("D"),
+            AuditOutcome.Success,
+            JsonSerializer.Serialize(new
+            {
+                agentRunId = run.Id,
+                attemptId = attempt.Id,
+                attempt.AttemptNumber,
+                attempt.Operation,
+                connectorId = run.ConnectorId
+            }),
+            cancellationToken).ConfigureAwait(false);
+        transaction.Commit();
+    }
+
+    public async Task RecordAgentStartedAsync(
+        Guid taskId,
+        Guid agentRunId,
+        Guid attemptId,
+        string externalRunId,
+        string connectorVersion,
+        int processId,
+        DateTimeOffset startedAtUtc,
+        CancellationToken cancellationToken = default)
+    {
+        RequireText(externalRunId, nameof(externalRunId));
+        RequireText(connectorVersion, nameof(connectorVersion));
+        if (processId <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(processId));
+        }
+
+        await using var connection = await OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+        await using var transaction = connection.BeginTransaction();
+        var task = await GetTaskInTransactionAsync(connection, transaction, taskId, cancellationToken)
+            .ConfigureAwait(false)
+            ?? throw new InvalidOperationException("任务不存在。");
+        var run = await GetAgentRunByIdInTransactionAsync(
+            connection,
+            transaction,
+            agentRunId,
+            cancellationToken).ConfigureAwait(false)
+            ?? throw new InvalidOperationException("Agent Run 不存在。");
+        var attempt = await GetAgentAttemptInTransactionAsync(
+            connection,
+            transaction,
+            attemptId,
+            cancellationToken).ConfigureAwait(false)
+            ?? throw new InvalidOperationException("Agent Attempt 不存在。");
+        if (run.TaskId != taskId || attempt.AgentRunId != agentRunId || attempt.TaskId != taskId)
+        {
+            throw new InvalidOperationException("Agent 启动记录与任务不匹配。");
+        }
+
+        if (run.ExternalRunId is not null
+            && !string.Equals(run.ExternalRunId, externalRunId.Trim(), StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("续接返回了不同的 ExternalRunId。");
+        }
+
+        await using (var updateRun = connection.CreateCommand())
+        {
+            updateRun.Transaction = transaction;
+            updateRun.CommandText = """
+                UPDATE agent_runs
+                SET external_run_id = $externalRunId,
+                    connector_version = $connectorVersion,
+                    status = $status,
+                    updated_at_utc = $updatedAtUtc
+                WHERE id = $id;
+                """;
+            Add(updateRun, "$id", agentRunId);
+            updateRun.Parameters.AddWithValue("$externalRunId", externalRunId.Trim());
+            updateRun.Parameters.AddWithValue("$connectorVersion", connectorVersion.Trim());
+            updateRun.Parameters.AddWithValue("$status", AgentRunStatus.Running.ToString());
+            Add(updateRun, "$updatedAtUtc", startedAtUtc);
+            await updateRun.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        await using (var updateAttempt = connection.CreateCommand())
+        {
+            updateAttempt.Transaction = transaction;
+            updateAttempt.CommandText = """
+                UPDATE agent_attempts
+                SET status = $status,
+                    process_id = $processId,
+                    process_started_at_utc = $processStartedAtUtc
+                WHERE id = $id;
+                """;
+            Add(updateAttempt, "$id", attemptId);
+            updateAttempt.Parameters.AddWithValue("$status", AgentAttemptStatus.Running.ToString());
+            updateAttempt.Parameters.AddWithValue("$processId", processId);
+            Add(updateAttempt, "$processStartedAtUtc", startedAtUtc);
+            await updateAttempt.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        if (task.Status != TaskStatus.Running)
+        {
+            TaskStateMachine.EnsureTransition(task.Status, TaskStatus.Running);
+            var updatedTask = task with
+            {
+                Status = TaskStatus.Running,
+                UpdatedAtUtc = startedAtUtc,
+                StartedAtUtc = task.StartedAtUtc ?? startedAtUtc,
+                CompletedAtUtc = null,
+                Version = task.Version + 1
+            };
+            await UpdateTaskAsync(connection, transaction, task.Version, updatedTask, cancellationToken)
+                .ConfigureAwait(false);
+            await InsertTaskEventAsync(
+                connection,
+                transaction,
+                new TaskEventRecord
+                {
+                    Id = Guid.NewGuid(),
+                    TaskId = taskId,
+                    SequenceNumber = await GetNextSequenceAsync(
+                        connection,
+                        transaction,
+                        taskId,
+                        cancellationToken).ConfigureAwait(false),
+                    EventType = TaskEventType.StateChanged,
+                    FromStatus = task.Status,
+                    ToStatus = TaskStatus.Running,
+                    Source = TaskEventSource.Agent,
+                    OccurredAtUtc = startedAtUtc,
+                    Message = "Codex Turn 已启动。",
+                    DataJson = JsonSerializer.Serialize(new
+                    {
+                        agentRunId,
+                        attemptId,
+                        externalRunId = externalRunId.Trim()
+                    })
+                },
+                cancellationToken).ConfigureAwait(false);
+        }
+
+        await InsertAuditAsync(
+            connection,
+            transaction,
+            startedAtUtc,
+            null,
+            "AgentStarted",
+            "Task",
+            taskId.ToString("D"),
+            AuditOutcome.Success,
+            JsonSerializer.Serialize(new { agentRunId, attemptId, processId }),
+            cancellationToken).ConfigureAwait(false);
+        transaction.Commit();
+    }
+
+    public async Task RecordAgentCancellationRequestedAsync(
+        Guid taskId,
+        Guid attemptId,
+        DateTimeOffset requestedAtUtc,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+        await using var transaction = connection.BeginTransaction();
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            UPDATE agent_attempts
+            SET cancellation_requested_at_utc = COALESCE(cancellation_requested_at_utc, $requestedAtUtc)
+            WHERE id = $attemptId AND task_id = $taskId;
+            """;
+        Add(command, "$attemptId", attemptId);
+        Add(command, "$taskId", taskId);
+        Add(command, "$requestedAtUtc", requestedAtUtc);
+        if (await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) != 1)
+        {
+            throw new InvalidOperationException("找不到要取消的 Agent Attempt。");
+        }
+
+        await InsertAuditAsync(
+            connection,
+            transaction,
+            requestedAtUtc,
+            null,
+            "AgentCancellationRequested",
+            "Task",
+            taskId.ToString("D"),
+            AuditOutcome.Success,
+            JsonSerializer.Serialize(new { attemptId }),
+            cancellationToken).ConfigureAwait(false);
+        transaction.Commit();
+    }
+
+    public async Task<AgentEventApplyResult> ApplyAgentEventAsync(
+        AgentEventApplyRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        RequireText(request.ExternalEventId, nameof(request.ExternalEventId));
+        RequireText(request.EventKind, nameof(request.EventKind));
+        RequireText(request.Message, nameof(request.Message));
+        if (request.DataJson is not null)
+        {
+            ValidateJson(request.DataJson, nameof(request.DataJson));
+        }
+
+        if (request.FinalResultJson is not null)
+        {
+            ValidateJson(request.FinalResultJson, nameof(request.FinalResultJson));
+        }
+
+        await using var connection = await OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+        await using var transaction = connection.BeginTransaction();
+        var task = await GetTaskInTransactionAsync(
+            connection,
+            transaction,
+            request.TaskId,
+            cancellationToken).ConfigureAwait(false)
+            ?? throw new InvalidOperationException("任务不存在。");
+        var run = await GetAgentRunByIdInTransactionAsync(
+            connection,
+            transaction,
+            request.AgentRunId,
+            cancellationToken).ConfigureAwait(false)
+            ?? throw new InvalidOperationException("Agent Run 不存在。");
+        var attempt = await GetAgentAttemptInTransactionAsync(
+            connection,
+            transaction,
+            request.AttemptId,
+            cancellationToken).ConfigureAwait(false)
+            ?? throw new InvalidOperationException("Agent Attempt 不存在。");
+        if (run.TaskId != task.Id || attempt.TaskId != task.Id || attempt.AgentRunId != run.Id)
+        {
+            throw new InvalidOperationException("Agent 事件与任务关系不一致。");
+        }
+
+        await using (var insertEvent = connection.CreateCommand())
+        {
+            insertEvent.Transaction = transaction;
+            insertEvent.CommandText = """
+                INSERT OR IGNORE INTO agent_connector_events(
+                    id, agent_run_id, attempt_id, task_id, sequence_number,
+                    external_event_id, event_kind, run_status, occurred_at_utc,
+                    message, data_json)
+                VALUES(
+                    $id, $agentRunId, $attemptId, $taskId, $sequenceNumber,
+                    $externalEventId, $eventKind, $runStatus, $occurredAtUtc,
+                    $message, $dataJson);
+                """;
+            Add(insertEvent, "$id", Guid.NewGuid());
+            Add(insertEvent, "$agentRunId", request.AgentRunId);
+            Add(insertEvent, "$attemptId", request.AttemptId);
+            Add(insertEvent, "$taskId", request.TaskId);
+            insertEvent.Parameters.AddWithValue("$sequenceNumber", request.SequenceNumber);
+            insertEvent.Parameters.AddWithValue("$externalEventId", request.ExternalEventId.Trim());
+            insertEvent.Parameters.AddWithValue("$eventKind", request.EventKind.Trim());
+            insertEvent.Parameters.AddWithValue("$runStatus", request.RunStatus.ToString());
+            Add(insertEvent, "$occurredAtUtc", request.OccurredAtUtc);
+            insertEvent.Parameters.AddWithValue("$message", request.Message.Trim());
+            AddNullable(insertEvent, "$dataJson", request.DataJson);
+            if (await insertEvent.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) == 0)
+            {
+                transaction.Commit();
+                return new AgentEventApplyResult(false, task);
+            }
+        }
+
+        var requestedTaskStatus = request.TaskStatus;
+        var taskChanged = requestedTaskStatus.HasValue
+            && requestedTaskStatus.Value != task.Status;
+        var updatedTask = task;
+        if (taskChanged)
+        {
+            var nextTaskStatus = requestedTaskStatus!.Value;
+            TaskStateMachine.EnsureTransition(task.Status, nextTaskStatus);
+            updatedTask = task with
+            {
+                Status = nextTaskStatus,
+                UpdatedAtUtc = request.OccurredAtUtc,
+                StartedAtUtc = nextTaskStatus == TaskStatus.Running
+                    ? task.StartedAtUtc ?? request.OccurredAtUtc
+                    : task.StartedAtUtc,
+                CompletedAtUtc = TaskStateMachine.IsTerminal(nextTaskStatus)
+                    ? request.OccurredAtUtc
+                    : null,
+                FailureCode = nextTaskStatus == TaskStatus.Failed
+                    ? request.FailureCode
+                    : task.FailureCode,
+                FailureMessage = nextTaskStatus == TaskStatus.Failed
+                    ? request.FailureMessage
+                    : task.FailureMessage,
+                Version = task.Version + 1
+            };
+            await UpdateTaskAsync(connection, transaction, task.Version, updatedTask, cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        await using (var updateRun = connection.CreateCommand())
+        {
+            updateRun.Transaction = transaction;
+            updateRun.CommandText = """
+                UPDATE agent_runs SET
+                    status = $status,
+                    updated_at_utc = $updatedAtUtc,
+                    last_event_sequence = MAX(last_event_sequence, $lastEventSequence),
+                    last_event_type = $lastEventType,
+                    last_event_at_utc = $lastEventAtUtc,
+                    final_summary = COALESCE($finalSummary, final_summary),
+                    final_result_json = COALESCE($finalResultJson, final_result_json),
+                    failure_code = COALESCE($failureCode, failure_code),
+                    failure_message = COALESCE($failureMessage, failure_message)
+                WHERE id = $id;
+                """;
+            Add(updateRun, "$id", request.AgentRunId);
+            updateRun.Parameters.AddWithValue("$status", request.RunStatus.ToString());
+            Add(updateRun, "$updatedAtUtc", request.OccurredAtUtc);
+            updateRun.Parameters.AddWithValue("$lastEventSequence", request.SequenceNumber);
+            updateRun.Parameters.AddWithValue("$lastEventType", request.EventKind.Trim());
+            Add(updateRun, "$lastEventAtUtc", request.OccurredAtUtc);
+            AddNullable(updateRun, "$finalSummary", request.FinalSummary);
+            AddNullable(updateRun, "$finalResultJson", request.FinalResultJson);
+            AddNullable(updateRun, "$failureCode", request.FailureCode);
+            AddNullable(updateRun, "$failureMessage", request.FailureMessage);
+            await updateRun.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        await using (var updateAttempt = connection.CreateCommand())
+        {
+            updateAttempt.Transaction = transaction;
+            var terminal = request.AttemptStatus is AgentAttemptStatus.Completed
+                or AgentAttemptStatus.Failed
+                or AgentAttemptStatus.Cancelled
+                or AgentAttemptStatus.Interrupted;
+            updateAttempt.CommandText = """
+                UPDATE agent_attempts SET
+                    status = $status,
+                    terminal_event_at_utc = CASE WHEN $terminal THEN $terminalAtUtc ELSE terminal_event_at_utc END,
+                    terminal_event_type = CASE WHEN $terminal THEN $terminalEventType ELSE terminal_event_type END,
+                    exit_code = COALESCE($exitCode, exit_code),
+                    cancellation_confirmed_at_utc = CASE
+                        WHEN $cancelled THEN $terminalAtUtc
+                        ELSE cancellation_confirmed_at_utc
+                    END,
+                    last_event_sequence = MAX(last_event_sequence, $lastEventSequence),
+                    last_event_at_utc = $lastEventAtUtc
+                WHERE id = $id;
+                """;
+            Add(updateAttempt, "$id", request.AttemptId);
+            updateAttempt.Parameters.AddWithValue("$status", request.AttemptStatus.ToString());
+            updateAttempt.Parameters.AddWithValue("$terminal", terminal);
+            Add(updateAttempt, "$terminalAtUtc", request.OccurredAtUtc);
+            updateAttempt.Parameters.AddWithValue("$terminalEventType", request.EventKind.Trim());
+            updateAttempt.Parameters.AddWithValue(
+                "$cancelled",
+                request.AttemptStatus == AgentAttemptStatus.Cancelled);
+            AddNullable(updateAttempt, "$exitCode", request.ExitCode);
+            updateAttempt.Parameters.AddWithValue("$lastEventSequence", request.SequenceNumber);
+            Add(updateAttempt, "$lastEventAtUtc", request.OccurredAtUtc);
+            await updateAttempt.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        if (request.DecisionRequest is { } decision)
+        {
+            await InsertDecisionRequestAsync(
+                connection,
+                transaction,
+                decision,
+                cancellationToken).ConfigureAwait(false);
+        }
+
+        var taskEventType = taskChanged ? TaskEventType.StateChanged : TaskEventType.AgentEvent;
+        await InsertTaskEventAsync(
+            connection,
+            transaction,
+            new TaskEventRecord
+            {
+                Id = Guid.NewGuid(),
+                TaskId = task.Id,
+                SequenceNumber = await GetNextSequenceAsync(
+                    connection,
+                    transaction,
+                    task.Id,
+                    cancellationToken).ConfigureAwait(false),
+                EventType = taskEventType,
+                FromStatus = taskChanged ? task.Status : null,
+                ToStatus = taskChanged ? updatedTask.Status : null,
+                Source = TaskEventSource.Agent,
+                OccurredAtUtc = request.OccurredAtUtc,
+                Message = request.Message.Trim(),
+                DataJson = request.DataJson
+            },
+            cancellationToken).ConfigureAwait(false);
+
+        if (taskChanged || request.EventKind is "DecisionRequested" or "Completed" or "Failed" or "Cancelled" or "Interrupted")
+        {
+            await InsertAuditAsync(
+                connection,
+                transaction,
+                request.OccurredAtUtc,
+                null,
+                $"Agent{request.EventKind.Trim()}",
+                "Task",
+                task.Id.ToString("D"),
+                request.EventKind == "Failed" ? AuditOutcome.Failed : AuditOutcome.Success,
+                JsonSerializer.Serialize(new
+                {
+                    request.AgentRunId,
+                    request.AttemptId,
+                    request.SequenceNumber,
+                    taskStatus = request.TaskStatus
+                }),
+                cancellationToken).ConfigureAwait(false);
+        }
+
+        transaction.Commit();
+        return new AgentEventApplyResult(true, updatedTask);
     }
 
     public async Task<AgentTask> TransitionTaskAsync(
@@ -593,6 +1218,51 @@ public sealed class SqliteTaskStore : ILocalTaskStore
                 AuditOutcome.Success,
                 JsonSerializer.Serialize(new { previousStatus = current.Status }),
                 cancellationToken).ConfigureAwait(false);
+
+            await using (var updateRun = connection.CreateCommand())
+            {
+                updateRun.Transaction = transaction;
+                updateRun.CommandText = """
+                    UPDATE agent_runs
+                    SET status = $status,
+                        updated_at_utc = $updatedAtUtc,
+                        failure_code = COALESCE(failure_code, $failureCode),
+                        failure_message = COALESCE(failure_message, $failureMessage)
+                    WHERE task_id = $taskId
+                      AND status IN ($starting, $running, $waiting);
+                    """;
+                Add(updateRun, "$taskId", current.Id);
+                updateRun.Parameters.AddWithValue("$status", AgentRunStatus.Interrupted.ToString());
+                Add(updateRun, "$updatedAtUtc", recoveredAtUtc);
+                updateRun.Parameters.AddWithValue("$failureCode", "host_restarted");
+                updateRun.Parameters.AddWithValue(
+                    "$failureMessage",
+                    "Desktop Host 重启时 Agent 尚无权威终态。");
+                updateRun.Parameters.AddWithValue("$starting", AgentRunStatus.Starting.ToString());
+                updateRun.Parameters.AddWithValue("$running", AgentRunStatus.Running.ToString());
+                updateRun.Parameters.AddWithValue("$waiting", AgentRunStatus.WaitingForUser.ToString());
+                await updateRun.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            }
+
+            await using (var updateAttempt = connection.CreateCommand())
+            {
+                updateAttempt.Transaction = transaction;
+                updateAttempt.CommandText = """
+                    UPDATE agent_attempts
+                    SET status = $status,
+                        terminal_event_at_utc = COALESCE(terminal_event_at_utc, $terminalAtUtc),
+                        terminal_event_type = COALESCE(terminal_event_type, $terminalEventType)
+                    WHERE task_id = $taskId
+                      AND status IN ($starting, $running);
+                    """;
+                Add(updateAttempt, "$taskId", current.Id);
+                updateAttempt.Parameters.AddWithValue("$status", AgentAttemptStatus.Interrupted.ToString());
+                Add(updateAttempt, "$terminalAtUtc", recoveredAtUtc);
+                updateAttempt.Parameters.AddWithValue("$terminalEventType", "HostRecovery");
+                updateAttempt.Parameters.AddWithValue("$starting", AgentAttemptStatus.Starting.ToString());
+                updateAttempt.Parameters.AddWithValue("$running", AgentAttemptStatus.Running.ToString());
+                await updateAttempt.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            }
         }
 
         transaction.Commit();
@@ -622,7 +1292,7 @@ public sealed class SqliteTaskStore : ILocalTaskStore
     {
         await using var connection = await OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
         await using var command = connection.CreateCommand();
-        command.CommandText = "SELECT * FROM audit_log ORDER BY occurred_at_utc, id;";
+        command.CommandText = "SELECT * FROM audit_log ORDER BY occurred_at_utc, rowid;";
         var entries = new List<AuditLogEntry>();
         await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
         while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
@@ -631,6 +1301,86 @@ public sealed class SqliteTaskStore : ILocalTaskStore
         }
 
         return entries;
+    }
+
+    public async Task AppendAuditAsync(
+        AuditLogEntry entry,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(entry);
+        RequireText(entry.Action, nameof(entry.Action));
+        RequireText(entry.EntityType, nameof(entry.EntityType));
+        RequireText(entry.EntityId, nameof(entry.EntityId));
+        if (entry.DetailsJson is not null)
+        {
+            ValidateJson(entry.DetailsJson, nameof(entry.DetailsJson));
+        }
+
+        await using var connection = await OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+        await using var transaction = connection.BeginTransaction();
+        await InsertAuditAsync(
+            connection,
+            transaction,
+            entry.OccurredAtUtc,
+            entry.ActorDeviceId,
+            entry.Action.Trim(),
+            entry.EntityType.Trim(),
+            entry.EntityId.Trim(),
+            entry.Outcome,
+            entry.DetailsJson,
+            cancellationToken,
+            entry.Id).ConfigureAwait(false);
+        transaction.Commit();
+    }
+
+    public async Task UpsertTaskEvidenceAsync(
+        TaskEvidence evidence,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(evidence);
+        RequireText(evidence.UserSummary, nameof(evidence.UserSummary));
+        var json = JsonSerializer.Serialize(evidence, EvidenceJsonOptions);
+        ValidateJson(json, nameof(evidence));
+        await using var connection = await OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+        await using var transaction = connection.BeginTransaction();
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            INSERT INTO task_evidence(
+                id, task_id, generated_at_utc, verification_status, user_summary, evidence_json)
+            VALUES(
+                $id, $taskId, $generatedAtUtc, $verificationStatus, $userSummary, $evidenceJson)
+            ON CONFLICT(task_id) DO NOTHING;
+            """;
+        Add(command, "$id", evidence.Id);
+        Add(command, "$taskId", evidence.TaskId);
+        Add(command, "$generatedAtUtc", evidence.GeneratedAtUtc);
+        command.Parameters.AddWithValue("$verificationStatus", evidence.VerificationStatus.ToString());
+        command.Parameters.AddWithValue("$userSummary", evidence.UserSummary);
+        command.Parameters.AddWithValue("$evidenceJson", json);
+        var inserted = await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        if (inserted > 0)
+        {
+            await InsertAuditAsync(
+                    connection,
+                    transaction,
+                    evidence.GeneratedAtUtc,
+                    null,
+                    "TaskEvidenceRecorded",
+                    "Task",
+                    evidence.TaskId.ToString("D"),
+                    AuditOutcome.Success,
+                    JsonSerializer.Serialize(new
+                    {
+                        verificationStatus = evidence.VerificationStatus.ToString(),
+                        changedFileCount = evidence.Git.ChangedFiles.Count,
+                        testStatus = evidence.Tests.Status.ToString()
+                    }),
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        transaction.Commit();
     }
 
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
@@ -658,6 +1408,258 @@ public sealed class SqliteTaskStore : ILocalTaskStore
         Add(command, "$id", id);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
         return await reader.ReadAsync(cancellationToken).ConfigureAwait(false) ? map(reader) : null;
+    }
+
+    private static async Task RecordSchemaVersionAsync(
+        SqliteConnection connection,
+        int version,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            INSERT OR IGNORE INTO schema_info(version, applied_at_utc)
+            VALUES ($version, $appliedAtUtc);
+            """;
+        command.Parameters.AddWithValue("$version", version);
+        command.Parameters.AddWithValue("$appliedAtUtc", ToDb(DateTimeOffset.UtcNow));
+        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task<AgentRunRecord?> GetAgentRunInTransactionAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        Guid taskId,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = "SELECT * FROM agent_runs WHERE task_id = $taskId;";
+        Add(command, "$taskId", taskId);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        return await reader.ReadAsync(cancellationToken).ConfigureAwait(false)
+            ? ReadAgentRun(reader)
+            : null;
+    }
+
+    private static async Task<AgentRunRecord?> GetAgentRunByIdInTransactionAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        Guid agentRunId,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = "SELECT * FROM agent_runs WHERE id = $id;";
+        Add(command, "$id", agentRunId);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        return await reader.ReadAsync(cancellationToken).ConfigureAwait(false)
+            ? ReadAgentRun(reader)
+            : null;
+    }
+
+    private static async Task<AgentAttemptRecord?> GetAgentAttemptInTransactionAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        Guid attemptId,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = "SELECT * FROM agent_attempts WHERE id = $id;";
+        Add(command, "$id", attemptId);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        return await reader.ReadAsync(cancellationToken).ConfigureAwait(false)
+            ? ReadAgentAttempt(reader)
+            : null;
+    }
+
+    private static async Task InsertAgentRunAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        AgentRunRecord run,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            INSERT INTO agent_runs(
+                id, task_id, connector_id, transport, external_run_id,
+                connector_version, status, created_at_utc, updated_at_utc,
+                last_event_sequence, last_event_type, last_event_at_utc,
+                final_summary, final_result_json, failure_code, failure_message)
+            VALUES(
+                $id, $taskId, $connectorId, $transport, $externalRunId,
+                $connectorVersion, $status, $createdAtUtc, $updatedAtUtc,
+                $lastEventSequence, $lastEventType, $lastEventAtUtc,
+                $finalSummary, $finalResultJson, $failureCode, $failureMessage);
+            """;
+        Add(command, "$id", run.Id);
+        Add(command, "$taskId", run.TaskId);
+        command.Parameters.AddWithValue("$connectorId", run.ConnectorId.Trim());
+        command.Parameters.AddWithValue("$transport", run.Transport.Trim());
+        AddNullable(command, "$externalRunId", run.ExternalRunId);
+        AddNullable(command, "$connectorVersion", run.ConnectorVersion);
+        command.Parameters.AddWithValue("$status", run.Status.ToString());
+        Add(command, "$createdAtUtc", run.CreatedAtUtc);
+        Add(command, "$updatedAtUtc", run.UpdatedAtUtc);
+        command.Parameters.AddWithValue("$lastEventSequence", run.LastEventSequence);
+        AddNullable(command, "$lastEventType", run.LastEventType);
+        AddNullable(command, "$lastEventAtUtc", run.LastEventAtUtc);
+        AddNullable(command, "$finalSummary", run.FinalSummary);
+        AddNullable(command, "$finalResultJson", run.FinalResultJson);
+        AddNullable(command, "$failureCode", run.FailureCode);
+        AddNullable(command, "$failureMessage", run.FailureMessage);
+        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task InsertAgentAttemptAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        AgentAttemptRecord attempt,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            INSERT INTO agent_attempts(
+                id, agent_run_id, task_id, command_id, attempt_number,
+                operation, status, process_id, process_started_at_utc,
+                started_at_utc, terminal_event_at_utc, process_exited_at_utc,
+                terminal_event_type, exit_code, cancellation_requested_at_utc,
+                cancellation_confirmed_at_utc, last_event_sequence,
+                last_event_at_utc, input_hash)
+            VALUES(
+                $id, $agentRunId, $taskId, $commandId, $attemptNumber,
+                $operation, $status, $processId, $processStartedAtUtc,
+                $startedAtUtc, $terminalEventAtUtc, $processExitedAtUtc,
+                $terminalEventType, $exitCode, $cancellationRequestedAtUtc,
+                $cancellationConfirmedAtUtc, $lastEventSequence,
+                $lastEventAtUtc, $inputHash);
+            """;
+        Add(command, "$id", attempt.Id);
+        Add(command, "$agentRunId", attempt.AgentRunId);
+        Add(command, "$taskId", attempt.TaskId);
+        AddNullable(command, "$commandId", attempt.CommandId);
+        command.Parameters.AddWithValue("$attemptNumber", attempt.AttemptNumber);
+        command.Parameters.AddWithValue("$operation", attempt.Operation.ToString());
+        command.Parameters.AddWithValue("$status", attempt.Status.ToString());
+        AddNullable(command, "$processId", attempt.ProcessId);
+        AddNullable(command, "$processStartedAtUtc", attempt.ProcessStartedAtUtc);
+        Add(command, "$startedAtUtc", attempt.StartedAtUtc);
+        AddNullable(command, "$terminalEventAtUtc", attempt.TerminalEventAtUtc);
+        AddNullable(command, "$processExitedAtUtc", attempt.ProcessExitedAtUtc);
+        AddNullable(command, "$terminalEventType", attempt.TerminalEventType);
+        AddNullable(command, "$exitCode", attempt.ExitCode);
+        AddNullable(command, "$cancellationRequestedAtUtc", attempt.CancellationRequestedAtUtc);
+        AddNullable(command, "$cancellationConfirmedAtUtc", attempt.CancellationConfirmedAtUtc);
+        command.Parameters.AddWithValue("$lastEventSequence", attempt.LastEventSequence);
+        AddNullable(command, "$lastEventAtUtc", attempt.LastEventAtUtc);
+        command.Parameters.AddWithValue("$inputHash", attempt.InputHash.Trim());
+        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task UpdateAgentRunForNewAttemptAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        Guid agentRunId,
+        DateTimeOffset updatedAtUtc,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            UPDATE agent_runs
+            SET status = $status,
+                updated_at_utc = $updatedAtUtc,
+                final_summary = NULL,
+                final_result_json = NULL,
+                failure_code = NULL,
+                failure_message = NULL
+            WHERE id = $id;
+            """;
+        Add(command, "$id", agentRunId);
+        command.Parameters.AddWithValue("$status", AgentRunStatus.Starting.ToString());
+        Add(command, "$updatedAtUtc", updatedAtUtc);
+        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task<int> GetNextAttemptNumberAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        Guid agentRunId,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            SELECT COALESCE(MAX(attempt_number), 0) + 1
+            FROM agent_attempts
+            WHERE agent_run_id = $agentRunId;
+            """;
+        Add(command, "$agentRunId", agentRunId);
+        return Convert.ToInt32(
+            await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false),
+            CultureInfo.InvariantCulture);
+    }
+
+    private static async Task MarkPendingDecisionAnsweredAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        Guid taskId,
+        Guid? responseCommandId,
+        DateTimeOffset respondedAtUtc,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            UPDATE decision_requests
+            SET status = $answered,
+                responded_at_utc = $respondedAtUtc,
+                response_command_id = $responseCommandId
+            WHERE task_id = $taskId AND status = $pending;
+            """;
+        Add(command, "$taskId", taskId);
+        command.Parameters.AddWithValue("$answered", DecisionRequestStatus.Answered.ToString());
+        Add(command, "$respondedAtUtc", respondedAtUtc);
+        AddNullable(command, "$responseCommandId", responseCommandId);
+        command.Parameters.AddWithValue("$pending", DecisionRequestStatus.Pending.ToString());
+        if (await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) != 1)
+        {
+            throw new InvalidOperationException("没有可回答的待处理 Decision Request。");
+        }
+    }
+
+    private static async Task InsertDecisionRequestAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        DecisionRequestRecord decision,
+        CancellationToken cancellationToken)
+    {
+        ValidateJson(decision.OptionsJson, nameof(decision.OptionsJson));
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            INSERT INTO decision_requests(
+                id, task_id, agent_run_id, attempt_id, question,
+                options_json, status, created_at_utc, responded_at_utc,
+                response_command_id)
+            VALUES(
+                $id, $taskId, $agentRunId, $attemptId, $question,
+                $optionsJson, $status, $createdAtUtc, $respondedAtUtc,
+                $responseCommandId);
+            """;
+        Add(command, "$id", decision.Id);
+        Add(command, "$taskId", decision.TaskId);
+        Add(command, "$agentRunId", decision.AgentRunId);
+        Add(command, "$attemptId", decision.AttemptId);
+        command.Parameters.AddWithValue("$question", decision.Question.Trim());
+        command.Parameters.AddWithValue("$optionsJson", decision.OptionsJson);
+        command.Parameters.AddWithValue("$status", decision.Status.ToString());
+        Add(command, "$createdAtUtc", decision.CreatedAtUtc);
+        AddNullable(command, "$respondedAtUtc", decision.RespondedAtUtc);
+        AddNullable(command, "$responseCommandId", decision.ResponseCommandId);
+        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 
     private async Task<CommandRecord?> GetCommandByIdempotencyKeyAsync(
@@ -857,7 +1859,8 @@ public sealed class SqliteTaskStore : ILocalTaskStore
         string entityId,
         AuditOutcome outcome,
         string? detailsJson,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Guid? entryId = null)
     {
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
@@ -869,7 +1872,7 @@ public sealed class SqliteTaskStore : ILocalTaskStore
                 $id, $occurredAtUtc, $actorDeviceId, $action,
                 $entityType, $entityId, $outcome, $detailsJson);
             """;
-        Add(command, "$id", Guid.NewGuid());
+        Add(command, "$id", entryId ?? Guid.NewGuid());
         Add(command, "$occurredAtUtc", occurredAtUtc);
         AddNullable(command, "$actorDeviceId", actorDeviceId);
         command.Parameters.AddWithValue("$action", action);
@@ -979,6 +1982,63 @@ public sealed class SqliteTaskStore : ILocalTaskStore
         DataJson = ReadNullableString(reader, "data_json")
     };
 
+    private static AgentRunRecord ReadAgentRun(SqliteDataReader reader) => new()
+    {
+        Id = ReadGuid(reader, "id"),
+        TaskId = ReadGuid(reader, "task_id"),
+        ConnectorId = reader.GetString(reader.GetOrdinal("connector_id")),
+        Transport = reader.GetString(reader.GetOrdinal("transport")),
+        ExternalRunId = ReadNullableString(reader, "external_run_id"),
+        ConnectorVersion = ReadNullableString(reader, "connector_version"),
+        Status = ReadEnum<AgentRunStatus>(reader, "status"),
+        CreatedAtUtc = ReadDateTime(reader, "created_at_utc"),
+        UpdatedAtUtc = ReadDateTime(reader, "updated_at_utc"),
+        LastEventSequence = reader.GetInt64(reader.GetOrdinal("last_event_sequence")),
+        LastEventType = ReadNullableString(reader, "last_event_type"),
+        LastEventAtUtc = ReadNullableDateTime(reader, "last_event_at_utc"),
+        FinalSummary = ReadNullableString(reader, "final_summary"),
+        FinalResultJson = ReadNullableString(reader, "final_result_json"),
+        FailureCode = ReadNullableString(reader, "failure_code"),
+        FailureMessage = ReadNullableString(reader, "failure_message")
+    };
+
+    private static AgentAttemptRecord ReadAgentAttempt(SqliteDataReader reader) => new()
+    {
+        Id = ReadGuid(reader, "id"),
+        AgentRunId = ReadGuid(reader, "agent_run_id"),
+        TaskId = ReadGuid(reader, "task_id"),
+        CommandId = ReadNullableGuid(reader, "command_id"),
+        AttemptNumber = reader.GetInt32(reader.GetOrdinal("attempt_number")),
+        Operation = ReadEnum<AgentAttemptOperation>(reader, "operation"),
+        Status = ReadEnum<AgentAttemptStatus>(reader, "status"),
+        ProcessId = ReadNullableInt32(reader, "process_id"),
+        ProcessStartedAtUtc = ReadNullableDateTime(reader, "process_started_at_utc"),
+        StartedAtUtc = ReadDateTime(reader, "started_at_utc"),
+        TerminalEventAtUtc = ReadNullableDateTime(reader, "terminal_event_at_utc"),
+        ProcessExitedAtUtc = ReadNullableDateTime(reader, "process_exited_at_utc"),
+        TerminalEventType = ReadNullableString(reader, "terminal_event_type"),
+        ExitCode = ReadNullableInt32(reader, "exit_code"),
+        CancellationRequestedAtUtc = ReadNullableDateTime(reader, "cancellation_requested_at_utc"),
+        CancellationConfirmedAtUtc = ReadNullableDateTime(reader, "cancellation_confirmed_at_utc"),
+        LastEventSequence = reader.GetInt64(reader.GetOrdinal("last_event_sequence")),
+        LastEventAtUtc = ReadNullableDateTime(reader, "last_event_at_utc"),
+        InputHash = reader.GetString(reader.GetOrdinal("input_hash"))
+    };
+
+    private static DecisionRequestRecord ReadDecisionRequest(SqliteDataReader reader) => new()
+    {
+        Id = ReadGuid(reader, "id"),
+        TaskId = ReadGuid(reader, "task_id"),
+        AgentRunId = ReadGuid(reader, "agent_run_id"),
+        AttemptId = ReadGuid(reader, "attempt_id"),
+        Question = reader.GetString(reader.GetOrdinal("question")),
+        OptionsJson = reader.GetString(reader.GetOrdinal("options_json")),
+        Status = ReadEnum<DecisionRequestStatus>(reader, "status"),
+        CreatedAtUtc = ReadDateTime(reader, "created_at_utc"),
+        RespondedAtUtc = ReadNullableDateTime(reader, "responded_at_utc"),
+        ResponseCommandId = ReadNullableGuid(reader, "response_command_id")
+    };
+
     private static AuditLogEntry ReadAudit(SqliteDataReader reader) => new()
     {
         Id = ReadGuid(reader, "id"),
@@ -1043,6 +2103,12 @@ public sealed class SqliteTaskStore : ILocalTaskStore
     {
         var ordinal = reader.GetOrdinal(name);
         return reader.IsDBNull(ordinal) ? null : reader.GetString(ordinal);
+    }
+
+    private static int? ReadNullableInt32(SqliteDataReader reader, string name)
+    {
+        var ordinal = reader.GetOrdinal(name);
+        return reader.IsDBNull(ordinal) ? null : reader.GetInt32(ordinal);
     }
 
     private static T ReadEnum<T>(SqliteDataReader reader, string name)

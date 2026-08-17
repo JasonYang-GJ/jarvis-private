@@ -1,0 +1,206 @@
+using System.Text.Json;
+using Microsoft.Extensions.Logging;
+using ScreenGuide.Core.Tasking;
+using ScreenGuide.Evidence;
+using ScreenGuide.Persistence.Runtime;
+
+namespace ScreenGuide.DesktopHost.Runtime;
+
+public sealed class DesktopHostRuntime(
+    ILocalTaskStore store,
+    LocalDeviceInitializer deviceInitializer,
+    TaskRecoveryService recoveryService,
+    TaskCancellationService cancellationService,
+    TaskCancellationRegistry cancellationRegistry,
+    AgentConnectorRegistry connectorRegistry,
+    AgentTaskExecutionService executionService,
+    TaskEvidenceService evidenceService,
+    DesktopHostState state,
+    TimeProvider timeProvider,
+    ILogger<DesktopHostRuntime> logger)
+{
+    private readonly SemaphoreSlim _lifecycleGate = new(1, 1);
+
+    public TaskCancellationService CancellationService => cancellationService;
+
+    public TaskCancellationRegistry CancellationRegistry => cancellationRegistry;
+
+    public async Task StartAsync(CancellationToken cancellationToken = default)
+    {
+        await _lifecycleGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        var storeInitialized = false;
+        DeviceRecord? localDevice = null;
+        try
+        {
+            if (state.Snapshot.IsStarted)
+            {
+                return;
+            }
+
+            await store.InitializeAsync(cancellationToken).ConfigureAwait(false);
+            storeInitialized = true;
+            localDevice = await deviceInitializer.InitializeAsync(cancellationToken).ConfigureAwait(false);
+            await AppendAuditAsync(
+                "HostStarting",
+                localDevice.Id,
+                AuditOutcome.Success,
+                null,
+                cancellationToken).ConfigureAwait(false);
+
+            var projects = await store.GetAuthorizedProjectsAsync(cancellationToken).ConfigureAwait(false);
+            var recovery = await recoveryService.RecoverAsync(
+                timeProvider.GetUtcNow(),
+                cancellationToken).ConfigureAwait(false);
+            await evidenceService.FinalizeRecoveredTasksAsync(
+                    recovery.InterruptedTaskIds,
+                    cancellationToken)
+                .ConfigureAwait(false);
+            connectorRegistry.Initialize();
+            var connectorIds = connectorRegistry.ConnectorIds;
+            state.MarkStarted(localDevice, projects, recovery.InterruptedTaskIds, connectorIds);
+            await AppendAuditAsync(
+                "HostStarted",
+                localDevice.Id,
+                AuditOutcome.Success,
+                JsonSerializer.Serialize(new
+                {
+                    authorizedProjectCount = projects.Count,
+                    recoveredTaskCount = recovery.InterruptedTaskIds.Count,
+                    connectorCount = connectorIds.Count
+                }),
+                cancellationToken).ConfigureAwait(false);
+            logger.LogInformation(
+                "Desktop Host started with {ProjectCount} authorized projects and {ConnectorCount} connectors.",
+                projects.Count,
+                connectorIds.Count);
+        }
+        catch (Exception exception)
+        {
+            state.MarkStopped();
+            logger.LogCritical(exception, "Desktop Host startup failed.");
+            if (storeInitialized)
+            {
+                await TryAppendFailureAuditAsync(
+                    "HostStartupFailed",
+                    localDevice?.Id,
+                    exception,
+                    cancellationToken).ConfigureAwait(false);
+            }
+
+            throw;
+        }
+        finally
+        {
+            _lifecycleGate.Release();
+        }
+    }
+
+    public async Task StopAsync(CancellationToken cancellationToken = default)
+    {
+        await _lifecycleGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var snapshot = state.Snapshot;
+            if (!snapshot.IsStarted)
+            {
+                return;
+            }
+
+            Exception? shutdownFailure = null;
+            try
+            {
+                await executionService.StopAsync(cancellationToken).ConfigureAwait(false);
+                await AppendAuditAsync(
+                    "HostStopping",
+                    snapshot.LocalDevice?.Id,
+                    AuditOutcome.Success,
+                    null,
+                    cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception exception)
+            {
+                shutdownFailure = exception;
+            }
+            finally
+            {
+                cancellationRegistry.Dispose();
+                state.MarkStopped();
+            }
+
+            if (shutdownFailure is null)
+            {
+                try
+                {
+                    await AppendAuditAsync(
+                        "HostStopped",
+                        snapshot.LocalDevice?.Id,
+                        AuditOutcome.Success,
+                        null,
+                        cancellationToken).ConfigureAwait(false);
+                    logger.LogInformation("Desktop Host stopped.");
+                    return;
+                }
+                catch (Exception exception)
+                {
+                    shutdownFailure = exception;
+                }
+            }
+
+            logger.LogError(shutdownFailure, "Desktop Host shutdown failed.");
+            await TryAppendFailureAuditAsync(
+                "HostShutdownFailed",
+                snapshot.LocalDevice?.Id,
+                shutdownFailure,
+                CancellationToken.None).ConfigureAwait(false);
+        }
+        finally
+        {
+            _lifecycleGate.Release();
+        }
+    }
+
+    private Task AppendAuditAsync(
+        string action,
+        Guid? actorDeviceId,
+        AuditOutcome outcome,
+        string? detailsJson,
+        CancellationToken cancellationToken) =>
+        store.AppendAuditAsync(
+            new AuditLogEntry
+            {
+                Id = Guid.NewGuid(),
+                OccurredAtUtc = timeProvider.GetUtcNow(),
+                ActorDeviceId = actorDeviceId,
+                Action = action,
+                EntityType = "DesktopHost",
+                EntityId = actorDeviceId?.ToString("D") ?? "local-host",
+                Outcome = outcome,
+                DetailsJson = detailsJson
+            },
+            cancellationToken);
+
+    private async Task TryAppendFailureAuditAsync(
+        string action,
+        Guid? actorDeviceId,
+        Exception exception,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await AppendAuditAsync(
+                action,
+                actorDeviceId,
+                AuditOutcome.Failed,
+                JsonSerializer.Serialize(new
+                {
+                    exceptionType = exception.GetType().FullName,
+                    exception.Message
+                }),
+                cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception auditException)
+        {
+            logger.LogError(auditException, "Failed to record Desktop Host failure audit.");
+        }
+    }
+}

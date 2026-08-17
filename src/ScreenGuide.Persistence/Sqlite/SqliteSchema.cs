@@ -113,4 +113,109 @@ internal static class SqliteSchema
         CREATE INDEX IF NOT EXISTS ix_commands_task ON commands(task_id);
         CREATE INDEX IF NOT EXISTS ix_audit_log_time ON audit_log(occurred_at_utc);
         """;
+
+    public const string CreateVersion2 = """
+        CREATE TABLE IF NOT EXISTS agent_runs (
+            id TEXT NOT NULL PRIMARY KEY,
+            task_id TEXT NOT NULL UNIQUE,
+            connector_id TEXT NOT NULL,
+            transport TEXT NOT NULL,
+            external_run_id TEXT NULL,
+            connector_version TEXT NULL,
+            status TEXT NOT NULL,
+            created_at_utc TEXT NOT NULL,
+            updated_at_utc TEXT NOT NULL,
+            last_event_sequence INTEGER NOT NULL,
+            last_event_type TEXT NULL,
+            last_event_at_utc TEXT NULL,
+            final_summary TEXT NULL,
+            final_result_json TEXT NULL,
+            failure_code TEXT NULL,
+            failure_message TEXT NULL,
+            FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS agent_attempts (
+            id TEXT NOT NULL PRIMARY KEY,
+            agent_run_id TEXT NOT NULL,
+            task_id TEXT NOT NULL,
+            command_id TEXT NULL,
+            attempt_number INTEGER NOT NULL,
+            operation TEXT NOT NULL,
+            status TEXT NOT NULL,
+            process_id INTEGER NULL,
+            process_started_at_utc TEXT NULL,
+            started_at_utc TEXT NOT NULL,
+            terminal_event_at_utc TEXT NULL,
+            process_exited_at_utc TEXT NULL,
+            terminal_event_type TEXT NULL,
+            exit_code INTEGER NULL,
+            cancellation_requested_at_utc TEXT NULL,
+            cancellation_confirmed_at_utc TEXT NULL,
+            last_event_sequence INTEGER NOT NULL,
+            last_event_at_utc TEXT NULL,
+            input_hash TEXT NOT NULL,
+            FOREIGN KEY (agent_run_id) REFERENCES agent_runs(id) ON DELETE CASCADE,
+            FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+            FOREIGN KEY (command_id) REFERENCES commands(id),
+            UNIQUE (agent_run_id, attempt_number)
+        );
+
+        CREATE TABLE IF NOT EXISTS agent_connector_events (
+            id TEXT NOT NULL PRIMARY KEY,
+            agent_run_id TEXT NOT NULL,
+            attempt_id TEXT NOT NULL,
+            task_id TEXT NOT NULL,
+            sequence_number INTEGER NOT NULL,
+            external_event_id TEXT NOT NULL,
+            event_kind TEXT NOT NULL,
+            run_status TEXT NOT NULL,
+            occurred_at_utc TEXT NOT NULL,
+            message TEXT NOT NULL,
+            data_json TEXT NULL,
+            FOREIGN KEY (agent_run_id) REFERENCES agent_runs(id) ON DELETE CASCADE,
+            FOREIGN KEY (attempt_id) REFERENCES agent_attempts(id) ON DELETE CASCADE,
+            FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+            UNIQUE (attempt_id, external_event_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS decision_requests (
+            id TEXT NOT NULL PRIMARY KEY,
+            task_id TEXT NOT NULL,
+            agent_run_id TEXT NOT NULL,
+            attempt_id TEXT NOT NULL,
+            question TEXT NOT NULL,
+            options_json TEXT NOT NULL,
+            status TEXT NOT NULL,
+            created_at_utc TEXT NOT NULL,
+            responded_at_utc TEXT NULL,
+            response_command_id TEXT NULL,
+            FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+            FOREIGN KEY (agent_run_id) REFERENCES agent_runs(id) ON DELETE CASCADE,
+            FOREIGN KEY (attempt_id) REFERENCES agent_attempts(id) ON DELETE CASCADE,
+            FOREIGN KEY (response_command_id) REFERENCES commands(id)
+        );
+
+        CREATE INDEX IF NOT EXISTS ix_agent_runs_status ON agent_runs(status);
+        CREATE INDEX IF NOT EXISTS ix_agent_attempts_task ON agent_attempts(task_id, attempt_number);
+        CREATE INDEX IF NOT EXISTS ix_agent_events_task ON agent_connector_events(task_id, sequence_number);
+        CREATE UNIQUE INDEX IF NOT EXISTS ux_pending_decision_per_task
+            ON decision_requests(task_id)
+            WHERE status = 'Pending';
+        """;
+
+    public const string CreateVersion3 = """
+        CREATE TABLE IF NOT EXISTS task_evidence (
+            id TEXT NOT NULL PRIMARY KEY,
+            task_id TEXT NOT NULL UNIQUE,
+            generated_at_utc TEXT NOT NULL,
+            verification_status TEXT NOT NULL,
+            user_summary TEXT NOT NULL,
+            evidence_json TEXT NOT NULL,
+            FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS ix_task_evidence_verification
+            ON task_evidence(verification_status, generated_at_utc);
+        """;
 }

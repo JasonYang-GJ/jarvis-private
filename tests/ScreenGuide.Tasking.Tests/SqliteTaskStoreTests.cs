@@ -185,4 +185,198 @@ public sealed class SqliteTaskStoreTests
                 TaskEventSource.System,
                 "Invalid restart."));
     }
+
+    [Fact]
+    public async Task AgentEventIsIdempotentAtSqliteBoundary()
+    {
+        await using var environment = await TaskStoreTestEnvironment.CreateAsync();
+        var (task, _) = await environment.CreateTaskAsync();
+        var now = DateTimeOffset.UtcNow;
+        var (run, attempt) = NewAgentAttempt(task, now);
+        await environment.Store.CreateAgentAttemptAsync(run, attempt);
+        await environment.Store.RecordAgentStartedAsync(
+            task.Id,
+            run.Id,
+            attempt.Id,
+            "thread-test-id",
+            "codex-cli 0.151.0",
+            1234,
+            now);
+        var request = new AgentEventApplyRequest
+        {
+            TaskId = task.Id,
+            AgentRunId = run.Id,
+            AttemptId = attempt.Id,
+            SequenceNumber = 2,
+            ExternalEventId = "same-terminal-event",
+            EventKind = "Completed",
+            RunStatus = AgentRunStatus.Succeeded,
+            AttemptStatus = AgentAttemptStatus.Completed,
+            TaskStatus = AgentTaskStatus.Succeeded,
+            OccurredAtUtc = now.AddSeconds(1),
+            Message = "Authoritative turn.completed received.",
+            FinalSummary = "done",
+            FinalResultJson = "{\"outcome\":\"completed\"}",
+            ExitCode = 0
+        };
+
+        var first = await environment.Store.ApplyAgentEventAsync(request);
+        var duplicate = await environment.Store.ApplyAgentEventAsync(request);
+        var events = await environment.Store.GetTaskEventsAsync(task.Id);
+
+        Assert.True(first.Applied);
+        Assert.False(duplicate.Applied);
+        Assert.Single(events, item => item.ToStatus == AgentTaskStatus.Succeeded);
+        Assert.Equal(AgentTaskStatus.Succeeded, duplicate.Task.Status);
+    }
+
+    [Fact]
+    public async Task RecoveryInterruptsAgentRunAndAttemptButPreservesThreadId()
+    {
+        await using var environment = await TaskStoreTestEnvironment.CreateAsync();
+        var (task, _) = await environment.CreateTaskAsync();
+        var now = DateTimeOffset.UtcNow;
+        var (run, attempt) = NewAgentAttempt(task, now);
+        await environment.Store.CreateAgentAttemptAsync(run, attempt);
+        await environment.Store.RecordAgentStartedAsync(
+            task.Id,
+            run.Id,
+            attempt.Id,
+            "thread-preserved-after-restart",
+            "codex-cli 0.151.0",
+            4321,
+            now);
+
+        var recovered = await environment.Store.RecoverInterruptedTasksAsync(now.AddMinutes(1));
+        var persistedRun = await environment.Store.GetAgentRunByTaskAsync(task.Id);
+        var persistedAttempt = Assert.Single(await environment.Store.GetAgentAttemptsAsync(task.Id));
+
+        Assert.Contains(task.Id, recovered.InterruptedTaskIds);
+        Assert.Equal("thread-preserved-after-restart", persistedRun?.ExternalRunId);
+        Assert.Equal(AgentRunStatus.Interrupted, persistedRun?.Status);
+        Assert.Equal(AgentAttemptStatus.Interrupted, persistedAttempt.Status);
+        Assert.Equal(AgentTaskStatus.Interrupted, (await environment.Store.GetTaskAsync(task.Id))?.Status);
+    }
+
+    [Fact]
+    public async Task TaskEvidencePersistsAcrossStoreInstancesAndIsAudited()
+    {
+        await using var environment = await TaskStoreTestEnvironment.CreateAsync();
+        var (task, _) = await environment.CreateTaskAsync();
+        var now = DateTimeOffset.UtcNow;
+        var evidence = new TaskEvidence
+        {
+            Id = Guid.NewGuid(),
+            TaskId = task.Id,
+            GeneratedAtUtc = now,
+            TaskStatus = AgentTaskStatus.Succeeded,
+            AgentClaim = new AgentClaimEvidence
+            {
+                Status = AgentClaimStatus.Completed,
+                FinalExplanation = "done",
+                ClaimedChangedFiles = ["a.cs"],
+                ClaimedTests = ["dotnet test:passed"]
+            },
+            Git = new GitTaskEvidence
+            {
+                IsGitRepository = true,
+                BeforeCapturedAtUtc = now.AddMinutes(-1),
+                AfterCapturedAtUtc = now,
+                PreExistingChangedFiles = [],
+                BeforeStatus = [],
+                AfterStatus = [],
+                ChangedFiles =
+                [
+                    new EvidenceFileChange
+                    {
+                        RelativePath = "a.cs",
+                        ChangeType = EvidenceFileChangeType.Modified,
+                        AddedLines = 2,
+                        DeletedLines = 1
+                    }
+                ],
+                ModifiedFileCount = 1,
+                AddedLineCount = 2,
+                DeletedLineCount = 1,
+                DiffStatVerified = true
+            },
+            Tests = new TaskTestEvidence
+            {
+                Status = EvidenceTestStatus.Passed,
+                Commands =
+                [
+                    new TestCommandEvidence
+                    {
+                        Command = "dotnet test",
+                        ExternalItemId = "test-1",
+                        ExitCode = 0,
+                        Status = EvidenceTestStatus.Passed,
+                        TotalTests = 12,
+                        PassedTests = 12,
+                        FailedTests = 0,
+                        SkippedTests = 0
+                    }
+                ],
+                TotalTests = 12,
+                PassedTests = 12,
+                FailedTests = 0,
+                SkippedTests = 0,
+                HasRealExecutionEvidence = true
+            },
+            Connector = new ConnectorCompatibilityEvidence
+            {
+                ConnectorId = "codex",
+                DetectedVersion = "0.147.0",
+                VersionVerified = true,
+                VerifiedVersions = ["0.147.0"],
+                Decision = "allowed"
+            },
+            VerificationStatus = EvidenceVerificationStatus.Verified,
+            VerificationReasons = [],
+            UserSummary = "Codex 已完成任务，修改 1 个文件。执行 12 项测试，全部通过。"
+        };
+
+        await environment.Store.UpsertTaskEvidenceAsync(evidence);
+        await using var reopened = new SqliteTaskStore(environment.DatabasePath);
+        await reopened.InitializeAsync();
+        var persisted = await reopened.GetTaskEvidenceAsync(task.Id);
+        var audit = await reopened.GetAuditLogAsync();
+
+        Assert.NotNull(persisted);
+        Assert.Equal(EvidenceVerificationStatus.Verified, persisted.VerificationStatus);
+        Assert.Equal("0.147.0", persisted.Connector.DetectedVersion);
+        Assert.Equal(12, persisted.Tests.TotalTests);
+        Assert.Equal("a.cs", Assert.Single(persisted.Git.ChangedFiles).RelativePath);
+        Assert.Equal(evidence.UserSummary, persisted.UserSummary);
+        Assert.Contains(audit, item =>
+            item.Action == "TaskEvidenceRecorded" && item.EntityId == task.Id.ToString("D"));
+    }
+
+    private static (AgentRunRecord Run, AgentAttemptRecord Attempt) NewAgentAttempt(
+        AgentTask task,
+        DateTimeOffset now)
+    {
+        var run = new AgentRunRecord
+        {
+            Id = Guid.NewGuid(),
+            TaskId = task.Id,
+            ConnectorId = "codex",
+            Transport = "exec-json-v1",
+            Status = AgentRunStatus.Starting,
+            CreatedAtUtc = now,
+            UpdatedAtUtc = now
+        };
+        var attempt = new AgentAttemptRecord
+        {
+            Id = Guid.NewGuid(),
+            AgentRunId = run.Id,
+            TaskId = task.Id,
+            AttemptNumber = 1,
+            Operation = AgentAttemptOperation.Start,
+            Status = AgentAttemptStatus.Starting,
+            StartedAtUtc = now,
+            InputHash = "test-input-hash"
+        };
+        return (run, attempt);
+    }
 }

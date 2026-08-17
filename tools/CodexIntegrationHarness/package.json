@@ -1,0 +1,16 @@
+{
+  "name": "screen-guide-codex-integration-harness",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Disposable V0.1 stage 2B-0 probes for official Codex integration surfaces.",
+  "scripts": {
+    "probe": "node ./src/probe.mjs"
+  },
+  "dependencies": {
+    "@openai/codex-sdk": "0.147.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

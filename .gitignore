@@ -19,6 +19,9 @@ sessions/
 *.db-wal
 *.sqlite-shm
 *.sqlite-wal
+*.db-journal
+*.sqlite-journal
+*.jsonl
 *.log
 
 # Local configuration
