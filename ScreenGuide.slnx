@@ -2,8 +2,10 @@
   <Folder Name="/src/">
     <Project Path="src/ScreenGuide.App/ScreenGuide.App.csproj" />
     <Project Path="src/ScreenGuide.Core/ScreenGuide.Core.csproj" />
+    <Project Path="src/ScreenGuide.Persistence/ScreenGuide.Persistence.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/ScreenGuide.Core.Tests/ScreenGuide.Core.Tests.csproj" />
+    <Project Path="tests/ScreenGuide.Tasking.Tests/ScreenGuide.Tasking.Tests.csproj" />
   </Folder>
 </Solution>

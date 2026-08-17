@@ -15,6 +15,10 @@ screenshots/
 sessions/
 *.db
 *.sqlite
+*.db-shm
+*.db-wal
+*.sqlite-shm
+*.sqlite-wal
 *.log
 
 # Local configuration
