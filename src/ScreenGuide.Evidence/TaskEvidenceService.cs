@@ -427,13 +427,28 @@ public sealed partial class TaskEvidenceService(
             ? parsed
             : null;
 
-    private static bool IsTestCommand(string command) => TestCommandPattern().IsMatch(command);
+    private static bool IsTestCommand(string command) =>
+        TestCommandPattern().IsMatch(ExtractShellPayload(command));
 
     private static string RedactCommand(string command)
     {
-        var normalized = command.ReplaceLineEndings(" ").Trim();
+        var normalized = ExtractShellPayload(command).ReplaceLineEndings(" ").Trim();
         normalized = SecretArgumentPattern().Replace(normalized, "$1<redacted>");
         return normalized.Length <= 1000 ? normalized : normalized[..1000];
+    }
+
+    private static string ExtractShellPayload(string command)
+    {
+        const string marker = " -Command ";
+        var markerIndex = command.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+        if (markerIndex < 0)
+        {
+            return command.Trim();
+        }
+
+        return command[(markerIndex + marker.Length)..]
+            .Trim()
+            .Trim('\'', '"');
     }
 
     private static string NormalizePath(string value)

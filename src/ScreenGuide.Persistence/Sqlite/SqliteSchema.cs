@@ -218,4 +218,95 @@ internal static class SqliteSchema
         CREATE INDEX IF NOT EXISTS ix_task_evidence_verification
             ON task_evidence(verification_status, generated_at_utc);
         """;
+
+    public const string CreateVersion4 = """
+        ALTER TABLE tasks ADD COLUMN phase TEXT NOT NULL DEFAULT 'Planning';
+        ALTER TABLE task_events ADD COLUMN from_phase TEXT NULL;
+        ALTER TABLE task_events ADD COLUMN to_phase TEXT NULL;
+
+        UPDATE tasks
+        SET phase = CASE status
+            WHEN 'Pending' THEN 'Planning'
+            WHEN 'WaitingForUser' THEN 'AwaitingPermission'
+            WHEN 'Running' THEN 'Executing'
+            WHEN 'CancellationRequested' THEN 'Executing'
+            ELSE 'Verifying'
+        END;
+
+        CREATE TABLE project_authorizations (
+            id TEXT NOT NULL PRIMARY KEY,
+            project_id TEXT NOT NULL UNIQUE,
+            scope TEXT NOT NULL,
+            scope_value TEXT NOT NULL,
+            state TEXT NOT NULL,
+            authorized_by_device_id TEXT NOT NULL,
+            authorized_at_utc TEXT NOT NULL,
+            revoked_at_utc TEXT NULL,
+            updated_at_utc TEXT NOT NULL,
+            FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+            FOREIGN KEY (authorized_by_device_id) REFERENCES devices(id)
+        );
+
+        INSERT INTO project_authorizations(
+            id, project_id, scope, scope_value, state,
+            authorized_by_device_id, authorized_at_utc, revoked_at_utc, updated_at_utc)
+        SELECT
+            id, id, 'ProjectDirectory', root_path, authorization_state,
+            authorized_by_device_id, authorized_at_utc, revoked_at_utc, updated_at_utc
+        FROM projects;
+
+        CREATE TABLE resource_scopes (
+            id TEXT NOT NULL PRIMARY KEY,
+            task_id TEXT NOT NULL,
+            scope_type TEXT NOT NULL,
+            resource_id TEXT NULL,
+            scope_value TEXT NOT NULL,
+            access_mode TEXT NOT NULL,
+            granted_by_device_id TEXT NOT NULL,
+            granted_at_utc TEXT NOT NULL,
+            expires_at_utc TEXT NULL,
+            revoked_at_utc TEXT NULL,
+            FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+            FOREIGN KEY (granted_by_device_id) REFERENCES devices(id),
+            UNIQUE (task_id, scope_type, resource_id, scope_value)
+        );
+
+        INSERT INTO resource_scopes(
+            id, task_id, scope_type, resource_id, scope_value, access_mode,
+            granted_by_device_id, granted_at_utc, expires_at_utc, revoked_at_utc)
+        SELECT
+            lower(hex(randomblob(4))) || '-' || lower(hex(randomblob(2))) || '-4' ||
+            substr(lower(hex(randomblob(2))), 2) || '-' ||
+            substr('89ab', abs(random()) % 4 + 1, 1) ||
+            substr(lower(hex(randomblob(2))), 2) || '-' || lower(hex(randomblob(6))),
+            tasks.id, 'Project', tasks.project_id, projects.root_path,
+            'Execute', tasks.created_by_device_id, tasks.created_at_utc, NULL, NULL
+        FROM tasks
+        INNER JOIN projects ON projects.id = tasks.project_id;
+
+        CREATE TABLE skill_invocations (
+            id TEXT NOT NULL PRIMARY KEY,
+            task_id TEXT NOT NULL,
+            sequence_number INTEGER NOT NULL,
+            skill_id TEXT NOT NULL,
+            skill_version TEXT NOT NULL,
+            capability TEXT NOT NULL,
+            input_json TEXT NOT NULL,
+            status TEXT NOT NULL,
+            created_at_utc TEXT NOT NULL,
+            started_at_utc TEXT NULL,
+            completed_at_utc TEXT NULL,
+            failure_code TEXT NULL,
+            failure_message TEXT NULL,
+            FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+            UNIQUE (task_id, sequence_number)
+        );
+
+        CREATE INDEX ix_project_authorizations_state
+            ON project_authorizations(state, updated_at_utc);
+        CREATE INDEX ix_resource_scopes_task
+            ON resource_scopes(task_id, scope_type);
+        CREATE INDEX ix_skill_invocations_task
+            ON skill_invocations(task_id, sequence_number);
+        """;
 }

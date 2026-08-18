@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Text;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Threading.Channels;
@@ -134,6 +135,7 @@ public sealed class CodexConnector : IAgentConnector, IAsyncDisposable
         var state = _runs.GetOrAdd(
             response.Run.TaskId,
             _ => CreateResumedRunState(response));
+        AttemptState? finishingAttempt;
         lock (state.Gate)
         {
             if (state.Status != AgentExecutionStatus.WaitingForUser
@@ -149,6 +151,31 @@ public sealed class CodexConnector : IAgentConnector, IAsyncDisposable
                     StringComparison.Ordinal))
             {
                 throw new InvalidOperationException("Decision Request ID 不匹配。");
+            }
+
+            finishingAttempt = state.ActiveAttempt;
+        }
+
+        // turn.completed is authoritative for WaitingForUser, but the CLI process can
+        // take a short time to flush and exit after that event. Do not start a second
+        // turn until the previous process tree and event channel are fully closed.
+        if (finishingAttempt is not null)
+        {
+            await finishingAttempt.Completion.Task.WaitAsync(cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        lock (state.Gate)
+        {
+            if (state.Status != AgentExecutionStatus.WaitingForUser
+                && state.Status != AgentExecutionStatus.Interrupted)
+            {
+                throw new InvalidOperationException("Codex Run 当前没有等待用户决定或恢复指令。");
+            }
+
+            if (state.ActiveAttempt is not null)
+            {
+                throw new InvalidOperationException("上一个 Codex Turn 尚未完成清理。");
             }
         }
 
@@ -429,6 +456,9 @@ public sealed class CodexConnector : IAgentConnector, IAsyncDisposable
             RedirectStandardInput = true,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
+            StandardInputEncoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
+            StandardOutputEncoding = Encoding.UTF8,
+            StandardErrorEncoding = Encoding.UTF8,
             CreateNoWindow = true
         };
         startInfo.ArgumentList.Add("exec");

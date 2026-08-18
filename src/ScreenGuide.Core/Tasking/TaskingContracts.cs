@@ -8,6 +8,8 @@ public interface ILocalTaskStore : IAsyncDisposable
 {
     Task InitializeAsync(CancellationToken cancellationToken = default);
 
+    Task<int> GetSchemaVersionAsync(CancellationToken cancellationToken = default);
+
     Task UpsertDeviceAsync(DeviceRecord device, CancellationToken cancellationToken = default);
 
     Task SetProjectAuthorizationAsync(ProjectRecord project, CancellationToken cancellationToken = default);
@@ -18,12 +20,28 @@ public interface ILocalTaskStore : IAsyncDisposable
 
     Task<ProjectRecord?> GetProjectAsync(Guid projectId, CancellationToken cancellationToken = default);
 
+    Task<ProjectAuthorizationRecord?> GetProjectAuthorizationAsync(
+        Guid projectId,
+        CancellationToken cancellationToken = default);
+
     Task<IReadOnlyList<ProjectRecord>> GetAuthorizedProjectsAsync(
+        CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<ProjectRecord>> GetProjectsAsync(
+        bool includeRevoked = false,
         CancellationToken cancellationToken = default);
 
     Task<AgentTask?> GetTaskAsync(Guid taskId, CancellationToken cancellationToken = default);
 
+    Task<IReadOnlyList<AgentTask>> GetTasksAsync(
+        Guid? projectId = null,
+        CancellationToken cancellationToken = default);
+
     Task<CommandRecord?> GetCommandAsync(Guid commandId, CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<CommandRecord>> GetTaskCommandsAsync(
+        Guid taskId,
+        CancellationToken cancellationToken = default);
 
     Task<AgentRunRecord?> GetAgentRunByTaskAsync(
         Guid taskId,
@@ -31,6 +49,22 @@ public interface ILocalTaskStore : IAsyncDisposable
 
     Task<IReadOnlyList<AgentAttemptRecord>> GetAgentAttemptsAsync(
         Guid taskId,
+        CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<ResourceScopeRecord>> GetResourceScopesAsync(
+        Guid taskId,
+        CancellationToken cancellationToken = default);
+
+    Task UpsertResourceScopeAsync(
+        ResourceScopeRecord scope,
+        CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<SkillInvocationRecord>> GetSkillInvocationsAsync(
+        Guid taskId,
+        CancellationToken cancellationToken = default);
+
+    Task UpsertSkillInvocationAsync(
+        SkillInvocationRecord invocation,
         CancellationToken cancellationToken = default);
 
     Task<DecisionRequestRecord?> GetPendingDecisionRequestAsync(
@@ -43,6 +77,13 @@ public interface ILocalTaskStore : IAsyncDisposable
 
     Task<CommandRegistrationResult> RegisterCommandAsync(
         CommandRecord command,
+        CancellationToken cancellationToken = default);
+
+    Task CompleteCommandAsync(
+        Guid commandId,
+        CommandStatus status,
+        DateTimeOffset processedAtUtc,
+        string? rejectionReason = null,
         CancellationToken cancellationToken = default);
 
     Task CreateTaskAsync(
@@ -91,6 +132,16 @@ public interface ILocalTaskStore : IAsyncDisposable
         string? failureMessage = null,
         CancellationToken cancellationToken = default);
 
+    Task<AgentTask> TransitionTaskPhaseAsync(
+        Guid taskId,
+        TaskPhase newPhase,
+        TaskEventSource source,
+        string message,
+        Guid? sourceDeviceId = null,
+        Guid? commandId = null,
+        string? dataJson = null,
+        CancellationToken cancellationToken = default);
+
     Task<bool> RequestCancellationAsync(
         Guid taskId,
         Guid sourceDeviceId,
@@ -110,5 +161,10 @@ public interface ILocalTaskStore : IAsyncDisposable
 
     Task AppendAuditAsync(
         AuditLogEntry entry,
+        CancellationToken cancellationToken = default);
+
+    Task<int> DeleteTerminalTaskHistoryAsync(
+        DateTimeOffset deletedAtUtc,
+        Guid actorDeviceId,
         CancellationToken cancellationToken = default);
 }

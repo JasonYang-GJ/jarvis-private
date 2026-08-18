@@ -24,6 +24,9 @@ public sealed class AgentTaskExecutionServiceTests
         var persistedTask = await store.GetTaskAsync(task.Id);
         var run = await store.GetAgentRunByTaskAsync(task.Id);
         var attempts = await store.GetAgentAttemptsAsync(task.Id);
+        var invocations = await store.GetSkillInvocationsAsync(task.Id);
+        var events = await store.GetTaskEventsAsync(task.Id);
+        var audit = await store.GetAuditLogAsync();
         await host.StopAsync();
 
         Assert.Equal(AgentTaskStatus.Succeeded, persistedTask?.Status);
@@ -31,6 +34,17 @@ public sealed class AgentTaskExecutionServiceTests
         Assert.Equal(reference.ExternalRunId, run?.ExternalRunId);
         Assert.Equal(AgentRunStatus.Succeeded, run?.Status);
         Assert.Equal(AgentAttemptStatus.Completed, Assert.Single(attempts).Status);
+        Assert.Equal(TaskPhase.Verifying, persistedTask?.Phase);
+        var invocation = Assert.Single(invocations);
+        Assert.Equal("codex.project-task", invocation.SkillId);
+        Assert.Equal(SkillInvocationStatus.Succeeded, invocation.Status);
+        Assert.Equal("skill/codex.project-task", run?.Transport);
+        Assert.Contains(events, item => item.ToPhase == TaskPhase.Routing);
+        Assert.Contains(events, item => item.ToPhase == TaskPhase.Executing);
+        Assert.Contains(events, item => item.ToPhase == TaskPhase.Verifying);
+        Assert.Contains(audit, item =>
+            item.Action == "SkillAuthorizationAllowed"
+            && item.EntityId == invocation.Id.ToString("D"));
     }
 
     [Fact]
@@ -61,7 +75,8 @@ public sealed class AgentTaskExecutionServiceTests
         var (_, _, task) = await environment.SeedTaskAsync("TEST_SUCCESS");
         var options = new DesktopHostOptions(
             environment.Options.DataDirectory,
-            Path.Combine(environment.RootDirectory, "missing-codex.exe"));
+            Path.Combine(environment.RootDirectory, "missing-codex.exe"),
+            environment.Options.PipeName);
         using var host = DesktopHostFactory.Build(
             Array.Empty<string>(),
             options,
@@ -117,9 +132,20 @@ public sealed class AgentTaskExecutionServiceTests
         var first = await service.StartTaskAsync(task.Id);
         await service.WaitForTaskAsync(task.Id);
         Assert.Equal(AgentTaskStatus.WaitingForUser, (await store.GetTaskAsync(task.Id))?.Status);
+        Assert.Equal(TaskPhase.AwaitingPermission, (await store.GetTaskAsync(task.Id))?.Phase);
+        Assert.Equal(
+            SkillInvocationStatus.WaitingForUser,
+            Assert.Single(await store.GetSkillInvocationsAsync(task.Id)).Status);
         Assert.NotNull(await store.GetPendingDecisionRequestAsync(task.Id));
 
-        var second = await service.ContinueTaskAsync(task.Id, "TEST_CONTINUE");
+        var responseCommand = await environment.RegisterTaskCommandAsync(
+            task.Id,
+            CommandType.UserResponse,
+            "{\"response\":\"TEST_CONTINUE\"}");
+        var second = await service.ContinueTaskAsync(
+            task.Id,
+            "TEST_CONTINUE",
+            responseCommand.Id);
         await service.WaitForTaskAsync(task.Id);
         var attempts = await store.GetAgentAttemptsAsync(task.Id);
         var run = await store.GetAgentRunByTaskAsync(task.Id);
@@ -133,6 +159,14 @@ public sealed class AgentTaskExecutionServiceTests
             [AgentAttemptOperation.Start, AgentAttemptOperation.Resume],
             attempts.Select(item => item.Operation));
         Assert.Null(await store.GetPendingDecisionRequestAsync(task.Id));
+        Assert.Equal(TaskPhase.Verifying, (await store.GetTaskAsync(task.Id))?.Phase);
+        Assert.Equal(
+            SkillInvocationStatus.Succeeded,
+            Assert.Single(await store.GetSkillInvocationsAsync(task.Id)).Status);
+        Assert.Equal(
+            2,
+            (await store.GetAuditLogAsync()).Count(item =>
+                item.Action == "SkillAuthorizationAllowed"));
     }
 
     [Fact]
@@ -173,10 +207,13 @@ public sealed class AgentTaskExecutionServiceTests
         var store = host.Services.GetRequiredService<ILocalTaskStore>();
         var persistedTask = await store.GetTaskAsync(task.Id);
         var attempts = await store.GetAgentAttemptsAsync(task.Id);
+        var invocation = Assert.Single(await store.GetSkillInvocationsAsync(task.Id));
         await host.StopAsync();
 
         Assert.Equal(AgentTaskStatus.Cancelled, persistedTask?.Status);
         Assert.NotNull(Assert.Single(attempts).CancellationConfirmedAtUtc);
+        Assert.Equal(SkillInvocationStatus.Cancelled, invocation.Status);
+        Assert.Equal(TaskPhase.Verifying, persistedTask?.Phase);
         Assert.False(File.Exists(marker));
     }
 
@@ -221,9 +258,62 @@ public sealed class AgentTaskExecutionServiceTests
             Assert.Equal(AgentTaskStatus.Interrupted, (await store.GetTaskAsync(task.Id))?.Status);
             Assert.False(string.IsNullOrWhiteSpace(
                 (await store.GetAgentRunByTaskAsync(task.Id))?.ExternalRunId));
+            Assert.Equal(
+                SkillInvocationStatus.Interrupted,
+                Assert.Single(await store.GetSkillInvocationsAsync(task.Id)).Status);
+            Assert.Equal(TaskPhase.Verifying, (await store.GetTaskAsync(task.Id))?.Phase);
             await Task.Delay(TimeSpan.FromSeconds(5));
             Assert.False(File.Exists(marker));
             await secondHost.StopAsync();
         }
+    }
+
+    [Fact]
+    public async Task RevokedTaskResourceScopeIsRejectedBeforeSkillStarts()
+    {
+        await using var environment = DesktopHostTestEnvironment.Create();
+        var (_, _, task) = await environment.SeedTaskAsync("TEST_SUCCESS");
+        await using (var store = await environment.OpenStoreAsync())
+        {
+            var scope = Assert.Single(await store.GetResourceScopesAsync(task.Id));
+            await store.UpsertResourceScopeAsync(scope with
+            {
+                RevokedAtUtc = environment.TimeProvider.GetUtcNow()
+            });
+        }
+
+        using var host = environment.BuildHost();
+        await host.StartAsync();
+        var service = host.Services.GetRequiredService<AgentTaskExecutionService>();
+
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => service.StartTaskAsync(task.Id));
+
+        var activeStore = host.Services.GetRequiredService<ILocalTaskStore>();
+        Assert.Null(await activeStore.GetAgentRunByTaskAsync(task.Id));
+        Assert.Empty(await activeStore.GetSkillInvocationsAsync(task.Id));
+        Assert.Equal(TaskPhase.Planning, (await activeStore.GetTaskAsync(task.Id))?.Phase);
+        await host.StopAsync();
+    }
+
+    [Fact]
+    public async Task UnrelatedCommandCannotAuthorizeSkillExecution()
+    {
+        await using var environment = DesktopHostTestEnvironment.Create();
+        var (_, _, task) = await environment.SeedTaskAsync("TEST_SUCCESS");
+        var wrongCommand = await environment.RegisterTaskCommandAsync(
+            task.Id,
+            CommandType.CancelTask);
+        using var host = environment.BuildHost();
+        await host.StartAsync();
+        var service = host.Services.GetRequiredService<AgentTaskExecutionService>();
+
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() =>
+            service.StartTaskAsync(task.Id, wrongCommand.Id));
+
+        var store = host.Services.GetRequiredService<ILocalTaskStore>();
+        Assert.Null(await store.GetAgentRunByTaskAsync(task.Id));
+        Assert.Empty(await store.GetSkillInvocationsAsync(task.Id));
+        Assert.Equal(TaskPhase.Planning, (await store.GetTaskAsync(task.Id))?.Phase);
+        await host.StopAsync();
     }
 }

@@ -2,21 +2,27 @@
   <Folder Name="/src/">
     <Project Path="src/ScreenGuide.Agent.Abstractions/ScreenGuide.Agent.Abstractions.csproj" />
     <Project Path="src/ScreenGuide.Agent.Codex/ScreenGuide.Agent.Codex.csproj" />
-    <Project Path="src/ScreenGuide.App/ScreenGuide.App.csproj" />
     <Project Path="src/ScreenGuide.Core/ScreenGuide.Core.csproj" />
+    <Project Path="src/ScreenGuide.DesktopClient/ScreenGuide.DesktopClient.csproj" />
     <Project Path="src/ScreenGuide.DesktopHost/ScreenGuide.DesktopHost.csproj" />
+    <Project Path="src/ScreenGuide.DesktopProtocol/ScreenGuide.DesktopProtocol.csproj" />
     <Project Path="src/ScreenGuide.Evidence/ScreenGuide.Evidence.csproj" />
     <Project Path="src/ScreenGuide.Persistence/ScreenGuide.Persistence.csproj" />
+    <Project Path="src/ScreenGuide.Skills.Abstractions/ScreenGuide.Skills.Abstractions.csproj" />
+    <Project Path="src/ScreenGuide.Skills.Windows/ScreenGuide.Skills.Windows.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/ScreenGuide.Agent.Codex.Tests/ScreenGuide.Agent.Codex.Tests.csproj" />
     <Project Path="tests/ScreenGuide.Core.Tests/ScreenGuide.Core.Tests.csproj" />
+    <Project Path="tests/ScreenGuide.DesktopClient.Tests/ScreenGuide.DesktopClient.Tests.csproj" />
     <Project Path="tests/ScreenGuide.DesktopHost.Tests/ScreenGuide.DesktopHost.Tests.csproj" />
+    <Project Path="tests/ScreenGuide.DesktopProduct.Tests/ScreenGuide.DesktopProduct.Tests.csproj" />
     <Project Path="tests/ScreenGuide.FakeCodexCli/ScreenGuide.FakeCodexCli.csproj" />
     <Project Path="tests/ScreenGuide.Tasking.Tests/ScreenGuide.Tasking.Tests.csproj" />
   </Folder>
   <Folder Name="/tools/">
     <Project Path="tools/ScreenGuide.CodexConnector.IntegrationRunner/ScreenGuide.CodexConnector.IntegrationRunner.csproj" />
+    <Project Path="tools/ScreenGuide.DesktopV01.RealAcceptanceRunner/ScreenGuide.DesktopV01.RealAcceptanceRunner.csproj" />
     <Project Path="tools/ScreenGuide.TaskEvidence.IntegrationRunner/ScreenGuide.TaskEvidence.IntegrationRunner.csproj" />
   </Folder>
 </Solution>

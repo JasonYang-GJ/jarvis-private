@@ -3,9 +3,12 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using ScreenGuide.Agent.Abstractions;
+using ScreenGuide.Agent.Codex;
+using ScreenGuide.Core.Security;
 using ScreenGuide.Core.Tasking;
 using ScreenGuide.Evidence;
 using ScreenGuide.Persistence.Runtime;
+using ScreenGuide.Skills.Abstractions;
 using AgentTaskStatus = ScreenGuide.Core.Tasking.TaskStatus;
 
 namespace ScreenGuide.DesktopHost.Runtime;
@@ -13,6 +16,9 @@ namespace ScreenGuide.DesktopHost.Runtime;
 public sealed class AgentTaskExecutionService(
     ILocalTaskStore store,
     AgentConnectorRegistry connectorRegistry,
+    TaskSkillRouter skillRouter,
+    SkillAdapterRegistry skillAdapters,
+    CapabilityPolicyEngine policyEngine,
     TaskCancellationService cancellationService,
     TaskCancellationRegistry cancellationRegistry,
     TaskEvidenceService evidenceService,
@@ -46,19 +52,80 @@ public sealed class AgentTaskExecutionService(
 
             var project = await RequireAuthorizedProjectAsync(task.ProjectId, cancellationToken)
                 .ConfigureAwait(false);
+            var actionCommand = await RequireActionCommandAsync(
+                    task,
+                    commandId,
+                    CommandType.CreateTask,
+                    allowTaskCommandLookup: true,
+                    cancellationToken)
+                .ConfigureAwait(false);
             var workingDirectory = ProjectPathPolicy.ResolveWithinRoot(
                 project.RootPath,
                 task.WorkingDirectoryRelativePath);
+            var route = skillRouter.Route(task);
+            var scope = await RequireProjectScopeAsync(task, project, cancellationToken)
+                .ConfigureAwait(false);
+            var now = timeProvider.GetUtcNow();
+            var invocation = new SkillInvocationRecord
+            {
+                Id = Guid.NewGuid(),
+                TaskId = task.Id,
+                SequenceNumber = 1,
+                SkillId = route.Adapter.Descriptor.Id,
+                SkillVersion = route.Adapter.Descriptor.Version,
+                Capability = route.Capability,
+                InputJson = JsonSerializer.Serialize(new CodexSkillInput(
+                    project.RootPath,
+                    workingDirectory,
+                    task.Instruction)),
+                Status = SkillInvocationStatus.Pending,
+                CreatedAtUtc = now
+            };
+            await store.TransitionTaskPhaseAsync(
+                    task.Id,
+                    TaskPhase.Routing,
+                    TaskEventSource.System,
+                    "正在选择并检查任务执行能力。",
+                    task.CreatedByDeviceId,
+                    actionCommand.Id,
+                    cancellationToken: cancellationToken)
+                .ConfigureAwait(false);
+            await store.UpsertSkillInvocationAsync(invocation, cancellationToken).ConfigureAwait(false);
+
+            var authorizationId = actionCommand.Id;
+            var skillRequest = new SkillInvocationRequest(
+                task.Id,
+                invocation.Id,
+                invocation.SkillId,
+                invocation.Capability,
+                invocation.InputJson,
+                [scope],
+                SkillAuthorizationOrigin.ExplicitUser,
+                authorizationId);
+            await AuthorizeAsync(
+                    route.Adapter,
+                    skillRequest,
+                    task.CreatedByDeviceId,
+                    cancellationToken)
+                .ConfigureAwait(false);
             await evidenceService.CaptureBaselineAsync(task, project, cancellationToken)
                 .ConfigureAwait(false);
-            var connector = connectorRegistry.GetRequired(task.Executor);
-            var now = timeProvider.GetUtcNow();
+            await store.TransitionTaskPhaseAsync(
+                    task.Id,
+                    TaskPhase.Executing,
+                    TaskEventSource.System,
+                    "权限检查通过，开始执行 Codex Skill。",
+                    task.CreatedByDeviceId,
+                    actionCommand.Id,
+                    cancellationToken: cancellationToken)
+                .ConfigureAwait(false);
+
             var run = new AgentRunRecord
             {
                 Id = Guid.NewGuid(),
                 TaskId = task.Id,
-                ConnectorId = connector.ConnectorId,
-                Transport = "exec-json-v1",
+                ConnectorId = task.Executor,
+                Transport = $"skill/{invocation.SkillId}",
                 Status = AgentRunStatus.Starting,
                 CreatedAtUtc = now,
                 UpdatedAtUtc = now,
@@ -67,31 +134,38 @@ public sealed class AgentTaskExecutionService(
             var attempt = NewAttempt(
                 run,
                 task,
-                commandId,
+                actionCommand.Id,
                 1,
                 AgentAttemptOperation.Start,
                 task.Instruction,
                 now);
             await store.CreateAgentAttemptAsync(run, attempt, cancellationToken).ConfigureAwait(false);
+            invocation = invocation with
+            {
+                Status = SkillInvocationStatus.Running,
+                StartedAtUtc = now
+            };
+            await store.UpsertSkillInvocationAsync(invocation, cancellationToken).ConfigureAwait(false);
             _ = cancellationRegistry.GetOrCreateToken(task.Id);
 
-            var start = await connector.StartTaskAsync(
-                    new AgentStartRequest(
-                        task.Id,
-                        project.RootPath,
-                        workingDirectory,
-                        task.Instruction,
-                        attempt.Id),
+            var start = await route.Adapter.StartAsync(
+                    skillRequest with { AttemptId = attempt.Id },
                     cancellationToken)
                 .ConfigureAwait(false);
-            if (start.Status == AgentExecutionStatus.Running)
+            if (start.Status == SkillExecutionStatus.Running)
             {
                 await RecordStartedAsync(task.Id, run.Id, attempt.Id, start, cancellationToken)
                     .ConfigureAwait(false);
             }
 
-            StartPump(connector, start.Run, run.Id, attempt.Id, run.LastEventSequence);
-            return start.Run;
+            StartPump(
+                route.Adapter,
+                start.Run,
+                run.Id,
+                attempt.Id,
+                invocation.Id,
+                run.LastEventSequence);
+            return ToAgentRun(start.Run);
         }
         finally
         {
@@ -121,6 +195,15 @@ public sealed class AgentTaskExecutionService(
                 throw new InvalidOperationException("只有 WaitingForUser 任务可以继续当前 Codex Thread。");
             }
 
+
+            var actionCommand = await RequireActionCommandAsync(
+                    task,
+                    commandId,
+                    CommandType.UserResponse,
+                    allowTaskCommandLookup: false,
+                    cancellationToken)
+                .ConfigureAwait(false);
+
             var run = await store.GetAgentRunByTaskAsync(taskId, cancellationToken).ConfigureAwait(false)
                 ?? throw new InvalidOperationException("任务没有可续接的 Agent Run。");
             if (string.IsNullOrWhiteSpace(run.ExternalRunId))
@@ -131,45 +214,104 @@ public sealed class AgentTaskExecutionService(
             var decision = await store.GetPendingDecisionRequestAsync(taskId, cancellationToken)
                 .ConfigureAwait(false)
                 ?? throw new InvalidOperationException("任务没有待回答的 Decision Request。");
+            var invocation = (await store.GetSkillInvocationsAsync(taskId, cancellationToken)
+                    .ConfigureAwait(false))
+                .OrderByDescending(item => item.SequenceNumber)
+                .FirstOrDefault()
+                ?? throw new InvalidOperationException("任务没有可续接的 Skill Invocation。");
+            if (invocation.Status != SkillInvocationStatus.WaitingForUser)
+            {
+                throw new InvalidOperationException("Skill Invocation 当前不等待用户回答。");
+            }
+
             var project = await RequireAuthorizedProjectAsync(task.ProjectId, cancellationToken)
                 .ConfigureAwait(false);
-            var workingDirectory = ProjectPathPolicy.ResolveWithinRoot(
-                project.RootPath,
-                task.WorkingDirectoryRelativePath);
+            var scope = await RequireProjectScopeAsync(task, project, cancellationToken)
+                .ConfigureAwait(false);
             var attempts = await store.GetAgentAttemptsAsync(taskId, cancellationToken)
                 .ConfigureAwait(false);
             var now = timeProvider.GetUtcNow();
             var attempt = NewAttempt(
                 run,
                 task,
-                commandId,
+                actionCommand.Id,
                 attempts.Count + 1,
                 AgentAttemptOperation.Resume,
                 responseText,
                 now);
+            var adapter = skillAdapters.GetRequired(invocation.SkillId);
+            await store.TransitionTaskPhaseAsync(
+                    task.Id,
+                    TaskPhase.Routing,
+                    TaskEventSource.User,
+                    "已收到补充指令，正在重新检查执行权限。",
+                    task.CreatedByDeviceId,
+                    actionCommand.Id,
+                    cancellationToken: cancellationToken)
+                .ConfigureAwait(false);
+            var authorizationRequest = new SkillInvocationRequest(
+                task.Id,
+                invocation.Id,
+                invocation.SkillId,
+                invocation.Capability,
+                invocation.InputJson,
+                [scope],
+                SkillAuthorizationOrigin.ExplicitUser,
+                actionCommand.Id,
+                attempt.Id);
+            await AuthorizeAsync(
+                    adapter,
+                    authorizationRequest,
+                    task.CreatedByDeviceId,
+                    cancellationToken)
+                .ConfigureAwait(false);
+            await store.TransitionTaskPhaseAsync(
+                    task.Id,
+                    TaskPhase.Executing,
+                    TaskEventSource.System,
+                    "补充指令权限检查通过，继续原 Codex Thread。",
+                    task.CreatedByDeviceId,
+                    actionCommand.Id,
+                    cancellationToken: cancellationToken)
+                .ConfigureAwait(false);
             await store.CreateAgentAttemptAsync(run, attempt, cancellationToken).ConfigureAwait(false);
+            invocation = invocation with
+            {
+                Status = SkillInvocationStatus.Running,
+                CompletedAtUtc = null,
+                FailureCode = null,
+                FailureMessage = null
+            };
+            await store.UpsertSkillInvocationAsync(invocation, cancellationToken).ConfigureAwait(false);
             _ = cancellationRegistry.GetOrCreateToken(task.Id);
 
-            var connector = connectorRegistry.GetRequired(run.ConnectorId);
-            var start = await connector.RespondToDecisionAsync(
-                    new AgentDecisionResponse(
-                        new AgentRunReference(task.Id, run.ExternalRunId),
+            var start = await adapter.RespondAsync(
+                    new SkillDecisionResponse(
+                        new SkillRunReference(
+                            task.Id,
+                            invocation.Id,
+                            run.ExternalRunId,
+                            attempt.Id),
                         decision.Id.ToString("D"),
                         responseText.Trim(),
                         attempt.Id,
-                        project.RootPath,
-                        workingDirectory,
                         run.LastEventSequence),
                     cancellationToken)
                 .ConfigureAwait(false);
-            if (start.Status == AgentExecutionStatus.Running)
+            if (start.Status == SkillExecutionStatus.Running)
             {
                 await RecordStartedAsync(task.Id, run.Id, attempt.Id, start, cancellationToken)
                     .ConfigureAwait(false);
             }
 
-            StartPump(connector, start.Run, run.Id, attempt.Id, run.LastEventSequence);
-            return start.Run;
+            StartPump(
+                adapter,
+                start.Run,
+                run.Id,
+                attempt.Id,
+                invocation.Id,
+                run.LastEventSequence);
+            return ToAgentRun(start.Run);
         }
         finally
         {
@@ -188,6 +330,11 @@ public sealed class AgentTaskExecutionService(
         var attempts = await store.GetAgentAttemptsAsync(taskId, cancellationToken).ConfigureAwait(false);
         var attempt = attempts.LastOrDefault()
             ?? throw new InvalidOperationException("任务没有 Agent Attempt。");
+        var invocation = (await store.GetSkillInvocationsAsync(taskId, cancellationToken)
+                .ConfigureAwait(false))
+            .OrderByDescending(item => item.SequenceNumber)
+            .FirstOrDefault()
+            ?? throw new InvalidOperationException("任务没有 Skill Invocation。");
         var accepted = await cancellationService.RequestAsync(
                 taskId,
                 sourceDeviceId,
@@ -206,9 +353,9 @@ public sealed class AgentTaskExecutionService(
                 requestedAt,
                 cancellationToken)
             .ConfigureAwait(false);
-        var connector = connectorRegistry.GetRequired(run.ConnectorId);
-        await connector.CancelTaskAsync(
-                new AgentRunReference(taskId, run.ExternalRunId, attempt.Id),
+        var adapter = skillAdapters.GetRequired(invocation.SkillId);
+        await adapter.CancelAsync(
+                new SkillRunReference(taskId, invocation.Id, run.ExternalRunId, attempt.Id),
                 cancellationToken)
             .ConfigureAwait(false);
         await WaitForAttemptAsync(attempt.Id, cancellationToken).ConfigureAwait(false);
@@ -264,17 +411,19 @@ public sealed class AgentTaskExecutionService(
     }
 
     private void StartPump(
-        IAgentConnector connector,
-        AgentRunReference reference,
+        ISkillAdapter adapter,
+        SkillRunReference reference,
         Guid agentRunId,
         Guid attemptId,
+        Guid invocationId,
         long afterSequence)
     {
         var pump = PumpEventsAsync(
-            connector,
+            adapter,
             reference with { AttemptId = attemptId },
             agentRunId,
             attemptId,
+            invocationId,
             afterSequence);
         if (!_attemptPumps.TryAdd(attemptId, pump))
         {
@@ -283,28 +432,43 @@ public sealed class AgentTaskExecutionService(
     }
 
     private async Task PumpEventsAsync(
-        IAgentConnector connector,
-        AgentRunReference reference,
+        ISkillAdapter adapter,
+        SkillRunReference reference,
         Guid agentRunId,
         Guid attemptId,
+        Guid invocationId,
         long afterSequence)
     {
         try
         {
-            await foreach (var connectorEvent in connector.GetTaskEventsAsync(
+            await foreach (var skillEvent in adapter.GetEventsAsync(
                                reference,
                                afterSequence,
                                CancellationToken.None).ConfigureAwait(false))
             {
+                await TransitionPhaseForEventAsync(
+                        reference.TaskId,
+                        skillEvent,
+                        CancellationToken.None)
+                    .ConfigureAwait(false);
                 var request = await MapEventAsync(
-                        connector,
+                        adapter,
                         reference,
                         agentRunId,
                         attemptId,
-                        connectorEvent)
+                        skillEvent)
                     .ConfigureAwait(false);
-                _ = await store.ApplyAgentEventAsync(request, CancellationToken.None)
+                var applied = await store.ApplyAgentEventAsync(request, CancellationToken.None)
                     .ConfigureAwait(false);
+                if (applied.Applied)
+                {
+                    await UpdateInvocationForEventAsync(
+                            reference.TaskId,
+                            invocationId,
+                            skillEvent,
+                            CancellationToken.None)
+                        .ConfigureAwait(false);
+                }
             }
         }
         finally
@@ -316,86 +480,227 @@ public sealed class AgentTaskExecutionService(
     }
 
     private async Task<AgentEventApplyRequest> MapEventAsync(
-        IAgentConnector connector,
-        AgentRunReference reference,
+        ISkillAdapter adapter,
+        SkillRunReference reference,
         Guid agentRunId,
         Guid attemptId,
-        AgentConnectorEvent connectorEvent)
+        SkillEvent skillEvent)
     {
-        var status = connectorEvent.Status ?? InferStatus(connectorEvent.EventKind);
-        var runStatus = MapRunStatus(status);
-        var attemptStatus = MapAttemptStatus(status);
-        var taskStatus = connectorEvent.EventKind switch
+        var status = skillEvent.Status ?? InferStatus(skillEvent.EventKind);
+        var taskStatus = skillEvent.EventKind switch
         {
-            AgentConnectorEventKind.DecisionRequested => AgentTaskStatus.WaitingForUser,
-            AgentConnectorEventKind.Completed => AgentTaskStatus.Succeeded,
-            AgentConnectorEventKind.Failed => AgentTaskStatus.Failed,
-            AgentConnectorEventKind.Cancelled => AgentTaskStatus.Cancelled,
-            AgentConnectorEventKind.Interrupted => AgentTaskStatus.Interrupted,
+            SkillEventKind.DecisionRequested => AgentTaskStatus.WaitingForUser,
+            SkillEventKind.Completed => AgentTaskStatus.Succeeded,
+            SkillEventKind.Failed => AgentTaskStatus.Failed,
+            SkillEventKind.Cancelled => AgentTaskStatus.Cancelled,
+            SkillEventKind.Interrupted => AgentTaskStatus.Interrupted,
             _ => null as AgentTaskStatus?
         };
-        AgentFinalResult? final = null;
-        DecisionRequestRecord? decision = null;
-        if (connectorEvent.EventKind is AgentConnectorEventKind.DecisionRequested
-            or AgentConnectorEventKind.Completed
-            or AgentConnectorEventKind.Failed
-            or AgentConnectorEventKind.Cancelled
-            or AgentConnectorEventKind.Interrupted)
+        SkillFinalResult? final = null;
+        if (IsTerminalOrWaiting(skillEvent.EventKind))
         {
-            final = await connector.GetFinalResultAsync(reference, CancellationToken.None)
+            final = await adapter.GetFinalResultAsync(reference, CancellationToken.None)
                 .ConfigureAwait(false);
         }
 
-        if (connectorEvent.EventKind == AgentConnectorEventKind.DecisionRequested)
-        {
-            decision = ParseDecisionRequest(
-                reference.TaskId,
-                agentRunId,
-                attemptId,
-                connectorEvent);
-        }
-
-        var (failureCode, failureMessage, exitCode) = ParseDiagnostics(connectorEvent.DataJson);
+        var decision = skillEvent.EventKind == SkillEventKind.DecisionRequested
+            ? ParseDecisionRequest(reference.TaskId, agentRunId, attemptId, skillEvent)
+            : null;
+        var diagnostics = ParseDiagnostics(skillEvent.DataJson);
         return new AgentEventApplyRequest
         {
             TaskId = reference.TaskId,
             AgentRunId = agentRunId,
-            AttemptId = connectorEvent.AttemptId ?? attemptId,
-            SequenceNumber = connectorEvent.SequenceNumber,
-            ExternalEventId = connectorEvent.ExternalEventId
-                ?? $"{attemptId:D}:{connectorEvent.SequenceNumber}",
-            EventKind = connectorEvent.EventKind.ToString(),
-            RunStatus = runStatus,
-            AttemptStatus = attemptStatus,
+            AttemptId = attemptId,
+            SequenceNumber = skillEvent.SequenceNumber,
+            ExternalEventId = skillEvent.ExternalEventId
+                ?? $"{attemptId:D}:{skillEvent.SequenceNumber}",
+            EventKind = skillEvent.EventKind.ToString(),
+            RunStatus = MapRunStatus(status),
+            AttemptStatus = MapAttemptStatus(status),
             TaskStatus = taskStatus,
-            OccurredAtUtc = connectorEvent.OccurredAtUtc,
-            Message = connectorEvent.Message,
-            DataJson = connectorEvent.DataJson,
+            OccurredAtUtc = skillEvent.OccurredAtUtc,
+            Message = skillEvent.Message,
+            DataJson = skillEvent.DataJson,
             FinalSummary = final?.Summary,
             FinalResultJson = final?.DataJson,
-            FailureCode = connectorEvent.EventKind == AgentConnectorEventKind.Failed
-                ? failureCode ?? "agent_failed"
+            FailureCode = skillEvent.EventKind == SkillEventKind.Failed
+                ? diagnostics.FailureCode ?? "agent_failed"
                 : null,
-            FailureMessage = connectorEvent.EventKind == AgentConnectorEventKind.Failed
-                ? failureMessage ?? connectorEvent.Message
+            FailureMessage = skillEvent.EventKind == SkillEventKind.Failed
+                ? diagnostics.FailureMessage ?? skillEvent.Message
                 : null,
             DecisionRequest = decision,
-            ExitCode = final?.ExitCode ?? exitCode
+            ExitCode = final?.ExitCode ?? diagnostics.ExitCode
         };
+    }
+
+    private async Task TransitionPhaseForEventAsync(
+        Guid taskId,
+        SkillEvent skillEvent,
+        CancellationToken cancellationToken)
+    {
+        var target = skillEvent.EventKind switch
+        {
+            SkillEventKind.DecisionRequested => TaskPhase.AwaitingPermission,
+            SkillEventKind.Completed or SkillEventKind.Failed or SkillEventKind.Cancelled
+                or SkillEventKind.Interrupted => TaskPhase.Verifying,
+            _ => null as TaskPhase?
+        };
+        if (target is null)
+        {
+            return;
+        }
+
+        var task = await RequireTaskAsync(taskId, cancellationToken).ConfigureAwait(false);
+        if (task.Phase == target || !TaskPhaseStateMachine.CanTransition(task.Phase, target.Value))
+        {
+            return;
+        }
+
+        await store.TransitionTaskPhaseAsync(
+                taskId,
+                target.Value,
+                TaskEventSource.Agent,
+                target == TaskPhase.AwaitingPermission
+                    ? "Codex Skill 需要用户补充决定。"
+                    : "Codex Skill 已结束执行，正在核验结果。",
+                cancellationToken: cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    private async Task UpdateInvocationForEventAsync(
+        Guid taskId,
+        Guid invocationId,
+        SkillEvent skillEvent,
+        CancellationToken cancellationToken)
+    {
+        if (skillEvent.EventKind is SkillEventKind.Progress or SkillEventKind.Diagnostic)
+        {
+            return;
+        }
+
+        var invocation = (await store.GetSkillInvocationsAsync(taskId, cancellationToken)
+                .ConfigureAwait(false))
+            .Single(item => item.Id == invocationId);
+        var nextStatus = skillEvent.EventKind switch
+        {
+            SkillEventKind.Started => SkillInvocationStatus.Running,
+            SkillEventKind.DecisionRequested => SkillInvocationStatus.WaitingForUser,
+            SkillEventKind.Completed => SkillInvocationStatus.Succeeded,
+            SkillEventKind.Failed => SkillInvocationStatus.Failed,
+            SkillEventKind.Cancelled => SkillInvocationStatus.Cancelled,
+            SkillEventKind.Interrupted => SkillInvocationStatus.Interrupted,
+            _ => invocation.Status
+        };
+        if (nextStatus == invocation.Status)
+        {
+            return;
+        }
+
+        var terminal = nextStatus is SkillInvocationStatus.Succeeded
+            or SkillInvocationStatus.Failed
+            or SkillInvocationStatus.Cancelled
+            or SkillInvocationStatus.Interrupted;
+        var diagnostics = ParseDiagnostics(skillEvent.DataJson);
+        await store.UpsertSkillInvocationAsync(
+                invocation with
+                {
+                    Status = nextStatus,
+                    StartedAtUtc = invocation.StartedAtUtc ?? skillEvent.OccurredAtUtc,
+                    CompletedAtUtc = terminal ? skillEvent.OccurredAtUtc : null,
+                    FailureCode = nextStatus == SkillInvocationStatus.Failed
+                        ? diagnostics.FailureCode ?? "skill_failed"
+                        : null,
+                    FailureMessage = nextStatus == SkillInvocationStatus.Failed
+                        ? diagnostics.FailureMessage ?? skillEvent.Message
+                        : null
+                },
+                cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    private async Task AuthorizeAsync(
+        ISkillAdapter adapter,
+        SkillInvocationRequest request,
+        Guid actorDeviceId,
+        CancellationToken cancellationToken)
+    {
+        var decision = policyEngine.AuthorizeOnce(adapter.Descriptor, request);
+        await store.AppendAuditAsync(
+                new AuditLogEntry
+                {
+                    Id = Guid.NewGuid(),
+                    OccurredAtUtc = timeProvider.GetUtcNow(),
+                    ActorDeviceId = actorDeviceId,
+                    Action = decision.IsAllowed
+                        ? "SkillAuthorizationAllowed"
+                        : "SkillAuthorizationDenied",
+                    EntityType = "SkillInvocation",
+                    EntityId = request.InvocationId.ToString("D"),
+                    Outcome = decision.IsAllowed ? AuditOutcome.Success : AuditOutcome.Rejected,
+                    DetailsJson = JsonSerializer.Serialize(new
+                    {
+                        request.SkillId,
+                        request.Capability,
+                        request.ActionAuthorizationId,
+                        decision.Code
+                    })
+                },
+                cancellationToken)
+            .ConfigureAwait(false);
+        if (!decision.IsAllowed)
+        {
+            var invocation = (await store.GetSkillInvocationsAsync(request.TaskId, cancellationToken)
+                    .ConfigureAwait(false))
+                .Single(item => item.Id == request.InvocationId);
+            await store.UpsertSkillInvocationAsync(
+                    invocation with
+                    {
+                        Status = SkillInvocationStatus.Failed,
+                        CompletedAtUtc = timeProvider.GetUtcNow(),
+                        FailureCode = decision.Code,
+                        FailureMessage = decision.UserMessage
+                    },
+                    cancellationToken)
+                .ConfigureAwait(false);
+            throw new UnauthorizedAccessException(decision.UserMessage);
+        }
+    }
+
+    private async Task<SkillResourceScope> RequireProjectScopeAsync(
+        AgentTask task,
+        ProjectRecord project,
+        CancellationToken cancellationToken)
+    {
+        var now = timeProvider.GetUtcNow();
+        var scopes = await store.GetResourceScopesAsync(task.Id, cancellationToken).ConfigureAwait(false);
+        var scope = scopes.SingleOrDefault(item =>
+            item.ScopeType == ResourceScopeType.Project
+            && item.ResourceId == project.Id
+            && item.AccessMode == ResourceAccessMode.Execute
+            && item.RevokedAtUtc is null
+            && (item.ExpiresAtUtc is null || item.ExpiresAtUtc > now))
+            ?? throw new UnauthorizedAccessException("任务缺少有效的项目执行范围授权。");
+        return new SkillResourceScope(
+            scope.ScopeType.ToString(),
+            scope.ResourceId,
+            project.RootPath,
+            scope.AccessMode.ToString());
     }
 
     private static DecisionRequestRecord ParseDecisionRequest(
         Guid taskId,
         Guid agentRunId,
         Guid attemptId,
-        AgentConnectorEvent connectorEvent)
+        SkillEvent skillEvent)
     {
-        if (connectorEvent.DataJson is null)
+        if (skillEvent.DataJson is null)
         {
             throw new InvalidDataException("DecisionRequested 事件缺少结构化数据。");
         }
 
-        using var document = JsonDocument.Parse(connectorEvent.DataJson);
+        using var document = JsonDocument.Parse(skillEvent.DataJson);
         var root = document.RootElement;
         var requestId = Guid.Parse(root.GetProperty("decisionRequestId").GetString()!);
         var question = root.GetProperty("question").GetString();
@@ -404,7 +709,6 @@ public sealed class AgentTaskExecutionService(
             throw new InvalidDataException("DecisionRequested 事件缺少 question。");
         }
 
-        var options = root.GetProperty("decisionOptions").GetRawText();
         return new DecisionRequestRecord
         {
             Id = requestId,
@@ -412,9 +716,9 @@ public sealed class AgentTaskExecutionService(
             AgentRunId = agentRunId,
             AttemptId = attemptId,
             Question = question,
-            OptionsJson = options,
+            OptionsJson = root.GetProperty("decisionOptions").GetRawText(),
             Status = DecisionRequestStatus.Pending,
-            CreatedAtUtc = connectorEvent.OccurredAtUtc
+            CreatedAtUtc = skillEvent.OccurredAtUtc
         };
     }
 
@@ -451,14 +755,14 @@ public sealed class AgentTaskExecutionService(
         Guid taskId,
         Guid runId,
         Guid attemptId,
-        AgentStartResult start,
+        SkillStartResult start,
         CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(start.Run.ExternalRunId)
-            || string.IsNullOrWhiteSpace(start.ConnectorVersion)
+            || string.IsNullOrWhiteSpace(start.AdapterVersion)
             || start.ProcessId is null)
         {
-            throw new InvalidDataException("Connector 返回 Running，但缺少 Thread ID、版本或进程 ID。");
+            throw new InvalidDataException("Skill Adapter 返回 Running，但缺少 Thread ID、版本或进程 ID。");
         }
 
         await store.RecordAgentStartedAsync(
@@ -466,7 +770,7 @@ public sealed class AgentTaskExecutionService(
                 runId,
                 attemptId,
                 start.Run.ExternalRunId,
-                start.ConnectorVersion,
+                start.AdapterVersion,
                 start.ProcessId.Value,
                 start.StartedAtUtc,
                 cancellationToken)
@@ -488,7 +792,61 @@ public sealed class AgentTaskExecutionService(
             throw new UnauthorizedAccessException("项目未授权，禁止启动 Codex。");
         }
 
+        var authorization = await store.GetProjectAuthorizationAsync(projectId, cancellationToken)
+            .ConfigureAwait(false);
+        if (authorization is null
+            || authorization.State != ProjectAuthorizationState.Authorized
+            || authorization.RevokedAtUtc is not null
+            || !string.Equals(
+                Path.GetFullPath(authorization.ScopeValue),
+                Path.GetFullPath(project.RootPath),
+                StringComparison.OrdinalIgnoreCase))
+        {
+            throw new UnauthorizedAccessException("项目授权记录无效，禁止启动 Codex。");
+        }
+
         return project;
+    }
+
+    private async Task<CommandRecord> RequireActionCommandAsync(
+        AgentTask task,
+        Guid? commandId,
+        CommandType expectedType,
+        bool allowTaskCommandLookup,
+        CancellationToken cancellationToken)
+    {
+        CommandRecord? command = null;
+        if (commandId is not null)
+        {
+            command = await store.GetCommandAsync(commandId.Value, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        else if (allowTaskCommandLookup)
+        {
+            command = (await store.GetTaskCommandsAsync(task.Id, cancellationToken)
+                    .ConfigureAwait(false))
+                .LastOrDefault(item => item.CommandType == expectedType);
+        }
+
+        if (command is null
+            || command.CommandType != expectedType
+            || command.TaskId != task.Id
+            || command.ProjectId != task.ProjectId
+            || command.SourceDeviceId != task.CreatedByDeviceId)
+        {
+            throw new UnauthorizedAccessException("任务缺少与本次操作匹配的用户命令授权。");
+        }
+
+        var expectedStatus = expectedType == CommandType.CreateTask
+            ? CommandStatus.Processed
+            : CommandStatus.Received;
+        if (command.Status != expectedStatus
+            || command.ExpiresAtUtc is { } expiresAt && expiresAt <= timeProvider.GetUtcNow())
+        {
+            throw new UnauthorizedAccessException("本次用户命令已经失效或不能用于当前操作。");
+        }
+
+        return command;
     }
 
     private static AgentAttemptRecord NewAttempt(
@@ -512,37 +870,48 @@ public sealed class AgentTaskExecutionService(
             InputHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(input)))
         };
 
-    private static AgentExecutionStatus InferStatus(AgentConnectorEventKind kind) => kind switch
+    private static SkillExecutionStatus InferStatus(SkillEventKind kind) => kind switch
     {
-        AgentConnectorEventKind.Started or AgentConnectorEventKind.Progress => AgentExecutionStatus.Running,
-        AgentConnectorEventKind.DecisionRequested => AgentExecutionStatus.WaitingForUser,
-        AgentConnectorEventKind.Completed => AgentExecutionStatus.Succeeded,
-        AgentConnectorEventKind.Failed => AgentExecutionStatus.Failed,
-        AgentConnectorEventKind.Cancelled => AgentExecutionStatus.Cancelled,
-        AgentConnectorEventKind.Interrupted => AgentExecutionStatus.Interrupted,
-        _ => AgentExecutionStatus.Unknown
+        SkillEventKind.Started or SkillEventKind.Progress => SkillExecutionStatus.Running,
+        SkillEventKind.DecisionRequested => SkillExecutionStatus.WaitingForUser,
+        SkillEventKind.Completed => SkillExecutionStatus.Succeeded,
+        SkillEventKind.Failed => SkillExecutionStatus.Failed,
+        SkillEventKind.Cancelled => SkillExecutionStatus.Cancelled,
+        SkillEventKind.Interrupted => SkillExecutionStatus.Interrupted,
+        _ => SkillExecutionStatus.Unknown
     };
 
-    private static AgentRunStatus MapRunStatus(AgentExecutionStatus status) => status switch
+    private static AgentRunStatus MapRunStatus(SkillExecutionStatus status) => status switch
     {
-        AgentExecutionStatus.Starting => AgentRunStatus.Starting,
-        AgentExecutionStatus.Running or AgentExecutionStatus.Unknown => AgentRunStatus.Running,
-        AgentExecutionStatus.WaitingForUser => AgentRunStatus.WaitingForUser,
-        AgentExecutionStatus.Succeeded => AgentRunStatus.Succeeded,
-        AgentExecutionStatus.Failed => AgentRunStatus.Failed,
-        AgentExecutionStatus.Cancelled => AgentRunStatus.Cancelled,
-        AgentExecutionStatus.Interrupted => AgentRunStatus.Interrupted,
+        SkillExecutionStatus.Starting => AgentRunStatus.Starting,
+        SkillExecutionStatus.Running or SkillExecutionStatus.Unknown => AgentRunStatus.Running,
+        SkillExecutionStatus.WaitingForUser => AgentRunStatus.WaitingForUser,
+        SkillExecutionStatus.Succeeded => AgentRunStatus.Succeeded,
+        SkillExecutionStatus.Failed => AgentRunStatus.Failed,
+        SkillExecutionStatus.Cancelled => AgentRunStatus.Cancelled,
+        SkillExecutionStatus.Interrupted => AgentRunStatus.Interrupted,
         _ => throw new ArgumentOutOfRangeException(nameof(status))
     };
 
-    private static AgentAttemptStatus MapAttemptStatus(AgentExecutionStatus status) => status switch
+    private static AgentAttemptStatus MapAttemptStatus(SkillExecutionStatus status) => status switch
     {
-        AgentExecutionStatus.Starting => AgentAttemptStatus.Starting,
-        AgentExecutionStatus.Running or AgentExecutionStatus.Unknown => AgentAttemptStatus.Running,
-        AgentExecutionStatus.WaitingForUser or AgentExecutionStatus.Succeeded => AgentAttemptStatus.Completed,
-        AgentExecutionStatus.Failed => AgentAttemptStatus.Failed,
-        AgentExecutionStatus.Cancelled => AgentAttemptStatus.Cancelled,
-        AgentExecutionStatus.Interrupted => AgentAttemptStatus.Interrupted,
+        SkillExecutionStatus.Starting => AgentAttemptStatus.Starting,
+        SkillExecutionStatus.Running or SkillExecutionStatus.Unknown => AgentAttemptStatus.Running,
+        SkillExecutionStatus.WaitingForUser or SkillExecutionStatus.Succeeded =>
+            AgentAttemptStatus.Completed,
+        SkillExecutionStatus.Failed => AgentAttemptStatus.Failed,
+        SkillExecutionStatus.Cancelled => AgentAttemptStatus.Cancelled,
+        SkillExecutionStatus.Interrupted => AgentAttemptStatus.Interrupted,
         _ => throw new ArgumentOutOfRangeException(nameof(status))
     };
+
+    private static bool IsTerminalOrWaiting(SkillEventKind kind) => kind is
+        SkillEventKind.DecisionRequested or
+        SkillEventKind.Completed or
+        SkillEventKind.Failed or
+        SkillEventKind.Cancelled or
+        SkillEventKind.Interrupted;
+
+    private static AgentRunReference ToAgentRun(SkillRunReference run) =>
+        new(run.TaskId, run.ExternalRunId, run.AttemptId);
 }

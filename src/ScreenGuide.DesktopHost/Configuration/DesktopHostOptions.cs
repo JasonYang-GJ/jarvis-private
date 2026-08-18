@@ -3,8 +3,13 @@ namespace ScreenGuide.DesktopHost.Configuration;
 public sealed class DesktopHostOptions
 {
     public const string DataDirectoryEnvironmentVariable = "SCREEN_GUIDE_DATA_DIRECTORY";
+    public const string PipeNameEnvironmentVariable = "SCREEN_GUIDE_PIPE_NAME";
+    public const string CodexExecutableEnvironmentVariable = "SCREEN_GUIDE_CODEX_PATH";
 
-    public DesktopHostOptions(string dataDirectory, string? codexExecutablePath = null)
+    public DesktopHostOptions(
+        string dataDirectory,
+        string? codexExecutablePath = null,
+        string? pipeName = null)
     {
         if (string.IsNullOrWhiteSpace(dataDirectory))
         {
@@ -15,6 +20,9 @@ public sealed class DesktopHostOptions
         CodexExecutablePath = string.IsNullOrWhiteSpace(codexExecutablePath)
             ? null
             : Path.GetFullPath(codexExecutablePath.Trim());
+        PipeName = string.IsNullOrWhiteSpace(pipeName)
+            ? DesktopProtocol.DesktopIpcEndpoint.CurrentUserPipeName()
+            : pipeName.Trim();
     }
 
     public string DataDirectory { get; }
@@ -25,14 +33,21 @@ public sealed class DesktopHostOptions
 
     public string EvidenceDataDirectory => Path.Combine(DataDirectory, "evidence");
 
+    public string LogsDirectory => Path.Combine(DataDirectory, "logs");
+
     public string? CodexExecutablePath { get; }
+
+    public string PipeName { get; }
 
     public static DesktopHostOptions FromEnvironment()
     {
         var configured = Environment.GetEnvironmentVariable(DataDirectoryEnvironmentVariable);
         if (!string.IsNullOrWhiteSpace(configured))
         {
-            return new DesktopHostOptions(configured);
+            return new DesktopHostOptions(
+                configured,
+                Environment.GetEnvironmentVariable(CodexExecutableEnvironmentVariable),
+                pipeName: Environment.GetEnvironmentVariable(PipeNameEnvironmentVariable));
         }
 
         var localApplicationData = Environment.GetFolderPath(
@@ -43,6 +58,8 @@ public sealed class DesktopHostOptions
         }
 
         return new DesktopHostOptions(
-            Path.Combine(localApplicationData, "ScreenGuide", "V01"));
+            Path.Combine(localApplicationData, "ScreenGuide", "V01"),
+            Environment.GetEnvironmentVariable(CodexExecutableEnvironmentVariable),
+            pipeName: Environment.GetEnvironmentVariable(PipeNameEnvironmentVariable));
     }
 }

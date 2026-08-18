@@ -13,6 +13,9 @@ captures/
 recordings/
 screenshots/
 sessions/
+evidence-baselines/
+evidence-snapshots/
+*.evidence-snapshot.json
 *.db
 *.sqlite
 *.db-shm
@@ -44,6 +47,3 @@ TestResults/
 Thumbs.db
 Desktop.ini
 .DS_Store
-
-# User-provided local branding (may not be licensed for public redistribution)
-src/ScreenGuide.App/Assets/jarvis-local.*

@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <SupportedOSPlatformVersion>10.0.19041.0</SupportedOSPlatformVersion>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>ScreenGuide.DesktopClient</AssemblyName>
+    <RootNamespace>ScreenGuide.DesktopClient</RootNamespace>
+    <AssemblyTitle>元枢</AssemblyTitle>
+    <Title>元枢</Title>
+    <Product>元枢</Product>
+    <Description>面向 Windows 的个人电脑 AI 中枢</Description>
+    <ApplicationIcon>..\..\assets\branding\yuanshu-icon.ico</ApplicationIcon>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\ScreenGuide.DesktopProtocol\ScreenGuide.DesktopProtocol.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Resource Include="..\..\assets\branding\yuanshu-icon.ico">
+      <Link>Assets\yuanshu-icon.ico</Link>
+    </Resource>
+  </ItemGroup>
+
+</Project>

@@ -14,18 +14,18 @@ public static class SpeechEchoMatcher
 
     public static bool CanInterrupt(string? recognizedText)
     {
-        var normalized = WakePhraseMatcher.Normalize(recognizedText);
+        var normalized = SpeechTextNormalizer.Normalize(recognizedText);
         return normalized.Length >= 3
             || ImmediateInterruptions.Any(phrase => string.Equals(
                 normalized,
-                WakePhraseMatcher.Normalize(phrase),
+                SpeechTextNormalizer.Normalize(phrase),
                 StringComparison.Ordinal));
     }
 
     public static bool IsLikelyAssistantEcho(string? recognizedText, string? assistantSpeech)
     {
-        var recognized = WakePhraseMatcher.Normalize(recognizedText);
-        var assistant = WakePhraseMatcher.Normalize(assistantSpeech);
+        var recognized = SpeechTextNormalizer.Normalize(recognizedText);
+        var assistant = SpeechTextNormalizer.Normalize(assistantSpeech);
         if (recognized.Length < 2 || assistant.Length < 2)
         {
             return false;

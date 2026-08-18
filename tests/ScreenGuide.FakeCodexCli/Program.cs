@@ -81,6 +81,11 @@ public static class Program
                 "请选择颜色。",
                 ["blue", "green"]);
             Write(new { type = "turn.completed", usage = Usage() });
+            if (prompt.Contains("TEST_ACTION_REQUIRED_DELAYED_EXIT", StringComparison.Ordinal))
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(750));
+            }
+
             return 0;
         }
 
@@ -122,6 +127,25 @@ public static class Program
             return 0;
         }
 
+        if (prompt.Contains("TEST_EVIDENCE_WRAPPED_FAIL", StringComparison.Ordinal))
+        {
+            await File.WriteAllTextAsync("wrapped-failed-test-change.txt", "agent change\n");
+            WriteCommand(
+                "wrapped-test-fail",
+                "\"C:\\Users\\Example\\pwsh.exe\" -Command 'dotnet test Sample.csproj --nologo'",
+                1,
+                "NU1301 restore failed");
+            WriteAgentMessage(
+                "completed",
+                "test failed",
+                null,
+                [],
+                ["wrapped-failed-test-change.txt"],
+                [new { name = "dotnet test", status = "failed" }]);
+            Write(new { type = "turn.completed", usage = Usage() });
+            return 0;
+        }
+
         if (prompt.Contains("TEST_EVIDENCE_NO_TEST", StringComparison.Ordinal))
         {
             await File.WriteAllTextAsync("untested-change.txt", "agent change\n");
@@ -131,6 +155,21 @@ public static class Program
                 null,
                 [],
                 ["untested-change.txt"],
+                []);
+            Write(new { type = "turn.completed", usage = Usage() });
+            return 0;
+        }
+
+        if (prompt.Contains("TEST_DELAYED_SUCCESS", StringComparison.Ordinal))
+        {
+            await Task.Delay(TimeSpan.FromSeconds(3));
+            await File.WriteAllTextAsync("delayed-change.txt", "agent change\n");
+            WriteAgentMessage(
+                "completed",
+                "delayed task completed",
+                null,
+                [],
+                ["delayed-change.txt"],
                 []);
             Write(new { type = "turn.completed", usage = Usage() });
             return 0;

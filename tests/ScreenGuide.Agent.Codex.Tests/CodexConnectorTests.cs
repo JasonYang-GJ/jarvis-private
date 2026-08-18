@@ -53,6 +53,23 @@ public sealed class CodexConnectorTests
     }
 
     [Fact]
+    public async Task SendsChineseInstructionAsUtf8WithoutConsoleEncodingDependency()
+    {
+        await using var environment = ConnectorTestEnvironment.Create();
+        await using var connector = environment.CreateConnector();
+
+        var (start, events) = await StartAndCollectAsync(
+            connector,
+            environment,
+            "中文桌面任务 TEST_SUCCESS");
+
+        Assert.Equal(
+            AgentExecutionStatus.Succeeded,
+            (await connector.GetTaskStatusAsync(start.Run)).Status);
+        Assert.Contains(events, item => item.EventKind == AgentConnectorEventKind.Completed);
+    }
+
+    [Fact]
     public async Task MapsAuthoritativeTurnFailedToFailed()
     {
         await using var environment = ConnectorTestEnvironment.Create();
@@ -137,6 +154,45 @@ public sealed class CodexConnectorTests
             first.Run.ExternalRunId!,
             (await connector.GetFinalResultAsync(second.Run))!.Summary,
             StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ImmediateDecisionResponseWaitsForPreviousTurnProcessCleanup()
+    {
+        await using var environment = ConnectorTestEnvironment.Create();
+        await using var connector = environment.CreateConnector();
+        var taskId = Guid.NewGuid();
+        var first = await connector.StartTaskAsync(
+            environment.NewRequest(taskId, "TEST_ACTION_REQUIRED_DELAYED_EXIT"));
+        var decisionObserved = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var firstCollector = Task.Run(
+            async () =>
+            {
+                await foreach (var connectorEvent in connector.GetTaskEventsAsync(first.Run, 0))
+                {
+                    if (connectorEvent.EventKind == AgentConnectorEventKind.DecisionRequested)
+                    {
+                        decisionObserved.TrySetResult();
+                    }
+                }
+            });
+        await decisionObserved.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        var waiting = await connector.GetTaskStatusAsync(first.Run);
+
+        var second = await connector.RespondToDecisionAsync(
+            new AgentDecisionResponse(
+                first.Run,
+                waiting.DecisionRequestId!,
+                "TEST_CONTINUE",
+                Guid.NewGuid(),
+                environment.ProjectRoot,
+                environment.ProjectRoot));
+        await firstCollector;
+        var events = await CollectAsync(connector, second.Run);
+
+        Assert.Equal(first.Run.ExternalRunId, second.Run.ExternalRunId);
+        Assert.Contains(events, item => item.EventKind == AgentConnectorEventKind.Completed);
     }
 
     [Fact]

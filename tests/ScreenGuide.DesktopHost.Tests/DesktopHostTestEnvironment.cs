@@ -16,7 +16,8 @@ internal sealed class DesktopHostTestEnvironment : IAsyncDisposable
         RootDirectory = rootDirectory;
         Options = new DesktopHostOptions(
             Path.Combine(rootDirectory, "host-data"),
-            Path.ChangeExtension(typeof(FakeCodexMarker).Assembly.Location, ".exe"));
+            Path.ChangeExtension(typeof(FakeCodexMarker).Assembly.Location, ".exe"),
+            $"ScreenGuide.Tests.{Guid.NewGuid():N}");
         TimeProvider = new TestTimeProvider(
             new DateTimeOffset(2026, 8, 17, 10, 0, 0, TimeSpan.Zero));
     }
@@ -182,6 +183,33 @@ internal sealed class DesktopHostTestEnvironment : IAsyncDisposable
         }
 
         return (device, project, task);
+    }
+
+    public async Task<CommandRecord> RegisterTaskCommandAsync(
+        Guid taskId,
+        CommandType commandType,
+        string payloadJson = "{}")
+    {
+        await using var store = await OpenStoreAsync();
+        var task = await store.GetTaskAsync(taskId)
+            ?? throw new InvalidOperationException("测试任务不存在。");
+        var now = TimeProvider.GetUtcNow();
+        var command = new CommandRecord
+        {
+            Id = Guid.NewGuid(),
+            SourceDeviceId = task.CreatedByDeviceId,
+            ProjectId = task.ProjectId,
+            TaskId = task.Id,
+            IdempotencyKey = $"test-{commandType}-{Guid.NewGuid():N}",
+            CommandType = commandType,
+            PayloadJson = payloadJson,
+            ReceivedAtUtc = now,
+            ExpiresAtUtc = now.AddMinutes(10),
+            Status = CommandStatus.Received
+        };
+        var result = await store.RegisterCommandAsync(command);
+        Assert.True(result.Accepted);
+        return result.Command;
     }
 
     public async Task<SqliteTaskStore> OpenStoreAsync()

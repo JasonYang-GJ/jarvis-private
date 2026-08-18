@@ -55,32 +55,62 @@ public sealed class SqliteTaskStore : ILocalTaskStore
         var storedVersion = Convert.ToInt32(
             await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false),
             CultureInfo.InvariantCulture);
-        if (storedVersion > V01Contract.SchemaVersion)
+        if (storedVersion > V02Contract.SchemaVersion)
         {
             throw new NotSupportedException(
-                $"数据库版本 {storedVersion} 高于当前支持的版本 {V01Contract.SchemaVersion}。");
+                $"数据库版本 {storedVersion} 高于当前支持的版本 {V02Contract.SchemaVersion}。");
         }
 
-        if (storedVersion < 1)
+        string? backupPath = null;
+        if (storedVersion > 0 && storedVersion < V02Contract.SchemaVersion)
         {
-            command.CommandText = SqliteSchema.CreateVersion1;
-            await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
-            await RecordSchemaVersionAsync(connection, 1, cancellationToken).ConfigureAwait(false);
+            backupPath = await CreateMigrationBackupAsync(connection, storedVersion, cancellationToken)
+                .ConfigureAwait(false);
         }
 
-        if (storedVersion < 2)
+        try
         {
-            command.CommandText = SqliteSchema.CreateVersion2;
-            await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
-            await RecordSchemaVersionAsync(connection, 2, cancellationToken).ConfigureAwait(false);
-        }
+            if (storedVersion < 1)
+            {
+                command.CommandText = SqliteSchema.CreateVersion1;
+                await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+                await RecordSchemaVersionAsync(connection, null, 1, cancellationToken).ConfigureAwait(false);
+            }
 
-        if (storedVersion < 3)
-        {
-            command.CommandText = SqliteSchema.CreateVersion3;
-            await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
-            await RecordSchemaVersionAsync(connection, 3, cancellationToken).ConfigureAwait(false);
+            if (storedVersion < 2)
+            {
+                await ApplyMigrationAsync(connection, 2, SqliteSchema.CreateVersion2, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+
+            if (storedVersion < 3)
+            {
+                await ApplyMigrationAsync(connection, 3, SqliteSchema.CreateVersion3, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+
+            if (storedVersion < 4)
+            {
+                await ApplyMigrationAsync(connection, 4, SqliteSchema.CreateVersion4, cancellationToken)
+                    .ConfigureAwait(false);
+            }
         }
+        catch (Exception exception) when (backupPath is not null)
+        {
+            throw new InvalidOperationException(
+                $"数据库升级失败，原数据备份保存在：{backupPath}",
+                exception);
+        }
+    }
+
+    public async Task<int> GetSchemaVersionAsync(CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT COALESCE(MAX(version), 0) FROM schema_info;";
+        return Convert.ToInt32(
+            await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false),
+            CultureInfo.InvariantCulture);
     }
 
     public async Task UpsertDeviceAsync(
@@ -167,6 +197,39 @@ public sealed class SqliteTaskStore : ILocalTaskStore
         Add(command, "$updatedAtUtc", project.UpdatedAtUtc);
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
 
+        await using (var authorization = connection.CreateCommand())
+        {
+            authorization.Transaction = transaction;
+            authorization.CommandText = """
+                INSERT INTO project_authorizations(
+                    id, project_id, scope, scope_value, state,
+                    authorized_by_device_id, authorized_at_utc, revoked_at_utc, updated_at_utc)
+                VALUES(
+                    $id, $projectId, $scope, $scopeValue, $state,
+                    $authorizedByDeviceId, $authorizedAtUtc, $revokedAtUtc, $updatedAtUtc)
+                ON CONFLICT(project_id) DO UPDATE SET
+                    scope = excluded.scope,
+                    scope_value = excluded.scope_value,
+                    state = excluded.state,
+                    authorized_by_device_id = excluded.authorized_by_device_id,
+                    authorized_at_utc = excluded.authorized_at_utc,
+                    revoked_at_utc = excluded.revoked_at_utc,
+                    updated_at_utc = excluded.updated_at_utc;
+                """;
+            Add(authorization, "$id", project.Id);
+            Add(authorization, "$projectId", project.Id);
+            authorization.Parameters.AddWithValue(
+                "$scope",
+                ProjectAuthorizationScope.ProjectDirectory.ToString());
+            authorization.Parameters.AddWithValue("$scopeValue", normalizedRoot);
+            authorization.Parameters.AddWithValue("$state", project.AuthorizationState.ToString());
+            Add(authorization, "$authorizedByDeviceId", project.AuthorizedByDeviceId);
+            Add(authorization, "$authorizedAtUtc", project.AuthorizedAtUtc);
+            AddNullable(authorization, "$revokedAtUtc", project.RevokedAtUtc);
+            Add(authorization, "$updatedAtUtc", project.UpdatedAtUtc);
+            await authorization.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        }
+
         await InsertAuditAsync(
             connection,
             transaction,
@@ -214,6 +277,15 @@ public sealed class SqliteTaskStore : ILocalTaskStore
             ReadProject,
             cancellationToken);
 
+    public Task<ProjectAuthorizationRecord?> GetProjectAuthorizationAsync(
+        Guid projectId,
+        CancellationToken cancellationToken = default) =>
+        QuerySingleAsync(
+            "SELECT * FROM project_authorizations WHERE project_id = $id;",
+            projectId,
+            ReadProjectAuthorization,
+            cancellationToken);
+
     public async Task<IReadOnlyList<ProjectRecord>> GetAuthorizedProjectsAsync(
         CancellationToken cancellationToken = default)
     {
@@ -237,6 +309,32 @@ public sealed class SqliteTaskStore : ILocalTaskStore
         return projects;
     }
 
+    public async Task<IReadOnlyList<ProjectRecord>> GetProjectsAsync(
+        bool includeRevoked = false,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+        await using var command = connection.CreateCommand();
+        command.CommandText = includeRevoked
+            ? "SELECT * FROM projects ORDER BY name COLLATE NOCASE, id;"
+            : "SELECT * FROM projects WHERE authorization_state = $authorizationState ORDER BY name COLLATE NOCASE, id;";
+        if (!includeRevoked)
+        {
+            command.Parameters.AddWithValue(
+                "$authorizationState",
+                ProjectAuthorizationState.Authorized.ToString());
+        }
+
+        var projects = new List<ProjectRecord>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            projects.Add(ReadProject(reader));
+        }
+
+        return projects;
+    }
+
     public Task<AgentTask?> GetTaskAsync(Guid taskId, CancellationToken cancellationToken = default) =>
         QuerySingleAsync(
             "SELECT * FROM tasks WHERE id = $id;",
@@ -244,12 +342,58 @@ public sealed class SqliteTaskStore : ILocalTaskStore
             ReadTask,
             cancellationToken);
 
+    public async Task<IReadOnlyList<AgentTask>> GetTasksAsync(
+        Guid? projectId = null,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+        await using var command = connection.CreateCommand();
+        command.CommandText = projectId is null
+            ? "SELECT * FROM tasks ORDER BY created_at_utc DESC, id DESC;"
+            : "SELECT * FROM tasks WHERE project_id = $projectId ORDER BY created_at_utc DESC, id DESC;";
+        if (projectId is { } id)
+        {
+            Add(command, "$projectId", id);
+        }
+
+        var tasks = new List<AgentTask>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            tasks.Add(ReadTask(reader));
+        }
+
+        return tasks;
+    }
+
     public Task<CommandRecord?> GetCommandAsync(Guid commandId, CancellationToken cancellationToken = default) =>
         QuerySingleAsync(
             "SELECT * FROM commands WHERE id = $id;",
             commandId,
             ReadCommand,
             cancellationToken);
+
+    public async Task<IReadOnlyList<CommandRecord>> GetTaskCommandsAsync(
+        Guid taskId,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT * FROM commands
+            WHERE task_id = $taskId
+            ORDER BY received_at_utc, id;
+            """;
+        Add(command, "$taskId", taskId);
+        var commands = new List<CommandRecord>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            commands.Add(ReadCommand(reader));
+        }
+
+        return commands;
+    }
 
     public Task<AgentRunRecord?> GetAgentRunByTaskAsync(
         Guid taskId,
@@ -280,6 +424,171 @@ public sealed class SqliteTaskStore : ILocalTaskStore
         }
 
         return attempts;
+    }
+
+    public async Task<IReadOnlyList<ResourceScopeRecord>> GetResourceScopesAsync(
+        Guid taskId,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT * FROM resource_scopes
+            WHERE task_id = $taskId
+            ORDER BY granted_at_utc, id;
+            """;
+        Add(command, "$taskId", taskId);
+        var scopes = new List<ResourceScopeRecord>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            scopes.Add(ReadResourceScope(reader));
+        }
+
+        return scopes;
+    }
+
+    public async Task UpsertResourceScopeAsync(
+        ResourceScopeRecord scope,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(scope);
+        RequireText(scope.ScopeValue, nameof(scope.ScopeValue));
+        await using var connection = await OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+        await using var transaction = connection.BeginTransaction();
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            INSERT INTO resource_scopes(
+                id, task_id, scope_type, resource_id, scope_value, access_mode,
+                granted_by_device_id, granted_at_utc, expires_at_utc, revoked_at_utc)
+            VALUES(
+                $id, $taskId, $scopeType, $resourceId, $scopeValue, $accessMode,
+                $grantedByDeviceId, $grantedAtUtc, $expiresAtUtc, $revokedAtUtc)
+            ON CONFLICT(id) DO UPDATE SET
+                scope_type = excluded.scope_type,
+                resource_id = excluded.resource_id,
+                scope_value = excluded.scope_value,
+                access_mode = excluded.access_mode,
+                expires_at_utc = excluded.expires_at_utc,
+                revoked_at_utc = excluded.revoked_at_utc;
+            """;
+        Add(command, "$id", scope.Id);
+        Add(command, "$taskId", scope.TaskId);
+        command.Parameters.AddWithValue("$scopeType", scope.ScopeType.ToString());
+        AddNullable(command, "$resourceId", scope.ResourceId);
+        command.Parameters.AddWithValue("$scopeValue", scope.ScopeValue.Trim());
+        command.Parameters.AddWithValue("$accessMode", scope.AccessMode.ToString());
+        Add(command, "$grantedByDeviceId", scope.GrantedByDeviceId);
+        Add(command, "$grantedAtUtc", scope.GrantedAtUtc);
+        AddNullable(command, "$expiresAtUtc", scope.ExpiresAtUtc);
+        AddNullable(command, "$revokedAtUtc", scope.RevokedAtUtc);
+        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        await InsertAuditAsync(
+            connection,
+            transaction,
+            scope.GrantedAtUtc,
+            scope.GrantedByDeviceId,
+            "ResourceScopeRecorded",
+            "Task",
+            scope.TaskId.ToString("D"),
+            AuditOutcome.Success,
+            JsonSerializer.Serialize(new { scope.Id, scope.ScopeType, scope.AccessMode }),
+            cancellationToken).ConfigureAwait(false);
+        transaction.Commit();
+    }
+
+    public async Task<IReadOnlyList<SkillInvocationRecord>> GetSkillInvocationsAsync(
+        Guid taskId,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT * FROM skill_invocations
+            WHERE task_id = $taskId
+            ORDER BY sequence_number;
+            """;
+        Add(command, "$taskId", taskId);
+        var invocations = new List<SkillInvocationRecord>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            invocations.Add(ReadSkillInvocation(reader));
+        }
+
+        return invocations;
+    }
+
+    public async Task UpsertSkillInvocationAsync(
+        SkillInvocationRecord invocation,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(invocation);
+        RequireText(invocation.SkillId, nameof(invocation.SkillId));
+        RequireText(invocation.SkillVersion, nameof(invocation.SkillVersion));
+        RequireText(invocation.Capability, nameof(invocation.Capability));
+        ValidateJson(invocation.InputJson, nameof(invocation.InputJson));
+        if (invocation.SequenceNumber <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(invocation), "Skill 调用序号必须大于零。");
+        }
+
+        await using var connection = await OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+        await using var transaction = connection.BeginTransaction();
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            INSERT INTO skill_invocations(
+                id, task_id, sequence_number, skill_id, skill_version, capability,
+                input_json, status, created_at_utc, started_at_utc, completed_at_utc,
+                failure_code, failure_message)
+            VALUES(
+                $id, $taskId, $sequenceNumber, $skillId, $skillVersion, $capability,
+                $inputJson, $status, $createdAtUtc, $startedAtUtc, $completedAtUtc,
+                $failureCode, $failureMessage)
+            ON CONFLICT(id) DO UPDATE SET
+                skill_version = excluded.skill_version,
+                capability = excluded.capability,
+                input_json = excluded.input_json,
+                status = excluded.status,
+                started_at_utc = excluded.started_at_utc,
+                completed_at_utc = excluded.completed_at_utc,
+                failure_code = excluded.failure_code,
+                failure_message = excluded.failure_message;
+            """;
+        Add(command, "$id", invocation.Id);
+        Add(command, "$taskId", invocation.TaskId);
+        command.Parameters.AddWithValue("$sequenceNumber", invocation.SequenceNumber);
+        command.Parameters.AddWithValue("$skillId", invocation.SkillId.Trim());
+        command.Parameters.AddWithValue("$skillVersion", invocation.SkillVersion.Trim());
+        command.Parameters.AddWithValue("$capability", invocation.Capability.Trim());
+        command.Parameters.AddWithValue("$inputJson", invocation.InputJson);
+        command.Parameters.AddWithValue("$status", invocation.Status.ToString());
+        Add(command, "$createdAtUtc", invocation.CreatedAtUtc);
+        AddNullable(command, "$startedAtUtc", invocation.StartedAtUtc);
+        AddNullable(command, "$completedAtUtc", invocation.CompletedAtUtc);
+        AddNullable(command, "$failureCode", invocation.FailureCode);
+        AddNullable(command, "$failureMessage", invocation.FailureMessage);
+        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        await InsertAuditAsync(
+            connection,
+            transaction,
+            invocation.CompletedAtUtc ?? invocation.StartedAtUtc ?? invocation.CreatedAtUtc,
+            null,
+            "SkillInvocationRecorded",
+            "Task",
+            invocation.TaskId.ToString("D"),
+            AuditOutcome.Success,
+            JsonSerializer.Serialize(new
+            {
+                invocation.Id,
+                invocation.SequenceNumber,
+                invocation.SkillId,
+                invocation.Status
+            }),
+            cancellationToken).ConfigureAwait(false);
+        transaction.Commit();
     }
 
     public async Task<DecisionRequestRecord?> GetPendingDecisionRequestAsync(
@@ -385,15 +694,86 @@ public sealed class SqliteTaskStore : ILocalTaskStore
         }
     }
 
+    public async Task CompleteCommandAsync(
+        Guid commandId,
+        CommandStatus status,
+        DateTimeOffset processedAtUtc,
+        string? rejectionReason = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (status is CommandStatus.Received)
+        {
+            throw new ArgumentException("完成命令不能保留 Received 状态。", nameof(status));
+        }
+
+        await using var connection = await OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+        await using var transaction = connection.BeginTransaction();
+        var existing = await GetCommandInTransactionAsync(
+            connection,
+            transaction,
+            commandId,
+            cancellationToken).ConfigureAwait(false)
+            ?? throw new InvalidOperationException("命令不存在。");
+        if (existing.Status != CommandStatus.Received)
+        {
+            if (existing.Status == status)
+            {
+                transaction.Commit();
+                return;
+            }
+
+            throw new InvalidOperationException("命令已经结束，不能再次改变结果。");
+        }
+
+        await using var update = connection.CreateCommand();
+        update.Transaction = transaction;
+        update.CommandText = """
+            UPDATE commands
+            SET status = $status,
+                processed_at_utc = $processedAtUtc,
+                rejection_reason = $rejectionReason
+            WHERE id = $commandId AND status = $expectedStatus;
+            """;
+        update.Parameters.AddWithValue("$status", status.ToString());
+        Add(update, "$processedAtUtc", processedAtUtc);
+        AddNullable(update, "$rejectionReason", rejectionReason);
+        Add(update, "$commandId", commandId);
+        update.Parameters.AddWithValue("$expectedStatus", CommandStatus.Received.ToString());
+        if (await update.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) != 1)
+        {
+            throw new InvalidOperationException("命令状态发生并发变化。");
+        }
+
+        await InsertAuditAsync(
+            connection,
+            transaction,
+            processedAtUtc,
+            existing.SourceDeviceId,
+            "CommandCompleted",
+            "Command",
+            commandId.ToString("D"),
+            status switch
+            {
+                CommandStatus.Processed => AuditOutcome.Success,
+                CommandStatus.Rejected => AuditOutcome.Rejected,
+                _ => AuditOutcome.Failed
+            },
+            JsonSerializer.Serialize(new { status, rejectionReason }),
+            cancellationToken).ConfigureAwait(false);
+        transaction.Commit();
+    }
+
     public async Task CreateTaskAsync(
         AgentTask task,
         Guid sourceCommandId,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(task);
-        if (task.Status != TaskStatus.Pending || task.Version != 0)
+        if (task.Status != TaskStatus.Pending
+            || task.Phase != TaskPhase.Planning
+            || task.Version != 0)
         {
-            throw new InvalidOperationException("新任务必须以 Pending 状态和版本 0 创建。");
+            throw new InvalidOperationException("新任务必须以 Pending / Planning 状态和版本 0 创建。");
         }
 
         RequireText(task.Title, nameof(task.Title));
@@ -427,19 +807,44 @@ public sealed class SqliteTaskStore : ILocalTaskStore
         insert.CommandText = """
             INSERT INTO tasks(
                 id, project_id, created_by_device_id, title, instruction,
-                working_directory_relative_path, executor, status,
+                working_directory_relative_path, executor, status, phase,
                 cancellation_requested_at_utc, created_at_utc, updated_at_utc,
                 started_at_utc, completed_at_utc, last_heartbeat_at_utc,
                 failure_code, failure_message, version)
             VALUES(
                 $id, $projectId, $createdByDeviceId, $title, $instruction,
-                $workingDirectoryRelativePath, $executor, $status,
+                $workingDirectoryRelativePath, $executor, $status, $phase,
                 $cancellationRequestedAtUtc, $createdAtUtc, $updatedAtUtc,
                 $startedAtUtc, $completedAtUtc, $lastHeartbeatAtUtc,
                 $failureCode, $failureMessage, $version);
             """;
         BindTask(insert, task);
         await insert.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+
+        var initialScopeId = Guid.NewGuid();
+        await using (var insertScope = connection.CreateCommand())
+        {
+            insertScope.Transaction = transaction;
+            insertScope.CommandText = """
+                INSERT INTO resource_scopes(
+                    id, task_id, scope_type, resource_id, scope_value, access_mode,
+                    granted_by_device_id, granted_at_utc, expires_at_utc, revoked_at_utc)
+                VALUES(
+                    $id, $taskId, $scopeType, $resourceId, $scopeValue, $accessMode,
+                    $grantedByDeviceId, $grantedAtUtc, NULL, NULL);
+                """;
+            Add(insertScope, "$id", initialScopeId);
+            Add(insertScope, "$taskId", task.Id);
+            insertScope.Parameters.AddWithValue("$scopeType", ResourceScopeType.Project.ToString());
+            Add(insertScope, "$resourceId", project.Id);
+            insertScope.Parameters.AddWithValue(
+                "$scopeValue",
+                project.RootPath);
+            insertScope.Parameters.AddWithValue("$accessMode", ResourceAccessMode.Execute.ToString());
+            Add(insertScope, "$grantedByDeviceId", task.CreatedByDeviceId);
+            Add(insertScope, "$grantedAtUtc", task.CreatedAtUtc);
+            await insertScope.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        }
 
         await using var updateCommand = connection.CreateCommand();
         updateCommand.Transaction = transaction;
@@ -471,6 +876,8 @@ public sealed class SqliteTaskStore : ILocalTaskStore
                 EventType = TaskEventType.Created,
                 FromStatus = null,
                 ToStatus = TaskStatus.Pending,
+                FromPhase = null,
+                ToPhase = TaskPhase.Planning,
                 Source = TaskEventSource.User,
                 SourceDeviceId = task.CreatedByDeviceId,
                 CommandId = sourceCommandId,
@@ -487,7 +894,7 @@ public sealed class SqliteTaskStore : ILocalTaskStore
             "Task",
             task.Id.ToString("D"),
             AuditOutcome.Success,
-            JsonSerializer.Serialize(new { task.ProjectId, sourceCommandId }),
+            JsonSerializer.Serialize(new { task.ProjectId, sourceCommandId, initialScopeId }),
             cancellationToken).ConfigureAwait(false);
         transaction.Commit();
     }
@@ -1076,6 +1483,77 @@ public sealed class SqliteTaskStore : ILocalTaskStore
         return updated;
     }
 
+    public async Task<AgentTask> TransitionTaskPhaseAsync(
+        Guid taskId,
+        TaskPhase newPhase,
+        TaskEventSource source,
+        string message,
+        Guid? sourceDeviceId = null,
+        Guid? commandId = null,
+        string? dataJson = null,
+        CancellationToken cancellationToken = default)
+    {
+        RequireText(message, nameof(message));
+        if (dataJson is not null)
+        {
+            ValidateJson(dataJson, nameof(dataJson));
+        }
+
+        await using var connection = await OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+        await using var transaction = connection.BeginTransaction();
+        var current = await GetTaskInTransactionAsync(
+            connection,
+            transaction,
+            taskId,
+            cancellationToken).ConfigureAwait(false)
+            ?? throw new InvalidOperationException("任务不存在。");
+        TaskPhaseStateMachine.EnsureTransition(current.Phase, newPhase);
+
+        var now = DateTimeOffset.UtcNow;
+        var updated = current with
+        {
+            Phase = newPhase,
+            UpdatedAtUtc = now,
+            Version = current.Version + 1
+        };
+        await UpdateTaskAsync(connection, transaction, current.Version, updated, cancellationToken)
+            .ConfigureAwait(false);
+        var sequence = await GetNextSequenceAsync(connection, transaction, taskId, cancellationToken)
+            .ConfigureAwait(false);
+        await InsertTaskEventAsync(
+            connection,
+            transaction,
+            new TaskEventRecord
+            {
+                Id = Guid.NewGuid(),
+                TaskId = taskId,
+                SequenceNumber = sequence,
+                EventType = TaskEventType.PhaseChanged,
+                FromPhase = current.Phase,
+                ToPhase = newPhase,
+                Source = source,
+                SourceDeviceId = sourceDeviceId,
+                CommandId = commandId,
+                OccurredAtUtc = now,
+                Message = message.Trim(),
+                DataJson = dataJson
+            },
+            cancellationToken).ConfigureAwait(false);
+        await InsertAuditAsync(
+            connection,
+            transaction,
+            now,
+            sourceDeviceId,
+            "TaskPhaseChanged",
+            "Task",
+            taskId.ToString("D"),
+            AuditOutcome.Success,
+            JsonSerializer.Serialize(new { from = current.Phase, to = newPhase }),
+            cancellationToken).ConfigureAwait(false);
+        transaction.Commit();
+        return updated;
+    }
+
     public async Task<bool> RequestCancellationAsync(
         Guid taskId,
         Guid sourceDeviceId,
@@ -1184,7 +1662,9 @@ public sealed class SqliteTaskStore : ILocalTaskStore
             var updated = current with
             {
                 Status = TaskStatus.Interrupted,
+                Phase = TaskPhase.Verifying,
                 UpdatedAtUtc = recoveredAtUtc,
+                CompletedAtUtc = recoveredAtUtc,
                 Version = current.Version + 1
             };
             await UpdateTaskAsync(connection, transaction, current.Version, updated, cancellationToken)
@@ -1202,6 +1682,8 @@ public sealed class SqliteTaskStore : ILocalTaskStore
                     EventType = TaskEventType.RecoveryDetected,
                     FromStatus = current.Status,
                     ToStatus = TaskStatus.Interrupted,
+                    FromPhase = current.Phase,
+                    ToPhase = TaskPhase.Verifying,
                     Source = TaskEventSource.Recovery,
                     OccurredAtUtc = recoveredAtUtc,
                     Message = "程序启动时发现未正常结束的任务，已标记为 Interrupted。"
@@ -1262,6 +1744,39 @@ public sealed class SqliteTaskStore : ILocalTaskStore
                 updateAttempt.Parameters.AddWithValue("$starting", AgentAttemptStatus.Starting.ToString());
                 updateAttempt.Parameters.AddWithValue("$running", AgentAttemptStatus.Running.ToString());
                 await updateAttempt.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            }
+
+            await using (var updateInvocation = connection.CreateCommand())
+            {
+                updateInvocation.Transaction = transaction;
+                updateInvocation.CommandText = """
+                    UPDATE skill_invocations
+                    SET status = $status,
+                        completed_at_utc = COALESCE(completed_at_utc, $completedAtUtc),
+                        failure_code = COALESCE(failure_code, $failureCode),
+                        failure_message = COALESCE(failure_message, $failureMessage)
+                    WHERE task_id = $taskId
+                      AND status IN ($pending, $running, $waiting);
+                    """;
+                Add(updateInvocation, "$taskId", current.Id);
+                updateInvocation.Parameters.AddWithValue(
+                    "$status",
+                    SkillInvocationStatus.Interrupted.ToString());
+                Add(updateInvocation, "$completedAtUtc", recoveredAtUtc);
+                updateInvocation.Parameters.AddWithValue("$failureCode", "host_restarted");
+                updateInvocation.Parameters.AddWithValue(
+                    "$failureMessage",
+                    "Desktop Host 重启时 Skill Invocation 尚无权威终态。");
+                updateInvocation.Parameters.AddWithValue(
+                    "$pending",
+                    SkillInvocationStatus.Pending.ToString());
+                updateInvocation.Parameters.AddWithValue(
+                    "$running",
+                    SkillInvocationStatus.Running.ToString());
+                updateInvocation.Parameters.AddWithValue(
+                    "$waiting",
+                    SkillInvocationStatus.WaitingForUser.ToString());
+                await updateInvocation.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
             }
         }
 
@@ -1331,6 +1846,77 @@ public sealed class SqliteTaskStore : ILocalTaskStore
             cancellationToken,
             entry.Id).ConfigureAwait(false);
         transaction.Commit();
+    }
+
+    public async Task<int> DeleteTerminalTaskHistoryAsync(
+        DateTimeOffset deletedAtUtc,
+        Guid actorDeviceId,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+        await using var transaction = connection.BeginTransaction();
+        await using var count = connection.CreateCommand();
+        count.Transaction = transaction;
+        count.CommandText = """
+            SELECT COUNT(*) FROM tasks
+            WHERE status IN ($succeeded, $failed, $cancelled, $interrupted);
+            """;
+        count.Parameters.AddWithValue("$succeeded", TaskStatus.Succeeded.ToString());
+        count.Parameters.AddWithValue("$failed", TaskStatus.Failed.ToString());
+        count.Parameters.AddWithValue("$cancelled", TaskStatus.Cancelled.ToString());
+        count.Parameters.AddWithValue("$interrupted", TaskStatus.Interrupted.ToString());
+        var deletedCount = Convert.ToInt32(
+            await count.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false),
+            CultureInfo.InvariantCulture);
+        if (deletedCount == 0)
+        {
+            transaction.Commit();
+            return 0;
+        }
+
+        await using (var detachCommands = connection.CreateCommand())
+        {
+            detachCommands.Transaction = transaction;
+            detachCommands.CommandText = """
+                UPDATE commands SET task_id = NULL
+                WHERE task_id IN (
+                    SELECT id FROM tasks
+                    WHERE status IN ($succeeded, $failed, $cancelled, $interrupted));
+                """;
+            detachCommands.Parameters.AddWithValue("$succeeded", TaskStatus.Succeeded.ToString());
+            detachCommands.Parameters.AddWithValue("$failed", TaskStatus.Failed.ToString());
+            detachCommands.Parameters.AddWithValue("$cancelled", TaskStatus.Cancelled.ToString());
+            detachCommands.Parameters.AddWithValue("$interrupted", TaskStatus.Interrupted.ToString());
+            await detachCommands.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        await using (var delete = connection.CreateCommand())
+        {
+            delete.Transaction = transaction;
+            delete.CommandText = """
+                DELETE FROM tasks
+                WHERE status IN ($succeeded, $failed, $cancelled, $interrupted);
+                """;
+            delete.Parameters.AddWithValue("$succeeded", TaskStatus.Succeeded.ToString());
+            delete.Parameters.AddWithValue("$failed", TaskStatus.Failed.ToString());
+            delete.Parameters.AddWithValue("$cancelled", TaskStatus.Cancelled.ToString());
+            delete.Parameters.AddWithValue("$interrupted", TaskStatus.Interrupted.ToString());
+            await delete.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        await InsertAuditAsync(
+            connection,
+            transaction,
+            deletedAtUtc,
+            actorDeviceId,
+            "TaskHistoryDeleted",
+            "TaskHistory",
+            "terminal",
+            AuditOutcome.Success,
+            JsonSerializer.Serialize(new { deletedCount }),
+            cancellationToken).ConfigureAwait(false);
+        transaction.Commit();
+        return deletedCount;
     }
 
     public async Task UpsertTaskEvidenceAsync(
@@ -1410,12 +1996,53 @@ public sealed class SqliteTaskStore : ILocalTaskStore
         return await reader.ReadAsync(cancellationToken).ConfigureAwait(false) ? map(reader) : null;
     }
 
+    private async Task<string> CreateMigrationBackupAsync(
+        SqliteConnection source,
+        int storedVersion,
+        CancellationToken cancellationToken)
+    {
+        var directory = Path.GetDirectoryName(_databasePath)
+            ?? throw new InvalidOperationException("数据库目录无效。");
+        var fileName = Path.GetFileNameWithoutExtension(_databasePath);
+        var backupPath = Path.Combine(
+            directory,
+            $"{fileName}.pre-v{V02Contract.SchemaVersion}-from-v{storedVersion}-{DateTimeOffset.UtcNow:yyyyMMddHHmmssfff}.backup.db");
+        var backupConnectionString = new SqliteConnectionStringBuilder
+        {
+            DataSource = backupPath,
+            Mode = SqliteOpenMode.ReadWriteCreate,
+            Pooling = false
+        }.ToString();
+        await using var destination = new SqliteConnection(backupConnectionString);
+        await destination.OpenAsync(cancellationToken).ConfigureAwait(false);
+        source.BackupDatabase(destination);
+        return backupPath;
+    }
+
+    private static async Task ApplyMigrationAsync(
+        SqliteConnection connection,
+        int version,
+        string sql,
+        CancellationToken cancellationToken)
+    {
+        await using var transaction = connection.BeginTransaction();
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = sql;
+        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        await RecordSchemaVersionAsync(connection, transaction, version, cancellationToken)
+            .ConfigureAwait(false);
+        transaction.Commit();
+    }
+
     private static async Task RecordSchemaVersionAsync(
         SqliteConnection connection,
+        SqliteTransaction? transaction,
         int version,
         CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
         command.CommandText = """
             INSERT OR IGNORE INTO schema_info(version, applied_at_utc)
             VALUES ($version, $appliedAtUtc);
@@ -1776,6 +2403,7 @@ public sealed class SqliteTaskStore : ILocalTaskStore
         command.CommandText = """
             UPDATE tasks SET
                 status = $status,
+                phase = $phase,
                 cancellation_requested_at_utc = $cancellationRequestedAtUtc,
                 updated_at_utc = $updatedAtUtc,
                 started_at_utc = $startedAtUtc,
@@ -1788,6 +2416,7 @@ public sealed class SqliteTaskStore : ILocalTaskStore
             """;
         Add(command, "$id", task.Id);
         command.Parameters.AddWithValue("$status", task.Status.ToString());
+        command.Parameters.AddWithValue("$phase", task.Phase.ToString());
         AddNullable(command, "$cancellationRequestedAtUtc", task.CancellationRequestedAtUtc);
         Add(command, "$updatedAtUtc", task.UpdatedAtUtc);
         AddNullable(command, "$startedAtUtc", task.StartedAtUtc);
@@ -1829,9 +2458,11 @@ public sealed class SqliteTaskStore : ILocalTaskStore
         command.CommandText = """
             INSERT INTO task_events(
                 id, task_id, sequence_number, event_type, from_status, to_status,
+                from_phase, to_phase,
                 source, source_device_id, command_id, occurred_at_utc, message, data_json)
             VALUES(
                 $id, $taskId, $sequenceNumber, $eventType, $fromStatus, $toStatus,
+                $fromPhase, $toPhase,
                 $source, $sourceDeviceId, $commandId, $occurredAtUtc, $message, $dataJson);
             """;
         Add(command, "$id", taskEvent.Id);
@@ -1840,6 +2471,8 @@ public sealed class SqliteTaskStore : ILocalTaskStore
         command.Parameters.AddWithValue("$eventType", taskEvent.EventType.ToString());
         AddNullable(command, "$fromStatus", taskEvent.FromStatus?.ToString());
         AddNullable(command, "$toStatus", taskEvent.ToStatus?.ToString());
+        AddNullable(command, "$fromPhase", taskEvent.FromPhase?.ToString());
+        AddNullable(command, "$toPhase", taskEvent.ToPhase?.ToString());
         command.Parameters.AddWithValue("$source", taskEvent.Source.ToString());
         AddNullable(command, "$sourceDeviceId", taskEvent.SourceDeviceId);
         AddNullable(command, "$commandId", taskEvent.CommandId);
@@ -1893,6 +2526,7 @@ public sealed class SqliteTaskStore : ILocalTaskStore
         command.Parameters.AddWithValue("$workingDirectoryRelativePath", task.WorkingDirectoryRelativePath);
         command.Parameters.AddWithValue("$executor", task.Executor.Trim());
         command.Parameters.AddWithValue("$status", task.Status.ToString());
+        command.Parameters.AddWithValue("$phase", task.Phase.ToString());
         AddNullable(command, "$cancellationRequestedAtUtc", task.CancellationRequestedAtUtc);
         Add(command, "$createdAtUtc", task.CreatedAtUtc);
         Add(command, "$updatedAtUtc", task.UpdatedAtUtc);
@@ -1929,6 +2563,50 @@ public sealed class SqliteTaskStore : ILocalTaskStore
         UpdatedAtUtc = ReadDateTime(reader, "updated_at_utc")
     };
 
+    private static ProjectAuthorizationRecord ReadProjectAuthorization(SqliteDataReader reader) => new()
+    {
+        Id = ReadGuid(reader, "id"),
+        ProjectId = ReadGuid(reader, "project_id"),
+        Scope = ReadEnum<ProjectAuthorizationScope>(reader, "scope"),
+        ScopeValue = reader.GetString(reader.GetOrdinal("scope_value")),
+        State = ReadEnum<ProjectAuthorizationState>(reader, "state"),
+        AuthorizedByDeviceId = ReadGuid(reader, "authorized_by_device_id"),
+        AuthorizedAtUtc = ReadDateTime(reader, "authorized_at_utc"),
+        RevokedAtUtc = ReadNullableDateTime(reader, "revoked_at_utc"),
+        UpdatedAtUtc = ReadDateTime(reader, "updated_at_utc")
+    };
+
+    private static ResourceScopeRecord ReadResourceScope(SqliteDataReader reader) => new()
+    {
+        Id = ReadGuid(reader, "id"),
+        TaskId = ReadGuid(reader, "task_id"),
+        ScopeType = ReadEnum<ResourceScopeType>(reader, "scope_type"),
+        ResourceId = ReadNullableGuid(reader, "resource_id"),
+        ScopeValue = reader.GetString(reader.GetOrdinal("scope_value")),
+        AccessMode = ReadEnum<ResourceAccessMode>(reader, "access_mode"),
+        GrantedByDeviceId = ReadGuid(reader, "granted_by_device_id"),
+        GrantedAtUtc = ReadDateTime(reader, "granted_at_utc"),
+        ExpiresAtUtc = ReadNullableDateTime(reader, "expires_at_utc"),
+        RevokedAtUtc = ReadNullableDateTime(reader, "revoked_at_utc")
+    };
+
+    private static SkillInvocationRecord ReadSkillInvocation(SqliteDataReader reader) => new()
+    {
+        Id = ReadGuid(reader, "id"),
+        TaskId = ReadGuid(reader, "task_id"),
+        SequenceNumber = reader.GetInt32(reader.GetOrdinal("sequence_number")),
+        SkillId = reader.GetString(reader.GetOrdinal("skill_id")),
+        SkillVersion = reader.GetString(reader.GetOrdinal("skill_version")),
+        Capability = reader.GetString(reader.GetOrdinal("capability")),
+        InputJson = reader.GetString(reader.GetOrdinal("input_json")),
+        Status = ReadEnum<SkillInvocationStatus>(reader, "status"),
+        CreatedAtUtc = ReadDateTime(reader, "created_at_utc"),
+        StartedAtUtc = ReadNullableDateTime(reader, "started_at_utc"),
+        CompletedAtUtc = ReadNullableDateTime(reader, "completed_at_utc"),
+        FailureCode = ReadNullableString(reader, "failure_code"),
+        FailureMessage = ReadNullableString(reader, "failure_message")
+    };
+
     private static AgentTask ReadTask(SqliteDataReader reader) => new()
     {
         Id = ReadGuid(reader, "id"),
@@ -1939,6 +2617,7 @@ public sealed class SqliteTaskStore : ILocalTaskStore
         WorkingDirectoryRelativePath = reader.GetString(reader.GetOrdinal("working_directory_relative_path")),
         Executor = reader.GetString(reader.GetOrdinal("executor")),
         Status = ReadEnum<TaskStatus>(reader, "status"),
+        Phase = ReadEnum<TaskPhase>(reader, "phase"),
         CancellationRequestedAtUtc = ReadNullableDateTime(reader, "cancellation_requested_at_utc"),
         CreatedAtUtc = ReadDateTime(reader, "created_at_utc"),
         UpdatedAtUtc = ReadDateTime(reader, "updated_at_utc"),
@@ -1974,6 +2653,8 @@ public sealed class SqliteTaskStore : ILocalTaskStore
         EventType = ReadEnum<TaskEventType>(reader, "event_type"),
         FromStatus = ReadNullableEnum<TaskStatus>(reader, "from_status"),
         ToStatus = ReadNullableEnum<TaskStatus>(reader, "to_status"),
+        FromPhase = ReadNullableEnum<TaskPhase>(reader, "from_phase"),
+        ToPhase = ReadNullableEnum<TaskPhase>(reader, "to_phase"),
         Source = ReadEnum<TaskEventSource>(reader, "source"),
         SourceDeviceId = ReadNullableGuid(reader, "source_device_id"),
         CommandId = ReadNullableGuid(reader, "command_id"),

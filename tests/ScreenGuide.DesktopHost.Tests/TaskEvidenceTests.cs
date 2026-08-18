@@ -35,6 +35,19 @@ public sealed class TaskEvidenceTests
     }
 
     [Fact]
+    public async Task PowerShellWrappedTestCommandIsRecordedAsRealFailure()
+    {
+        var result = await RunTerminalTaskAsync("TEST_EVIDENCE_WRAPPED_FAIL");
+
+        Assert.Equal(EvidenceVerificationStatus.VerificationFailed, result.Evidence.VerificationStatus);
+        Assert.Equal(EvidenceTestStatus.Failed, result.Evidence.Tests.Status);
+        var command = Assert.Single(result.Evidence.Tests.Commands);
+        Assert.Equal(1, command.ExitCode);
+        Assert.StartsWith("dotnet test", command.Command, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Users", command.Command, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task ClaimedSuccessWithNoFileChangesUsesActualGitEvidence()
     {
         var result = await RunTerminalTaskAsync("TEST_EVIDENCE_NO_CHANGE");
@@ -184,7 +197,14 @@ public sealed class TaskEvidenceTests
         await service.WaitForTaskAsync(task.Id);
         Assert.Null(await store.GetTaskEvidenceAsync(task.Id));
 
-        var second = await service.ContinueTaskAsync(task.Id, "TEST_CONTINUE");
+        var responseCommand = await environment.RegisterTaskCommandAsync(
+            task.Id,
+            CommandType.UserResponse,
+            "{\"response\":\"TEST_CONTINUE\"}");
+        var second = await service.ContinueTaskAsync(
+            task.Id,
+            "TEST_CONTINUE",
+            responseCommand.Id);
         await service.WaitForTaskAsync(task.Id);
         var evidence = await store.GetTaskEvidenceAsync(task.Id);
         await host.StopAsync();
@@ -248,7 +268,8 @@ public sealed class TaskEvidenceTests
         var (_, _, task) = await environment.SeedTaskAsync("TEST_SUCCESS");
         var options = new DesktopHostOptions(
             environment.Options.DataDirectory,
-            environment.CopyFakeCliToUnverifiedVersionDirectory());
+            environment.CopyFakeCliToUnverifiedVersionDirectory(),
+            environment.Options.PipeName);
         using var host = DesktopHostFactory.Build(
             Array.Empty<string>(),
             options,

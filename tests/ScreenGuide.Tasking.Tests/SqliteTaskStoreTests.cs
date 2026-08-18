@@ -1,4 +1,5 @@
 using ScreenGuide.Core.Tasking;
+using Microsoft.Data.Sqlite;
 using ScreenGuide.Persistence.Runtime;
 using ScreenGuide.Persistence.Sqlite;
 using AgentTaskStatus = ScreenGuide.Core.Tasking.TaskStatus;
@@ -7,6 +8,154 @@ namespace ScreenGuide.Tasking.Tests;
 
 public sealed class SqliteTaskStoreTests
 {
+    [Fact]
+    public async Task FreshDatabaseUsesV02SchemaAndCreatesExplicitResourceScope()
+    {
+        await using var environment = await TaskStoreTestEnvironment.CreateAsync();
+        var (task, _) = await environment.CreateTaskAsync("v02-fresh-schema");
+
+        var schemaVersion = await environment.Store.GetSchemaVersionAsync();
+        var authorization = await environment.Store.GetProjectAuthorizationAsync(environment.Project.Id);
+        var scope = Assert.Single(await environment.Store.GetResourceScopesAsync(task.Id));
+
+        Assert.Equal(V02Contract.SchemaVersion, schemaVersion);
+        Assert.Equal(environment.Project.Id, authorization?.ProjectId);
+        Assert.Equal(ProjectAuthorizationScope.ProjectDirectory, authorization?.Scope);
+        Assert.Equal(ResourceScopeType.Project, scope.ScopeType);
+        Assert.Equal(ResourceAccessMode.Execute, scope.AccessMode);
+        Assert.Equal(environment.Project.Id, scope.ResourceId);
+        Assert.Equal(environment.Project.RootPath, scope.ScopeValue);
+    }
+
+    [Fact]
+    public async Task MigratesVersion3WithoutLosingTaskAndCreatesBackup()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"screen-guide-v3-migration-{Guid.NewGuid():N}");
+        var projectRoot = Path.Combine(root, "project");
+        var databasePath = Path.Combine(root, "state", "tasking.db");
+        Directory.CreateDirectory(projectRoot);
+        Directory.CreateDirectory(Path.GetDirectoryName(databasePath)!);
+        var deviceId = Guid.NewGuid();
+        var projectId = Guid.NewGuid();
+        var taskId = Guid.NewGuid();
+        var now = new DateTimeOffset(2026, 8, 18, 1, 2, 3, TimeSpan.Zero);
+
+        try
+        {
+            await using (var connection = new SqliteConnection($"Data Source={databasePath}"))
+            {
+                await connection.OpenAsync();
+                await using var command = connection.CreateCommand();
+                command.CommandText = SqliteSchema.CreateVersion1
+                    + SqliteSchema.CreateVersion2
+                    + SqliteSchema.CreateVersion3
+                    + """
+                      INSERT INTO schema_info(version, applied_at_utc) VALUES(1, $now), (2, $now), (3, $now);
+                      INSERT INTO devices(id, display_name, device_type, trust_state, created_at_utc)
+                      VALUES($deviceId, 'Migration Host', 'WindowsHost', 'Local', $now);
+                      INSERT INTO projects(
+                          id, name, root_path, authorization_state, authorized_by_device_id,
+                          authorized_at_utc, created_at_utc, updated_at_utc)
+                      VALUES($projectId, 'Existing Project', $rootPath, 'Authorized', $deviceId, $now, $now, $now);
+                      INSERT INTO tasks(
+                          id, project_id, created_by_device_id, title, instruction,
+                          working_directory_relative_path, executor, status,
+                          created_at_utc, updated_at_utc, started_at_utc, version)
+                      VALUES(
+                          $taskId, $projectId, $deviceId, 'Existing task', 'keep me',
+                          '.', 'codex', 'Running', $now, $now, $now, 7);
+                      """;
+                command.Parameters.AddWithValue("$now", now.ToString("O"));
+                command.Parameters.AddWithValue("$deviceId", deviceId.ToString("D"));
+                command.Parameters.AddWithValue("$projectId", projectId.ToString("D"));
+                command.Parameters.AddWithValue("$taskId", taskId.ToString("D"));
+                command.Parameters.AddWithValue("$rootPath", projectRoot);
+                await command.ExecuteNonQueryAsync();
+            }
+
+            await using (var store = new SqliteTaskStore(databasePath))
+            {
+                await store.InitializeAsync();
+                var task = await store.GetTaskAsync(taskId);
+                var authorization = await store.GetProjectAuthorizationAsync(projectId);
+                var scope = Assert.Single(await store.GetResourceScopesAsync(taskId));
+
+                Assert.Equal(V02Contract.SchemaVersion, await store.GetSchemaVersionAsync());
+                Assert.Equal(AgentTaskStatus.Running, task?.Status);
+                Assert.Equal(TaskPhase.Executing, task?.Phase);
+                Assert.Equal(7, task?.Version);
+                Assert.Equal("keep me", task?.Instruction);
+                Assert.Equal(projectRoot, authorization?.ScopeValue);
+                Assert.Equal(projectId, scope.ResourceId);
+            }
+
+            Assert.Single(Directory.GetFiles(
+                Path.GetDirectoryName(databasePath)!,
+                "tasking.pre-v4-from-v3-*.backup.db"));
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task PersistsPhaseScopeAndSkillInvocationWithAudit()
+    {
+        await using var environment = await TaskStoreTestEnvironment.CreateAsync();
+        var (task, _) = await environment.CreateTaskAsync("v02-domain-records");
+
+        var routing = await environment.Store.TransitionTaskPhaseAsync(
+            task.Id,
+            TaskPhase.Routing,
+            TaskEventSource.System,
+            "正在选择执行技能。");
+        var scope = new ResourceScopeRecord
+        {
+            Id = Guid.NewGuid(),
+            TaskId = task.Id,
+            ScopeType = ResourceScopeType.Directory,
+            ScopeValue = "src",
+            AccessMode = ResourceAccessMode.Read,
+            GrantedByDeviceId = environment.Device.Id,
+            GrantedAtUtc = DateTimeOffset.UtcNow
+        };
+        var invocation = new SkillInvocationRecord
+        {
+            Id = Guid.NewGuid(),
+            TaskId = task.Id,
+            SequenceNumber = 1,
+            SkillId = "codex.project-task",
+            SkillVersion = "0.2.0",
+            Capability = "coding.execute",
+            InputJson = "{\"instruction\":\"safe test\"}",
+            Status = SkillInvocationStatus.Running,
+            CreatedAtUtc = DateTimeOffset.UtcNow,
+            StartedAtUtc = DateTimeOffset.UtcNow
+        };
+
+        await environment.Store.UpsertResourceScopeAsync(scope);
+        await environment.Store.UpsertSkillInvocationAsync(invocation);
+        var events = await environment.Store.GetTaskEventsAsync(task.Id);
+        var audit = await environment.Store.GetAuditLogAsync();
+
+        Assert.Equal(TaskPhase.Routing, routing.Phase);
+        Assert.Contains(events, item =>
+            item.EventType == TaskEventType.PhaseChanged
+            && item.FromPhase == TaskPhase.Planning
+            && item.ToPhase == TaskPhase.Routing);
+        Assert.Contains(await environment.Store.GetResourceScopesAsync(task.Id), item => item.Id == scope.Id);
+        Assert.Equal(SkillInvocationStatus.Running,
+            Assert.Single(await environment.Store.GetSkillInvocationsAsync(task.Id)).Status);
+        Assert.Contains(audit, item => item.Action == "TaskPhaseChanged");
+        Assert.Contains(audit, item => item.Action == "ResourceScopeRecorded");
+        Assert.Contains(audit, item => item.Action == "SkillInvocationRecorded");
+    }
+
     [Fact]
     public async Task PersistsTaskCommandEventAndAuditAcrossStoreInstances()
     {
@@ -44,6 +193,18 @@ public sealed class SqliteTaskStoreTests
         Assert.Single(persistedIds);
         var audit = await environment.Store.GetAuditLogAsync();
         Assert.Contains(audit, entry => entry.Action == "CommandDuplicateIgnored");
+    }
+
+    [Fact]
+    public async Task ListsOnlyCommandsBoundToRequestedTask()
+    {
+        await using var environment = await TaskStoreTestEnvironment.CreateAsync();
+        var (task, sourceCommand) = await environment.CreateTaskAsync("task-command-list");
+        _ = await environment.Store.RegisterCommandAsync(environment.NewCreateCommand("unbound-command"));
+
+        var commands = await environment.Store.GetTaskCommandsAsync(task.Id);
+
+        Assert.Equal(sourceCommand.Id, Assert.Single(commands).Id);
     }
 
     [Fact]
@@ -155,6 +316,8 @@ public sealed class SqliteTaskStoreTests
         Assert.Equal(recoveredAt, persisted.UpdatedAtUtc);
         Assert.Equal(TaskEventType.RecoveryDetected, events[^1].EventType);
         Assert.Equal(TaskEventSource.Recovery, events[^1].Source);
+        Assert.Equal(TaskPhase.Verifying, persisted.Phase);
+        Assert.Equal(recoveredAt, persisted.CompletedAtUtc);
     }
 
     [Fact]
@@ -246,6 +409,20 @@ public sealed class SqliteTaskStoreTests
             "codex-cli 0.151.0",
             4321,
             now);
+        var invocation = new SkillInvocationRecord
+        {
+            Id = Guid.NewGuid(),
+            TaskId = task.Id,
+            SequenceNumber = 1,
+            SkillId = "codex.project-task",
+            SkillVersion = "0.2.0",
+            Capability = "coding.execute",
+            InputJson = "{\"instruction\":\"test\"}",
+            Status = SkillInvocationStatus.Running,
+            CreatedAtUtc = now,
+            StartedAtUtc = now
+        };
+        await environment.Store.UpsertSkillInvocationAsync(invocation);
 
         var recovered = await environment.Store.RecoverInterruptedTasksAsync(now.AddMinutes(1));
         var persistedRun = await environment.Store.GetAgentRunByTaskAsync(task.Id);
@@ -256,6 +433,10 @@ public sealed class SqliteTaskStoreTests
         Assert.Equal(AgentRunStatus.Interrupted, persistedRun?.Status);
         Assert.Equal(AgentAttemptStatus.Interrupted, persistedAttempt.Status);
         Assert.Equal(AgentTaskStatus.Interrupted, (await environment.Store.GetTaskAsync(task.Id))?.Status);
+        var persistedInvocation = Assert.Single(
+            await environment.Store.GetSkillInvocationsAsync(task.Id));
+        Assert.Equal(SkillInvocationStatus.Interrupted, persistedInvocation.Status);
+        Assert.Equal("host_restarted", persistedInvocation.FailureCode);
     }
 
     [Fact]

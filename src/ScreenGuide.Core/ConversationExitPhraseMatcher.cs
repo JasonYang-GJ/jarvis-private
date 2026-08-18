@@ -17,10 +17,10 @@ public static class ConversationExitPhraseMatcher
 
     public static bool IsMatch(string? recognizedText)
     {
-        var normalized = WakePhraseMatcher.Normalize(recognizedText);
+        var normalized = SpeechTextNormalizer.Normalize(recognizedText);
         return ExitPhrases.Any(phrase => string.Equals(
             normalized,
-            WakePhraseMatcher.Normalize(phrase),
+            SpeechTextNormalizer.Normalize(phrase),
             StringComparison.Ordinal));
     }
 }

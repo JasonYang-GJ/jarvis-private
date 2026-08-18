@@ -2,7 +2,16 @@ namespace ScreenGuide.Core.Tasking;
 
 public static class V01Contract
 {
-    public const int SchemaVersion = 3;
+    public const int SchemaVersion = V02Contract.SchemaVersion;
+}
+
+public static class V02Contract
+{
+    public const int SchemaVersion = 4;
+
+    public const int ProtocolVersion = 2;
+
+    public const int MinimumProtocolVersion = 1;
 }
 
 public enum TaskStatus
@@ -21,10 +30,20 @@ public enum TaskEventType
 {
     Created,
     StateChanged,
+    PhaseChanged,
     AgentEvent,
     CancellationRequested,
     RecoveryDetected,
     Note
+}
+
+public enum TaskPhase
+{
+    Planning,
+    Routing,
+    AwaitingPermission,
+    Executing,
+    Verifying
 }
 
 public enum TaskEventSource
@@ -39,6 +58,38 @@ public enum ProjectAuthorizationState
 {
     Authorized,
     Revoked
+}
+
+public enum ProjectAuthorizationScope
+{
+    ProjectDirectory
+}
+
+public enum ResourceScopeType
+{
+    Project,
+    Directory,
+    File,
+    Window,
+    Website
+}
+
+public enum ResourceAccessMode
+{
+    Observe,
+    Read,
+    Execute
+}
+
+public enum SkillInvocationStatus
+{
+    Pending,
+    Running,
+    WaitingForUser,
+    Succeeded,
+    Failed,
+    Cancelled,
+    Interrupted
 }
 
 public enum DeviceType
@@ -59,7 +110,8 @@ public enum CommandType
     CreateTask,
     CancelTask,
     ResumeTask,
-    UserResponse
+    UserResponse,
+    ExecuteDesktopAction
 }
 
 public enum CommandStatus
@@ -129,6 +181,8 @@ public sealed record AgentTask
 
     public TaskStatus Status { get; init; } = TaskStatus.Pending;
 
+    public TaskPhase Phase { get; init; } = TaskPhase.Planning;
+
     public DateTimeOffset? CancellationRequestedAtUtc { get; init; }
 
     public required DateTimeOffset CreatedAtUtc { get; init; }
@@ -162,6 +216,10 @@ public sealed record TaskEventRecord
 
     public TaskStatus? ToStatus { get; init; }
 
+    public TaskPhase? FromPhase { get; init; }
+
+    public TaskPhase? ToPhase { get; init; }
+
     public required TaskEventSource Source { get; init; }
 
     public Guid? SourceDeviceId { get; init; }
@@ -194,6 +252,79 @@ public sealed record ProjectRecord
     public required DateTimeOffset CreatedAtUtc { get; init; }
 
     public required DateTimeOffset UpdatedAtUtc { get; init; }
+}
+
+public sealed record ProjectAuthorizationRecord
+{
+    public required Guid Id { get; init; }
+
+    public required Guid ProjectId { get; init; }
+
+    public ProjectAuthorizationScope Scope { get; init; } = ProjectAuthorizationScope.ProjectDirectory;
+
+    public required string ScopeValue { get; init; }
+
+    public ProjectAuthorizationState State { get; init; } = ProjectAuthorizationState.Authorized;
+
+    public required Guid AuthorizedByDeviceId { get; init; }
+
+    public required DateTimeOffset AuthorizedAtUtc { get; init; }
+
+    public DateTimeOffset? RevokedAtUtc { get; init; }
+
+    public required DateTimeOffset UpdatedAtUtc { get; init; }
+}
+
+public sealed record ResourceScopeRecord
+{
+    public required Guid Id { get; init; }
+
+    public required Guid TaskId { get; init; }
+
+    public required ResourceScopeType ScopeType { get; init; }
+
+    public Guid? ResourceId { get; init; }
+
+    public required string ScopeValue { get; init; }
+
+    public ResourceAccessMode AccessMode { get; init; } = ResourceAccessMode.Read;
+
+    public required Guid GrantedByDeviceId { get; init; }
+
+    public required DateTimeOffset GrantedAtUtc { get; init; }
+
+    public DateTimeOffset? ExpiresAtUtc { get; init; }
+
+    public DateTimeOffset? RevokedAtUtc { get; init; }
+}
+
+public sealed record SkillInvocationRecord
+{
+    public required Guid Id { get; init; }
+
+    public required Guid TaskId { get; init; }
+
+    public required int SequenceNumber { get; init; }
+
+    public required string SkillId { get; init; }
+
+    public required string SkillVersion { get; init; }
+
+    public required string Capability { get; init; }
+
+    public required string InputJson { get; init; }
+
+    public SkillInvocationStatus Status { get; init; } = SkillInvocationStatus.Pending;
+
+    public required DateTimeOffset CreatedAtUtc { get; init; }
+
+    public DateTimeOffset? StartedAtUtc { get; init; }
+
+    public DateTimeOffset? CompletedAtUtc { get; init; }
+
+    public string? FailureCode { get; init; }
+
+    public string? FailureMessage { get; init; }
 }
 
 public sealed record DeviceRecord

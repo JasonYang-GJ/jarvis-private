@@ -13,8 +13,10 @@ public sealed class DesktopHostRuntime(
     TaskCancellationService cancellationService,
     TaskCancellationRegistry cancellationRegistry,
     AgentConnectorRegistry connectorRegistry,
+    SkillAdapterRegistry skillAdapterRegistry,
     AgentTaskExecutionService executionService,
     TaskEvidenceService evidenceService,
+    RuntimeDataMaintenance maintenance,
     DesktopHostState state,
     TimeProvider timeProvider,
     ILogger<DesktopHostRuntime> logger)
@@ -37,6 +39,7 @@ public sealed class DesktopHostRuntime(
                 return;
             }
 
+            maintenance.CleanupStaleFiles();
             await store.InitializeAsync(cancellationToken).ConfigureAwait(false);
             storeInitialized = true;
             localDevice = await deviceInitializer.InitializeAsync(cancellationToken).ConfigureAwait(false);
@@ -56,7 +59,9 @@ public sealed class DesktopHostRuntime(
                     cancellationToken)
                 .ConfigureAwait(false);
             connectorRegistry.Initialize();
+            skillAdapterRegistry.Initialize();
             var connectorIds = connectorRegistry.ConnectorIds;
+            var skillIds = skillAdapterRegistry.SkillIds;
             state.MarkStarted(localDevice, projects, recovery.InterruptedTaskIds, connectorIds);
             await AppendAuditAsync(
                 "HostStarted",
@@ -66,7 +71,8 @@ public sealed class DesktopHostRuntime(
                 {
                     authorizedProjectCount = projects.Count,
                     recoveredTaskCount = recovery.InterruptedTaskIds.Count,
-                    connectorCount = connectorIds.Count
+                    connectorCount = connectorIds.Count,
+                    skillCount = skillIds.Count
                 }),
                 cancellationToken).ConfigureAwait(false);
             logger.LogInformation(

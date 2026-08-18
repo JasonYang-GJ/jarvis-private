@@ -6,4 +6,8 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="..\ScreenGuide.Skills.Abstractions\ScreenGuide.Skills.Abstractions.csproj" />
+  </ItemGroup>
+
 </Project>

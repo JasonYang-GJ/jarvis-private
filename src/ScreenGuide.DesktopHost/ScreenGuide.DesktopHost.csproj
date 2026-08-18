@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <OutputType>Exe</OutputType>
+    <OutputType>WinExe</OutputType>
     <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
     <SupportedOSPlatformVersion>10.0.19041.0</SupportedOSPlatformVersion>
     <ImplicitUsings>enable</ImplicitUsings>
@@ -12,8 +12,11 @@
     <ProjectReference Include="..\ScreenGuide.Agent.Abstractions\ScreenGuide.Agent.Abstractions.csproj" />
     <ProjectReference Include="..\ScreenGuide.Agent.Codex\ScreenGuide.Agent.Codex.csproj" />
     <ProjectReference Include="..\ScreenGuide.Core\ScreenGuide.Core.csproj" />
+    <ProjectReference Include="..\ScreenGuide.DesktopProtocol\ScreenGuide.DesktopProtocol.csproj" />
     <ProjectReference Include="..\ScreenGuide.Evidence\ScreenGuide.Evidence.csproj" />
     <ProjectReference Include="..\ScreenGuide.Persistence\ScreenGuide.Persistence.csproj" />
+    <ProjectReference Include="..\ScreenGuide.Skills.Abstractions\ScreenGuide.Skills.Abstractions.csproj" />
+    <ProjectReference Include="..\ScreenGuide.Skills.Windows\ScreenGuide.Skills.Windows.csproj" />
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.11" />
   </ItemGroup>
 

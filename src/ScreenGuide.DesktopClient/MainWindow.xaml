@@ -1,0 +1,475 @@
+<Window x:Class="ScreenGuide.DesktopClient.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="元枢" Width="1360" Height="860" MinWidth="1120" MinHeight="700"
+        WindowStartupLocation="CenterScreen">
+    <Grid>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="220" />
+            <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
+
+        <Grid Grid.Column="0" Background="{StaticResource SidebarBrush}">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="92" />
+                <RowDefinition Height="*" />
+                <RowDefinition Height="72" />
+            </Grid.RowDefinitions>
+            <StackPanel Margin="25,22,18,0">
+                <TextBlock Text="元枢" Foreground="White" FontFamily="Microsoft YaHei UI"
+                           FontSize="17" FontWeight="SemiBold" />
+                <TextBlock Text="电脑工作助手" Foreground="#8FA1A9" FontSize="12" Margin="0,5,0,0" />
+            </StackPanel>
+            <StackPanel Grid.Row="1">
+                <Button x:Name="DashboardNavButton" Content="首页" Tag="Selected" Style="{StaticResource NavButton}"
+                        Click="NavigationButton_Click" CommandParameter="Dashboard" />
+                <Button x:Name="ProjectsNavButton" Content="项目" Style="{StaticResource NavButton}"
+                        Click="NavigationButton_Click" CommandParameter="Projects" />
+                <Button x:Name="DesktopActionsNavButton" Content="电脑操作" Style="{StaticResource NavButton}"
+                        Click="NavigationButton_Click" CommandParameter="DesktopActions" />
+                <Button x:Name="NewTaskNavButton" Content="新建任务" Style="{StaticResource NavButton}"
+                        Click="NavigationButton_Click" CommandParameter="NewTask" />
+                <Button x:Name="CurrentTaskNavButton" Content="当前任务" Style="{StaticResource NavButton}"
+                        Click="NavigationButton_Click" CommandParameter="CurrentTask" />
+                <Button x:Name="HistoryNavButton" Content="任务历史" Style="{StaticResource NavButton}"
+                        Click="NavigationButton_Click" CommandParameter="History" />
+                <Button x:Name="SettingsNavButton" Content="设置" Style="{StaticResource NavButton}"
+                        Click="NavigationButton_Click" CommandParameter="Settings" />
+            </StackPanel>
+            <StackPanel Grid.Row="2" Margin="25,0,18,18" VerticalAlignment="Bottom">
+                <TextBlock Text="YUANSHU V0.1" Foreground="#71858E" FontFamily="Consolas" FontSize="11" />
+                <TextBlock Text="本机执行 · 证据优先" Foreground="#8FA1A9" FontSize="11" Margin="0,4,0,0" />
+            </StackPanel>
+        </Grid>
+
+        <Grid Grid.Column="1">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="66" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+                <RowDefinition Height="30" />
+            </Grid.RowDefinitions>
+
+            <Border Grid.Row="0" Background="White" BorderBrush="{StaticResource LineBrush}" BorderThickness="0,0,0,1">
+                <Grid Margin="28,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="18" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock x:Name="PageTitleText" Text="首页" FontFamily="Segoe UI Variable Display"
+                               FontSize="18" FontWeight="SemiBold" VerticalAlignment="Center" />
+                    <Border x:Name="HostStatusPill" Grid.Column="1" Background="#EAF6F0" CornerRadius="12" Padding="10,5"
+                            VerticalAlignment="Center">
+                        <TextBlock x:Name="HostStatusText" Text="Host 连接中" Foreground="{StaticResource SuccessBrush}" FontSize="12" />
+                    </Border>
+                    <Border x:Name="CodexStatusPill" Grid.Column="3" Background="#EDF2FA" CornerRadius="12" Padding="10,5"
+                            VerticalAlignment="Center">
+                        <TextBlock x:Name="CodexStatusText" Text="Codex 检查中" Foreground="{StaticResource BrandBrush}" FontSize="12" />
+                    </Border>
+                </Grid>
+            </Border>
+
+            <Border x:Name="ErrorBanner" Grid.Row="1" Visibility="Collapsed" Margin="22,12,22,0"
+                    Background="#FCECED" BorderBrush="#E3A1A5" BorderThickness="1" CornerRadius="4" Padding="13,10">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel>
+                        <TextBlock x:Name="ErrorMessageText" FontWeight="SemiBold" Foreground="#8E2F36" />
+                        <Expander Header="查看技术详情" Foreground="#8E2F36" Margin="0,5,0,0">
+                            <TextBlock x:Name="ErrorTechnicalText" TextWrapping="Wrap" Margin="0,5,0,0" />
+                        </Expander>
+                    </StackPanel>
+                    <Button Grid.Column="1" Content="关闭" Style="{StaticResource SecondaryButton}" Padding="10,4"
+                            MinHeight="28" Click="CloseErrorButton_Click" />
+                </Grid>
+            </Border>
+
+            <Grid Grid.Row="2" Margin="22,16,22,18">
+                <ScrollViewer x:Name="DashboardPage" VerticalScrollBarVisibility="Auto">
+                    <StackPanel>
+                        <Border Style="{StaticResource SurfaceBorder}" Background="#EAF0FF" BorderBrush="#BCD0F6" Padding="26,22">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+                                <TextBlock Text="今天想让电脑帮你做什么？" FontFamily="Segoe UI Variable Display"
+                                           FontSize="28" FontWeight="SemiBold" />
+                                <TextBlock Grid.Row="1" Text="选择一个已授权项目，直接描述希望完成的结果。"
+                                           Foreground="{StaticResource MutedBrush}" Margin="0,7,0,14" />
+                                <Grid Grid.Row="2">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="235" />
+                                        <ColumnDefinition Width="10" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="10" />
+                                        <ColumnDefinition Width="118" />
+                                    </Grid.ColumnDefinitions>
+                                    <ComboBox x:Name="DashboardProjectComboBox" DisplayMemberPath="Name" />
+                                    <TextBox x:Name="DashboardTaskTextBox" Grid.Column="2" MinHeight="56"
+                                             AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" />
+                                    <Button x:Name="DashboardCreateButton" Grid.Column="4" Content="交给电脑"
+                                            Style="{StaticResource PrimaryButton}" Click="DashboardCreateButton_Click" />
+                                </Grid>
+                            </Grid>
+                        </Border>
+
+                        <Border Style="{StaticResource SurfaceBorder}" Margin="0,14,0,0" Padding="0,16">
+                            <UniformGrid Columns="6">
+                                <StackPanel Margin="18,0">
+                                    <TextBlock Text="正在执行" Style="{StaticResource Eyebrow}" />
+                                    <TextBlock x:Name="ActiveCountText" Text="0" FontSize="25" FontWeight="SemiBold" Margin="0,4,0,0" />
+                                </StackPanel>
+                                <StackPanel Margin="18,0">
+                                    <TextBlock Text="等待你决定" Style="{StaticResource Eyebrow}" />
+                                    <TextBlock x:Name="WaitingCountText" Text="0" FontSize="25" FontWeight="SemiBold" Margin="0,4,0,0" />
+                                </StackPanel>
+                                <StackPanel Margin="18,0">
+                                    <TextBlock Text="授权项目" Style="{StaticResource Eyebrow}" />
+                                    <TextBlock x:Name="ProjectCountText" Text="0" FontSize="25" FontWeight="SemiBold" Margin="0,4,0,0" />
+                                </StackPanel>
+                                <StackPanel Margin="18,0">
+                                    <TextBlock Text="今日完成" Style="{StaticResource Eyebrow}" />
+                                    <TextBlock x:Name="TodayCompletedCountText" Text="0" FontSize="25" FontWeight="SemiBold" Margin="0,4,0,0" />
+                                </StackPanel>
+                                <StackPanel Margin="18,0">
+                                    <TextBlock Text="失败 / 中断" Style="{StaticResource Eyebrow}" />
+                                    <TextBlock x:Name="FailedCountText" Text="0" FontSize="25" FontWeight="SemiBold" Margin="0,4,0,0" />
+                                </StackPanel>
+                                <StackPanel Margin="18,0">
+                                    <TextBlock Text="Codex 版本" Style="{StaticResource Eyebrow}" />
+                                    <TextBlock x:Name="DashboardCodexVersionText" Text="—" FontFamily="Consolas" FontSize="17"
+                                               FontWeight="SemiBold" Margin="0,8,0,0" />
+                                </StackPanel>
+                            </UniformGrid>
+                        </Border>
+
+                        <Grid Margin="0,14,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="1.15*" />
+                                <ColumnDefinition Width="14" />
+                                <ColumnDefinition Width="0.85*" />
+                            </Grid.ColumnDefinitions>
+                            <Border Style="{StaticResource SurfaceBorder}" Padding="18">
+                                <Grid>
+                                    <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
+                                    <TextBlock Text="当前工作" FontSize="16" FontWeight="SemiBold" />
+                                    <ListBox x:Name="DashboardActiveList" Grid.Row="1" Margin="0,10,0,0" BorderThickness="0"
+                                             MouseDoubleClick="TaskList_MouseDoubleClick" />
+                                </Grid>
+                            </Border>
+                            <Border Grid.Column="2" Style="{StaticResource SurfaceBorder}" Padding="18">
+                                <Grid>
+                                    <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
+                                    <TextBlock Text="最近任务" FontSize="16" FontWeight="SemiBold" />
+                                    <ListBox x:Name="DashboardRecentList" Grid.Row="1" Margin="0,10,0,0" BorderThickness="0"
+                                             MouseDoubleClick="TaskList_MouseDoubleClick" />
+                                </Grid>
+                            </Border>
+                        </Grid>
+                    </StackPanel>
+                </ScrollViewer>
+
+                <Grid x:Name="ProjectsPage" Visibility="Collapsed">
+                    <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="12" /><RowDefinition Height="*" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+                    <Grid>
+                        <StackPanel>
+                            <TextBlock Text="项目" Style="{StaticResource SectionTitle}" />
+                            <TextBlock Text="只管理你明确选择并授权的 Git 项目，不会扫描硬盘。" Foreground="{StaticResource MutedBrush}" Margin="0,6,0,0" />
+                        </StackPanel>
+                        <Button Content="添加项目" Style="{StaticResource PrimaryButton}" HorizontalAlignment="Right"
+                                Click="AddProjectButton_Click" />
+                    </Grid>
+                    <Border Grid.Row="2" Style="{StaticResource SurfaceBorder}" Padding="12">
+                        <ListView x:Name="ProjectsListView" SelectionChanged="ProjectsListView_SelectionChanged">
+                            <ListView.View>
+                                <GridView>
+                                    <GridViewColumn Header="项目名称" DisplayMemberBinding="{Binding Name}" Width="180" />
+                                    <GridViewColumn Header="目录" DisplayMemberBinding="{Binding RootPath}" Width="390" />
+                                    <GridViewColumn Header="Git 状态" DisplayMemberBinding="{Binding GitStatus}" Width="180" />
+                                    <GridViewColumn Header="授权" DisplayMemberBinding="{Binding AuthorizationState}" Width="100" />
+                                    <GridViewColumn Header="最近任务" DisplayMemberBinding="{Binding RecentTaskCount}" Width="90" />
+                                    <GridViewColumn Header="正在执行" DisplayMemberBinding="{Binding ActiveText}" Width="90" />
+                                </GridView>
+                            </ListView.View>
+                        </ListView>
+                    </Border>
+                    <Border Grid.Row="3" Style="{StaticResource SurfaceBorder}" Margin="0,12,0,0" Padding="14">
+                        <Grid>
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                            <TextBlock x:Name="SelectedProjectDetailText" Text="选择项目查看详情。" VerticalAlignment="Center" Foreground="{StaticResource MutedBrush}" />
+                            <Button x:Name="RevokeProjectButton" Grid.Column="1" Content="删除授权" Style="{StaticResource DangerButton}"
+                                    IsEnabled="False" Click="RevokeProjectButton_Click" />
+                        </Grid>
+                    </Border>
+                </Grid>
+
+                <ScrollViewer x:Name="NewTaskPage" Visibility="Collapsed" VerticalScrollBarVisibility="Auto">
+                    <StackPanel MaxWidth="880" HorizontalAlignment="Left">
+                        <TextBlock Text="新建任务" Style="{StaticResource SectionTitle}" />
+                        <TextBlock Text="描述目标，Codex 会在授权范围内工作。" Foreground="{StaticResource MutedBrush}" Margin="0,6,0,18" />
+                        <Border Style="{StaticResource SurfaceBorder}" Padding="22">
+                            <StackPanel>
+                                <TextBlock Text="选择项目" FontWeight="SemiBold" />
+                                <ComboBox x:Name="NewTaskProjectComboBox" DisplayMemberPath="Name" Margin="0,7,0,0"
+                                          SelectionChanged="NewTaskProjectComboBox_SelectionChanged" />
+                                <Border Background="#FFF7E6" BorderBrush="#E4C47C" BorderThickness="1" CornerRadius="4"
+                                        Padding="12" Margin="0,12,0,0">
+                                    <TextBlock x:Name="TaskDirectoryNoticeText" Text="Codex 将在所选项目目录内执行任务。" TextWrapping="Wrap" />
+                                </Border>
+                                <TextBlock Text="任务标题（可选）" FontWeight="SemiBold" Margin="0,16,0,7" />
+                                <TextBox x:Name="NewTaskTitleTextBox" />
+                                <TextBlock Text="希望电脑完成什么" FontWeight="SemiBold" Margin="0,16,0,7" />
+                                <TextBox x:Name="NewTaskInstructionTextBox" MinHeight="150" AcceptsReturn="True"
+                                         TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" />
+                                <Button x:Name="NewTaskSubmitButton" Content="确认并开始任务" Style="{StaticResource PrimaryButton}"
+                                        HorizontalAlignment="Right" Margin="0,16,0,0" Click="NewTaskSubmitButton_Click" />
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                </ScrollViewer>
+
+                <ScrollViewer x:Name="DesktopActionsPage" Visibility="Collapsed" VerticalScrollBarVisibility="Auto">
+                    <StackPanel MaxWidth="880" HorizontalAlignment="Left">
+                        <TextBlock Text="电脑操作" Style="{StaticResource SectionTitle}" />
+                        <TextBlock Text="只执行你当次明确确认的低风险启动操作，不会移动鼠标、输入内容或执行系统命令。"
+                                   Foreground="{StaticResource MutedBrush}" Margin="0,6,0,18" TextWrapping="Wrap" />
+
+                        <Border Style="{StaticResource SurfaceBorder}" Padding="22">
+                            <StackPanel>
+                                <TextBlock Text="打开已知应用" FontSize="17" FontWeight="SemiBold" />
+                                <TextBlock Text="应用来自内置受控清单，不能输入程序路径或启动参数。"
+                                           Foreground="{StaticResource MutedBrush}" Margin="0,5,0,12" />
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="320" />
+                                        <ColumnDefinition Width="12" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <ComboBox x:Name="DesktopApplicationComboBox" DisplayMemberPath="DisplayName" />
+                                    <Button x:Name="OpenDesktopApplicationButton" Grid.Column="2" Content="确认后打开"
+                                            Style="{StaticResource PrimaryButton}" Click="OpenDesktopApplicationButton_Click" />
+                                </Grid>
+                            </StackPanel>
+                        </Border>
+
+                        <Border Style="{StaticResource SurfaceBorder}" Padding="22" Margin="0,12,0,0">
+                            <StackPanel>
+                                <TextBlock Text="打开安全网站" FontSize="17" FontWeight="SemiBold" />
+                                <TextBlock Text="当前只允许 https 地址。每次打开前都会显示完整地址并请你确认。"
+                                           Foreground="{StaticResource MutedBrush}" Margin="0,5,0,12" />
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="12" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBox x:Name="DesktopWebsiteTextBox" Text="https://" />
+                                    <Button x:Name="OpenDesktopWebsiteButton" Grid.Column="2" Content="确认后打开"
+                                            Style="{StaticResource PrimaryButton}" Click="OpenDesktopWebsiteButton_Click" />
+                                </Grid>
+                            </StackPanel>
+                        </Border>
+
+                        <Border x:Name="DesktopActionResultBorder" Style="{StaticResource SurfaceBorder}"
+                                Background="#EAF6F0" BorderBrush="#79B79C" Padding="16" Margin="0,12,0,0"
+                                Visibility="Collapsed">
+                            <TextBlock x:Name="DesktopActionResultText" TextWrapping="Wrap" />
+                        </Border>
+
+                        <Border Background="#FFF7E6" BorderBrush="#E4C47C" BorderThickness="1"
+                                CornerRadius="4" Padding="14" Margin="0,12,0,0">
+                            <TextBlock Text="当前不会执行：任意程序路径、命令行、鼠标点击、键盘输入、发送消息、删除文件、付款或账号设置。"
+                                       TextWrapping="Wrap" />
+                        </Border>
+                    </StackPanel>
+                </ScrollViewer>
+
+                <Grid x:Name="CurrentTaskPage" Visibility="Collapsed">
+                    <Grid x:Name="CurrentTaskEmptyPanel">
+                        <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+                            <TextBlock Text="当前没有正在查看的任务" FontSize="20" FontWeight="SemiBold" HorizontalAlignment="Center" />
+                            <TextBlock Text="从首页创建任务，或从任务历史中选择一项。" Foreground="{StaticResource MutedBrush}" Margin="0,8,0,16" />
+                            <Button Content="新建任务" Style="{StaticResource PrimaryButton}" Click="OpenNewTaskButton_Click" />
+                        </StackPanel>
+                    </Grid>
+                    <Grid x:Name="CurrentTaskContent" Visibility="Collapsed">
+                        <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
+                        <Grid>
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                            <StackPanel>
+                                <TextBlock x:Name="CurrentTaskTitleText" Style="{StaticResource SectionTitle}" Text="任务" />
+                                <StackPanel Orientation="Horizontal" Margin="0,7,0,0">
+                                    <TextBlock x:Name="CurrentTaskStatusText" FontWeight="SemiBold" />
+                                    <TextBlock x:Name="CurrentTaskDurationText" Foreground="{StaticResource MutedBrush}" Margin="14,0,0,0" />
+                                    <TextBlock x:Name="CurrentTaskProjectText" Foreground="{StaticResource MutedBrush}" Margin="14,0,0,0" />
+                                </StackPanel>
+                            </StackPanel>
+                            <Button x:Name="CurrentTaskCancelButton" Grid.Column="1" Content="取消任务" Style="{StaticResource DangerButton}"
+                                    Click="CurrentTaskCancelButton_Click" />
+                        </Grid>
+                        <Border x:Name="CurrentVerificationBanner" Grid.Row="1" Margin="0,14,0,0" Padding="16,13"
+                                Background="#EEF3F5" BorderBrush="#B8CBD3" BorderThickness="1" CornerRadius="5">
+                            <Grid>
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="190" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                                <StackPanel>
+                                    <TextBlock Text="系统验证结果" Style="{StaticResource Eyebrow}" />
+                                    <TextBlock x:Name="CurrentVerificationStatusText" Text="等待证据" FontSize="20" FontWeight="Bold" Margin="0,4,0,0" />
+                                </StackPanel>
+                                <TextBlock x:Name="CurrentUserSummaryText" Grid.Column="1" TextWrapping="Wrap" VerticalAlignment="Center" FontSize="15" />
+                            </Grid>
+                        </Border>
+                        <StackPanel Grid.Row="2">
+                            <Border x:Name="EvidenceConflictBanner" Visibility="Collapsed" Margin="0,10,0,0" Padding="12"
+                                    Background="#FCECED" BorderBrush="#E3A1A5" BorderThickness="1" CornerRadius="4">
+                                <TextBlock Text="Codex 已完成执行，但系统验证未通过。" Foreground="#972F37" FontWeight="Bold" />
+                            </Border>
+                            <Border x:Name="DecisionCard" Visibility="Collapsed" Margin="0,10,0,0" Padding="14"
+                                    Background="#FFF7E6" BorderBrush="#E4C47C" BorderThickness="1" CornerRadius="5">
+                                <Grid>
+                                    <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+                                    <TextBlock x:Name="DecisionQuestionText" FontSize="15" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                    <Grid Grid.Row="1" Margin="0,10,0,0">
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="10" /><ColumnDefinition Width="120" /></Grid.ColumnDefinitions>
+                                        <TextBox x:Name="DecisionAnswerTextBox" MinHeight="42" AcceptsReturn="True" TextWrapping="Wrap" />
+                                        <Button Grid.Column="2" Content="继续任务" Style="{StaticResource PrimaryButton}" Click="ContinueTaskButton_Click" />
+                                    </Grid>
+                                </Grid>
+                            </Border>
+                        </StackPanel>
+                        <Grid Grid.Row="3" Margin="0,12,0,0">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="1.04*" /><ColumnDefinition Width="12" /><ColumnDefinition Width="0.96*" /></Grid.ColumnDefinitions>
+                            <Border Style="{StaticResource SurfaceBorder}" Padding="14">
+                                <Grid>
+                                    <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
+                                    <TextBlock Text="执行过程" FontSize="16" FontWeight="SemiBold" />
+                                    <TextBlock x:Name="CurrentInstructionText" Grid.Row="1" TextWrapping="Wrap" Margin="0,8,0,8" Foreground="{StaticResource MutedBrush}" />
+                                    <ListBox x:Name="CurrentEventsList" Grid.Row="2" BorderThickness="0" />
+                                </Grid>
+                            </Border>
+                            <Border Grid.Column="2" Style="{StaticResource SurfaceBorder}" Padding="14">
+                                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                    <StackPanel>
+                                        <TextBlock Text="可信结果" FontSize="16" FontWeight="SemiBold" />
+                                        <TextBlock x:Name="EvidenceStatsText" TextWrapping="Wrap" Margin="0,10,0,0" />
+                                        <TextBlock Text="修改文件" FontWeight="SemiBold" Margin="0,15,0,6" />
+                                        <ListBox x:Name="ChangedFilesList" MinHeight="50" BorderThickness="0" />
+                                        <TextBlock Text="实际测试" FontWeight="SemiBold" Margin="0,15,0,6" />
+                                        <ListBox x:Name="TestCommandsList" MinHeight="50" BorderThickness="0" />
+                                        <TextBlock Text="Codex 最终说明" FontWeight="SemiBold" Margin="0,15,0,6" />
+                                        <TextBlock x:Name="AgentFinalExplanationText" TextWrapping="Wrap" />
+                                        <Expander Header="技术信息" Margin="0,14,0,0">
+                                            <TextBlock x:Name="TaskTechnicalInfoText" TextWrapping="Wrap" FontFamily="Consolas" Margin="0,7,0,0" />
+                                        </Expander>
+                                    </StackPanel>
+                                </ScrollViewer>
+                            </Border>
+                        </Grid>
+                    </Grid>
+                </Grid>
+
+                <Grid x:Name="HistoryPage" Visibility="Collapsed">
+                    <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="12" /><RowDefinition Height="*" /></Grid.RowDefinitions>
+                    <Grid>
+                        <StackPanel>
+                            <TextBlock Text="任务历史" Style="{StaticResource SectionTitle}" />
+                            <TextBlock Text="以系统证据筛选和查看过去的任务。" Foreground="{StaticResource MutedBrush}" Margin="0,6,0,0" />
+                        </StackPanel>
+                        <ComboBox x:Name="HistoryFilterComboBox" HorizontalAlignment="Right" Width="170"
+                                  SelectionChanged="HistoryFilterComboBox_SelectionChanged">
+                            <ComboBoxItem Content="全部历史" Tag="" IsSelected="True" />
+                            <ComboBoxItem Content="成功" Tag="Succeeded" />
+                            <ComboBoxItem Content="失败" Tag="Failed" />
+                            <ComboBoxItem Content="已取消" Tag="Cancelled" />
+                            <ComboBoxItem Content="等待用户" Tag="WaitingForUser" />
+                            <ComboBoxItem Content="未验证" Tag="Unverified" />
+                            <ComboBoxItem Content="验证失败" Tag="VerificationFailed" />
+                        </ComboBox>
+                    </Grid>
+                    <Border Grid.Row="2" Style="{StaticResource SurfaceBorder}" Padding="12">
+                        <ListView x:Name="HistoryListView" MouseDoubleClick="TaskList_MouseDoubleClick">
+                            <ListView.View>
+                                <GridView>
+                                    <GridViewColumn Header="任务" DisplayMemberBinding="{Binding Title}" Width="280" />
+                                    <GridViewColumn Header="项目" DisplayMemberBinding="{Binding ProjectName}" Width="160" />
+                                    <GridViewColumn Header="运行状态" DisplayMemberBinding="{Binding Status}" Width="120" />
+                                    <GridViewColumn Header="验证状态" DisplayMemberBinding="{Binding VerificationStatus}" Width="140" />
+                                    <GridViewColumn Header="开始时间" DisplayMemberBinding="{Binding TimeText}" Width="150" />
+                                    <GridViewColumn Header="结果摘要" DisplayMemberBinding="{Binding UserSummary}" Width="360" />
+                                </GridView>
+                            </ListView.View>
+                        </ListView>
+                    </Border>
+                </Grid>
+
+                <ScrollViewer x:Name="SettingsPage" Visibility="Collapsed" VerticalScrollBarVisibility="Auto">
+                    <StackPanel MaxWidth="900" HorizontalAlignment="Left">
+                        <TextBlock Text="设置" Style="{StaticResource SectionTitle}" />
+                        <TextBlock Text="只显示当前版本真正生效的选项。" Foreground="{StaticResource MutedBrush}" Margin="0,6,0,18" />
+                        <Border Style="{StaticResource SurfaceBorder}" Padding="20" Margin="0,0,0,12">
+                            <StackPanel>
+                                <TextBlock Text="运行方式" FontSize="16" FontWeight="SemiBold" />
+                                <CheckBox x:Name="StartWithWindowsCheckBox" Content="登录 Windows 后自动启动" Margin="0,14,0,0" />
+                                <CheckBox x:Name="RunInBackgroundCheckBox" Content="关闭窗口后在后台运行客户端" Margin="0,10,0,0" />
+                                <CheckBox x:Name="CloseToTrayCheckBox" Content="点击关闭按钮时收起到系统托盘" Margin="0,10,0,0" />
+                                <CheckBox x:Name="NotificationsEnabledCheckBox" Content="显示任务完成、失败和等待决定的本地通知" Margin="0,10,0,0" />
+                                <Button Content="保存设置" Style="{StaticResource PrimaryButton}" HorizontalAlignment="Left"
+                                        Margin="0,15,0,0" Click="SaveSettingsButton_Click" />
+                            </StackPanel>
+                        </Border>
+                        <Border Style="{StaticResource SurfaceBorder}" Padding="20">
+                            <Grid>
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="230" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="44" /><RowDefinition Height="44" /><RowDefinition Height="44" />
+                                    <RowDefinition Height="44" /><RowDefinition Height="44" /><RowDefinition Height="44" />
+                                </Grid.RowDefinitions>
+                                <TextBlock Text="Desktop Host" VerticalAlignment="Center" />
+                                <TextBlock x:Name="SettingsHostStatusText" Grid.Column="1" VerticalAlignment="Center" />
+                                <TextBlock Grid.Row="1" Text="Codex 状态" VerticalAlignment="Center" />
+                                <TextBlock x:Name="SettingsCodexStatusText" Grid.Row="1" Grid.Column="1" VerticalAlignment="Center" />
+                                <TextBlock Grid.Row="2" Text="Codex CLI 版本" VerticalAlignment="Center" />
+                                <TextBlock x:Name="SettingsCodexVersionText" Grid.Row="2" Grid.Column="1" VerticalAlignment="Center" FontFamily="Consolas" />
+                                <TextBlock Grid.Row="3" Text="数据库状态" VerticalAlignment="Center" />
+                                <TextBlock x:Name="SettingsDatabaseStatusText" Grid.Row="3" Grid.Column="1" VerticalAlignment="Center" />
+                                <TextBlock Grid.Row="4" Text="本机 Device ID" VerticalAlignment="Center" />
+                                <TextBlock x:Name="SettingsDeviceIdText" Grid.Row="4" Grid.Column="1" VerticalAlignment="Center" FontFamily="Consolas" />
+                                <TextBlock Grid.Row="5" Text="数据存储位置" VerticalAlignment="Center" />
+                                <TextBlock x:Name="SettingsDataPathText" Grid.Row="5" Grid.Column="1" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                            </Grid>
+                        </Border>
+                        <Border Style="{StaticResource SurfaceBorder}" Padding="20" Margin="0,12,0,0">
+                            <StackPanel>
+                                <TextBlock Text="数据管理" FontSize="16" FontWeight="SemiBold" />
+                                <TextBlock Text="清理只删除已结束的任务历史，不会删除项目文件。" Foreground="{StaticResource MutedBrush}" Margin="0,5,0,12" />
+                                <StackPanel Orientation="Horizontal">
+                                    <Button Content="清理历史记录" Style="{StaticResource DangerButton}" Click="ClearHistoryButton_Click" />
+                                    <Button Content="打开数据目录" Style="{StaticResource SecondaryButton}" Margin="10,0,0,0" Click="OpenDataDirectoryButton_Click" />
+                                    <Button Content="打开日志目录" Style="{StaticResource SecondaryButton}" Margin="10,0,0,0" Click="OpenLogsDirectoryButton_Click" />
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
+                        <Border Style="{StaticResource SurfaceBorder}" Padding="20" Margin="0,12,0,0">
+                            <StackPanel>
+                                <TextBlock Text="关于" FontSize="16" FontWeight="SemiBold" />
+                                <TextBlock Text="元枢 V0.1 · 个人电脑 AI 中枢" Margin="0,8,0,0" />
+                                <TextBlock x:Name="ProductVersionText" Foreground="{StaticResource MutedBrush}" Margin="0,4,0,0" />
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                </ScrollViewer>
+            </Grid>
+
+            <Border Grid.Row="3" Background="#E6ECEA" Padding="22,0">
+                <TextBlock x:Name="StatusBarText" Text="正在连接 Desktop Host…" VerticalAlignment="Center"
+                           Foreground="{StaticResource MutedBrush}" FontSize="11" />
+            </Border>
+        </Grid>
+    </Grid>
+</Window>
