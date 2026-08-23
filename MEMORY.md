@@ -4,9 +4,9 @@
 
 ## 当前状态
 
-- 最近正式冻结、可直接回滚的基线：V0.2.1，标签 `v0.2.1-baseline`。
-- V2 阶段 1“统一会话中枢”已经通过；363/363 自动化和实际 Release DesktopClient + DesktopHost 的真实桌面验收均通过。版本为 V0.3.0，标签为 `v0.3.0-stage1`（待最终冻结创建）。
-- V0.3.0 的最终源码提交、标签和安装包 SHA-256 仍待版本冻结填入；这些条件完成前，不把版本描述为已正式冻结。
+- 当前阶段 1 源码与功能基线：V0.3.0，标签 `v0.3.0-stage1`，源码提交 `0a8cd9e164c35b86f67ffd94b9e0f17c312a2576`，annotated tag object `9fc790ade57fa2d3c18bc5ee84e8dc9e7018aa89`。完整安装生命周期尚待干净机验收，因此安装包未获对外分发放行。
+- V2 阶段 1“统一会话中枢”已经通过；363/363 自动化和实际 Release DesktopClient + DesktopHost 的真实桌面验收均通过。
+- V0.2.1 标签 `v0.2.1-baseline` 保留为上一版回滚点；回滚必须同时使用 pre-v7 备份或隔离数据目录。
 - 阶段 1 没有接入 DeepSeek、长期记忆、RAG、向量数据库、第二个普通聊天 Provider 或复杂多 Agent 产品功能。
 
 ## 长期架构决策
@@ -43,9 +43,11 @@
 - 真实 Codex 打断 3/3，通过；每次取消后继续观察 10 秒，旧回答没有重新出现。
 - 项目补充、文件补充和单窗口同意/拒绝共 5/5 场景，通过；项目、文件均在同一原始 Turn 续接。
 - 独立桌面产品验收 2/2，通过；包含实际 Release WPF Client/Host、UI 停止、状态同步、窗口拒绝和进程恢复场景。
-- 实际 Release DesktopClient + DesktopHost + 真实 Codex Provider + 真实 Windows Notepad 验收 5/5，`Failed=0`、`FalseCompleted=0`；运行证据：`%LOCALAPPDATA%\ScreenGuide\Experiments\DesktopV01\20260823-182601`。
+- 实际 Release DesktopClient + DesktopHost + 真实 Codex Provider + 真实 Windows Notepad 验收 5/5，`Failed=0`、`FalseCompleted=0`；Notepad 严格校验窗口句柄与标题；运行证据：`%LOCALAPPDATA%\ScreenGuide\Experiments\DesktopV01\20260823-184833`。
 - 自动化全量测试 363/363，通过；失败 0，跳过 0。
 - 官方 NuGet 源全 solution 已知漏洞检查通过，没有已知易受攻击的直接或传递依赖。
+- 标签源码 locked restore 成功；发布目录 533 个文件。Client/Host ProductVersion 为 `0.3.0+0a8cd9e164c35b86f67ffd94b9e0f17c312a2576`，FileVersion 为 `0.3.0.0`。
+- 安装包 `artifacts/release/元枢-V0.3.0-安装包.exe` 为 64,039,656 bytes，SHA-256 为 `42C609E130B29C6D96784C2B0266473B6D3417BE0DC5FE9C81C7517CB100FCC7`，未签名。
 
 ## 阶段 0 保留事实
 
@@ -61,7 +63,7 @@
 - Session 快照仍随完整会话历史增长；`SessionCoordinator.cs`、`MainWindow.xaml.cs` 和部分 SQLite Store 较大。
 - 单窗口授权已比较句柄、进程名和标题，但尚未保存进程 ID / 启动时间；同程序同标题窗口的极端句柄复用风险留待后续加固。
 - 安装包无数字签名；语音模型分发与许可证待定。
-- V0.3.0 最终源码提交、`v0.3.0-stage1` 标签和提交后重建安装包 SHA-256 尚待填入；阶段 2 是否启动由项目负责人决定。
+- 阶段 2 尚未启动，是否启动由项目负责人决定。
 
 ## 更新规则
 

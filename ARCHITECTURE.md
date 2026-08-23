@@ -1,6 +1,6 @@
 # 元枢当前架构（V0.3.0 阶段 1 As-Built）
 
-> 本文只描述当前代码已经实现的系统，不把后续路线图写成现有能力。更新时间：2026-08-24。阶段 1 已通过；V0.3.0 的最终提交、标签和安装包哈希见 `docs/baselines/V0.3.0_STAGE1.md`。
+> 本文只描述当前代码已经实现的系统，不把后续路线图写成现有能力。更新时间：2026-08-24。阶段 1 已通过，源码与产物身份已冻结为 V0.3.0；最终提交、标签和安装包哈希见 `docs/baselines/V0.3.0_STAGE1.md`。
 
 ## 1. 运行结构
 
@@ -180,8 +180,10 @@ V0.3.0 的正式源码由下面这些内容共同组成：
 - 普通依赖与 win-x64 发布依赖使用锁文件，发布脚本在 locked mode 下恢复。
 - `scripts/build-desktop-release.ps1` 测试、发布 DesktopClient/DesktopHost、合并自包含目录并生成 V0.3.0 Inno Setup 安装包。
 - 全量自动化测试 363/363 通过，失败 0、跳过 0。
-- 实际 Release DesktopClient + DesktopHost + 真实 Codex Provider + 真实 Windows Notepad 完成 10 轮连续对话、3 次真取消和 5 个项目/文件/单窗口场景；`Failed=0`、`FalseCompleted=0`，证据目录为 `%LOCALAPPDATA%\ScreenGuide\Experiments\DesktopV01\20260823-182601`。
-- 自动化总数为 363/363；最终 Git 提交、安装包 SHA-256 与正式标签在版本冻结时写入 `docs/baselines/V0.3.0_STAGE1.md`。
+- 实际 Release DesktopClient + DesktopHost + 真实 Codex Provider + 真实 Windows Notepad 完成 10 轮连续对话、3 次真取消和 5 个项目/文件/单窗口场景；Notepad 严格校验窗口句柄与标题，`Failed=0`、`FalseCompleted=0`，证据目录为 `%LOCALAPPDATA%\ScreenGuide\Experiments\DesktopV01\20260823-184833`。
+- 自动化总数为 363/363；标签 `v0.3.0-stage1` 指向源码提交 `0a8cd9e164c35b86f67ffd94b9e0f17c312a2576`，annotated tag object 为 `9fc790ade57fa2d3c18bc5ee84e8dc9e7018aa89`。
+- 标签源码的 locked restore 通过。发布目录共 533 个文件；Client/Host ProductVersion 为 `0.3.0+0a8cd9e164c35b86f67ffd94b9e0f17c312a2576`，FileVersion 为 `0.3.0.0`。
+- 安装包 `artifacts/release/元枢-V0.3.0-安装包.exe` 为 64,039,656 bytes，SHA-256 为 `42C609E130B29C6D96784C2B0266473B6D3417BE0DC5FE9C81C7517CB100FCC7`，未签名。标签后的仅文档证据提交不改变标签源码或二进制来源。
 
 ## 12. 当前主要技术债
 

@@ -40,13 +40,14 @@
 - 独立桌面产品验收 2/2；
 - 实际 Release DesktopClient + DesktopHost + 真实 Codex Provider + 真实 Windows Notepad 综合场景 5/5，`Failed=0`、`FalseCompleted=0`；
 - 官方 NuGet 源全 solution 已知漏洞检查通过；本机完整安装生命周期因保护同 AppId 的现有 V0.2.0 安装与数据而未执行，不计为测试失败；
-- 证据目录：`%LOCALAPPDATA%\ScreenGuide\Experiments\DesktopV01\20260823-182601`。
+- 证据目录：`%LOCALAPPDATA%\ScreenGuide\Experiments\DesktopV01\20260823-184833`；真实 Notepad 严格校验窗口句柄与标题。
 
-版本记录待补：
+版本冻结：
 
-- 填入 V0.3.0 最终源码提交；
-- 创建 `v0.3.0-stage1` 标签；
-- 从标签目标重建安装包，并在发布后证据提交中填入标签提交与 SHA-256。
+- `v0.3.0-stage1` 已创建，annotated tag object 为 `9fc790ade57fa2d3c18bc5ee84e8dc9e7018aa89`，指向源码提交 `0a8cd9e164c35b86f67ffd94b9e0f17c312a2576`；
+- 标签源码 locked restore 成功，发布目录共 533 个文件，Client/Host ProductVersion 与标签提交一致；
+- 正式安装包大小 64,039,656 bytes，SHA-256 为 `42C609E130B29C6D96784C2B0266473B6D3417BE0DC5FE9C81C7517CB100FCC7`，未签名；
+- 标签后的仅文档证据提交负责记录上述结果，不改变标签源码或发布二进制。
 
 明确非目标：
 

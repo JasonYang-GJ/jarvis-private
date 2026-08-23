@@ -1,6 +1,6 @@
 # 元枢产品事实（V0.3.0 阶段 1）
 
-> 当前产品事实的唯一入口。更新时间：2026-08-24。V0.3.0 的功能、自动化和真实桌面验收已经通过；正式提交、标签和最终安装包哈希仍需在版本冻结时填入。在此之前，V0.2.1 仍是可回滚的正式基线。
+> 当前产品事实的唯一入口。更新时间：2026-08-24。V0.3.0 已通过功能、自动化、真实桌面验收和源码/产物身份冻结；完整安装生命周期仍待干净机验收。V0.2.1 保留为上一版可回滚基线。
 
 ## 产品定位
 
@@ -61,8 +61,8 @@
 - 真实 Codex 打断 3/3，通过；每次取消后等待 10 秒，无迟到旧回答。
 - 项目补充、文件补充、单窗口同意与拒绝共 5/5 场景，通过；项目和文件均在同一原始 Turn 续接。
 - 独立桌面产品验收 2/2，通过；覆盖实际 Release WPF Client/Host、UI 停止、状态同步、窗口授权拒绝和 Host/Client 生命周期。
-- 实际 Release DesktopClient + DesktopHost + 真实 Codex Provider + 真实 Windows Notepad 验收为 5/5，`Failed=0`、`FalseCompleted=0`；项目选择后执行了真实隔离编程任务，文件选择后经过可见确认，Notepad 单窗口拒绝为 `Cancelled`、同意为 `Completed`。
-- 真实验收运行证据位于 `%LOCALAPPDATA%\ScreenGuide\Experiments\DesktopV01\20260823-182601`；该目录含隔离测试数据和日志，不进入 Git。
+- 实际 Release DesktopClient + DesktopHost + 真实 Codex Provider + 真实 Windows Notepad 验收为 5/5，`Failed=0`、`FalseCompleted=0`；项目选择后执行了真实隔离编程任务，文件选择后经过可见确认，Notepad 单窗口严格校验句柄与标题，拒绝为 `Cancelled`、同意为 `Completed`。
+- 真实验收运行证据位于 `%LOCALAPPDATA%\ScreenGuide\Experiments\DesktopV01\20260823-184833`；该目录含隔离测试数据和日志，不进入 Git。
 - 自动化全量测试：363/363 通过，失败 0，跳过 0。
 
 ## 尚未完成
@@ -85,7 +85,9 @@
 
 ## 版本与安装状态
 
-- 可明确回滚的稳定基线：V0.2.1，Git 标签 `v0.2.1-baseline`。
-- 阶段 1 已通过版本：V0.3.0；标签为 `v0.3.0-stage1`（待最终冻结创建）。
-- V0.3.0 的实际 Release 二进制已完成上述真实流程验收；最终源码提交、标签和提交后重建安装包的 SHA-256 仍需写入 `docs/baselines/V0.3.0_STAGE1.md`。
-- 在计划标签存在、干净源码构建和测试通过、安装包验收通过且工作区干净之前，不把 V0.3.0 描述为“已正式冻结发布”。
+- 当前阶段 1 源码与功能基线：V0.3.0，标签 `v0.3.0-stage1`，源码提交 `0a8cd9e164c35b86f67ffd94b9e0f17c312a2576`。完整安装生命周期仍需在干净机验收后，才可把安装包视为对外分发版本。
+- annotated tag object：`9fc790ade57fa2d3c18bc5ee84e8dc9e7018aa89`。标签之后的仅文档证据提交不改变标签所指源码。
+- DesktopClient / DesktopHost ProductVersion 均为 `0.3.0+0a8cd9e164c35b86f67ffd94b9e0f17c312a2576`，FileVersion 均为 `0.3.0.0`；发布目录共 533 个文件。
+- 正式安装包为 `artifacts/release/元枢-V0.3.0-安装包.exe`，64,039,656 bytes，SHA-256 为 `42C609E130B29C6D96784C2B0266473B6D3417BE0DC5FE9C81C7517CB100FCC7`，未签名。
+- V0.2.1 标签 `v0.2.1-baseline` 保留为上一版回滚点；回滚数据必须使用 pre-v7 备份或隔离数据目录。
+- 为保护本机同 AppId 的现有 V0.2.0 安装、卸载登记和用户数据，本阶段没有在该机器重复完整安装—卸载—重装；该发布生命周期仍应在干净机执行。

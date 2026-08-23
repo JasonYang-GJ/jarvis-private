@@ -4,7 +4,7 @@
 
 ## 0.3.0 - 2026-08-24（V2 阶段 1：通过）
 
-> 功能、363/363 自动化和最终 Release 真实用户流程验收均已通过；最终源码提交、`v0.3.0-stage1` 标签和提交后重建安装包的 SHA-256 待版本冻结时填入。
+> 功能、363/363 自动化、最终 Release 真实用户流程和源码/产物身份冻结均已通过；标签后的仅文档证据提交不改变标签所指源码。完整安装生命周期仍待干净机验收，不视为已获对外分发放行。
 
 ### 统一会话中枢
 
@@ -48,13 +48,15 @@
 - 项目、文件和单窗口授权同意/拒绝共 5/5 场景，通过；项目/文件均续接同一原始 Turn。
 - 独立桌面产品验收 2/2，通过。
 - 实际 Release DesktopClient + DesktopHost + 真实 Codex Provider + 真实 Windows Notepad 验收 5/5，`Failed=0`、`FalseCompleted=0`；项目/文件续接和单窗口同意/拒绝均通过。
-- 真实验收证据：`%LOCALAPPDATA%\ScreenGuide\Experiments\DesktopV01\20260823-182601`。
+- 真实验收证据：`%LOCALAPPDATA%\ScreenGuide\Experiments\DesktopV01\20260823-184833`；真实 Notepad 严格校验窗口句柄与标题。
 - 自动化全量测试：363/363 通过，失败 0，跳过 0。
 - 官方 NuGet 源全 solution 已知漏洞检查通过，没有已知易受攻击的直接或传递依赖。
 - 本机为保护同 AppId 的现有 V0.2.0 安装、卸载登记与用户数据，没有运行完整安装—卸载—重装脚本；这是一项安全保护，不计为测试失败，干净机发布生命周期验收仍需单独执行。
-- 正式源码提交：**待最终冻结填入**。
-- 正式标签：`v0.3.0-stage1`，**待最终冻结创建**。
-- 安装包 SHA-256：**待最终冻结填入**。
+- 正式源码提交：`0a8cd9e164c35b86f67ffd94b9e0f17c312a2576`。
+- 正式标签：`v0.3.0-stage1`；annotated tag object：`9fc790ade57fa2d3c18bc5ee84e8dc9e7018aa89`。
+- Client/Host ProductVersion：`0.3.0+0a8cd9e164c35b86f67ffd94b9e0f17c312a2576`；FileVersion：`0.3.0.0`；发布目录：533 个文件。
+- 安装包：`artifacts/release/元枢-V0.3.0-安装包.exe`，64,039,656 bytes，SHA-256 `42C609E130B29C6D96784C2B0266473B6D3417BE0DC5FE9C81C7517CB100FCC7`，`NotSigned`。
+- 标签之后的提交只回填上述发布证据，不属于 `v0.3.0-stage1` 源码，也不改变发布二进制。
 
 ## 0.2.1 - 2026-08-23
 
