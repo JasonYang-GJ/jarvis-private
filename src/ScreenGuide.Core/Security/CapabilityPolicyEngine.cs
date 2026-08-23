@@ -32,7 +32,12 @@ public sealed class CapabilityPolicyEngine
             ["windows.safe-launch"] = new HashSet<string>(StringComparer.Ordinal)
             {
                 "desktop.application.open",
-                "desktop.website.open"
+                "desktop.website.open",
+                "browser.open",
+                "browser.open.visible-in-app",
+                "file.open",
+                "desktop.search.submit",
+                "desktop.window.describe"
             }
         };
 
@@ -82,7 +87,7 @@ public sealed class CapabilityPolicyEngine
         return new CapabilityPolicyDecision(
             CapabilityPolicyOutcome.Allowed,
             "allowed",
-            "已允许本次项目内 Codex 操作。");
+            "已允许本次明确确认的单次操作。");
     }
 
     public CapabilityPolicyDecision AuthorizeOnce(
@@ -127,6 +132,21 @@ public sealed class CapabilityPolicyEngine
                 && scope.ResourceId is null,
             "desktop.website.open" =>
                 string.Equals(scope.ScopeType, "Website", StringComparison.Ordinal)
+                && scope.ResourceId is null,
+            "browser.open" =>
+                string.Equals(scope.ScopeType, "Website", StringComparison.Ordinal)
+                && scope.ResourceId is null,
+            "browser.open.visible-in-app" =>
+                string.Equals(scope.ScopeType, "ApplicationWebsite", StringComparison.Ordinal)
+                && scope.ResourceId is null,
+            "file.open" =>
+                string.Equals(scope.ScopeType, "File", StringComparison.Ordinal)
+                && scope.ResourceId is null,
+            "desktop.search.submit" =>
+                string.Equals(scope.ScopeType, "Window", StringComparison.Ordinal)
+                && scope.ResourceId is null,
+            "desktop.window.describe" =>
+                string.Equals(scope.ScopeType, "Window", StringComparison.Ordinal)
                 && scope.ResourceId is null,
             _ => false
         };

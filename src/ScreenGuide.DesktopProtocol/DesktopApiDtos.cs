@@ -32,7 +32,11 @@ public sealed record ExecuteDesktopActionRequestDto(
     string ActionKind,
     string Target,
     bool Confirmed,
-    string? IdempotencyKey = null);
+    string? IdempotencyKey = null,
+    long? WindowHandle = null,
+    string? WindowTitle = null,
+    string? ApplicationId = null,
+    string AuthorizationSource = "VisibleConfirmation");
 
 public sealed record DesktopActionResultDto(
     Guid CommandId,
@@ -41,6 +45,102 @@ public sealed record DesktopActionResultDto(
     string Message,
     bool WasDuplicate,
     int? ProcessId = null);
+
+public sealed record PlanAssistantCommandRequestDto(
+    string Text,
+    string? SelectedFilePath = null,
+    Guid? SelectedProjectId = null,
+    bool ForegroundObservationConsent = false,
+    string InputModality = "Text");
+
+public sealed record ForegroundApplicationDto(
+    long WindowHandle,
+    string WindowTitle,
+    string ProcessName,
+    DateTimeOffset ObservedAtUtc);
+
+public sealed record AssistantIntentPlanDto(
+    Guid PlanId,
+    string IntentKind,
+    string Readiness,
+    string UserSummary,
+    bool RequiresConfirmation,
+    string? ConfirmationText,
+    string? MissingContext,
+    DateTimeOffset? ExpiresAtUtc,
+    ForegroundApplicationDto? ForegroundApplication = null);
+
+public sealed record ExecuteAssistantCommandRequestDto(
+    Guid PlanId,
+    bool Confirmed,
+    string? IdempotencyKey = null,
+    string AuthorizationSource = "VisibleConfirmation");
+
+public sealed record CancelWindowObservationRequestDto(string OperationId);
+
+public sealed record AssistantCommandResultDto(
+    string IntentKind,
+    string Status,
+    string UserSummary,
+    string VerificationStatus,
+    Guid? TaskId = null,
+    Guid? ConversationId = null,
+    Guid? CommandId = null,
+    bool WasDuplicate = false,
+    AssistantActionEvidenceDto? Evidence = null);
+
+public sealed record AssistantActionEvidenceDto(
+    Guid EvidenceId,
+    string VerificationStatus,
+    string UserSummary,
+    IReadOnlyList<string> VerifiedFacts,
+    IReadOnlyList<string> UnverifiedFacts,
+    DateTimeOffset GeneratedAtUtc);
+
+public sealed record ConversationIdRequestDto(Guid ConversationId);
+
+public sealed record CreateConversationRequestDto(string? Title = null);
+
+public sealed record SendConversationMessageRequestDto(
+    Guid ConversationId,
+    string Message,
+    string? IdempotencyKey = null);
+
+public sealed record CancelConversationTurnRequestDto(Guid ConversationId);
+
+public sealed record ConversationCommandResultDto(
+    Guid ConversationId,
+    Guid TurnId,
+    bool WasDuplicate);
+
+public sealed record ConversationSummaryDto(
+    Guid Id,
+    string Title,
+    string Status,
+    DateTimeOffset CreatedAtUtc,
+    DateTimeOffset UpdatedAtUtc,
+    DateTimeOffset? LastMessageAtUtc,
+    string? FailureMessage);
+
+public sealed record ConversationMessageDto(
+    Guid Id,
+    long SequenceNumber,
+    string Role,
+    string Content,
+    DateTimeOffset CreatedAtUtc);
+
+public sealed record ConversationTurnDto(
+    Guid Id,
+    int SequenceNumber,
+    string Status,
+    DateTimeOffset StartedAtUtc,
+    DateTimeOffset? CompletedAtUtc,
+    string? FailureMessage);
+
+public sealed record ConversationDetailsDto(
+    ConversationSummaryDto Summary,
+    IReadOnlyList<ConversationMessageDto> Messages,
+    IReadOnlyList<ConversationTurnDto> Turns);
 
 public sealed record CommandResultDto(Guid TaskId, bool WasDuplicate);
 

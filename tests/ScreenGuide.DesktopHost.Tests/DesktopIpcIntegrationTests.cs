@@ -24,7 +24,7 @@ public sealed class DesktopIpcIntegrationTests
         var projects = await client.ListProjectsAsync();
         Assert.True(status.HostOnline);
         Assert.Equal(DesktopProtocolVersion.Current, status.ProtocolVersion);
-        Assert.Equal(4, status.DatabaseSchemaVersion);
+        Assert.Equal(5, status.DatabaseSchemaVersion);
         Assert.Contains(projects, item => item.Id == project.Id);
 
         var created = await client.CreateTaskAsync(new CreateTaskRequestDto(
@@ -146,12 +146,13 @@ public sealed class DesktopIpcIntegrationTests
     [Fact]
     public async Task OnlyOneHostLeaseCanBeOwnedByDifferentThreads()
     {
+        var scope = $"Tests.{Guid.NewGuid():N}";
         var secondWasRejected = await Task.Run(() =>
         {
-            using var first = HostSingleInstanceLease.TryAcquire();
+            using var first = HostSingleInstanceLease.TryAcquire(scope);
             Assert.NotNull(first);
             HostSingleInstanceLease? second = null;
-            var thread = new Thread(() => second = HostSingleInstanceLease.TryAcquire());
+            var thread = new Thread(() => second = HostSingleInstanceLease.TryAcquire(scope));
             thread.Start();
             thread.Join();
             second?.Dispose();
@@ -164,15 +165,16 @@ public sealed class DesktopIpcIntegrationTests
     [Fact]
     public async Task HostLeaseCanBeReacquiredAfterAsyncOwnerDisposes()
     {
+        var scope = $"Tests.{Guid.NewGuid():N}";
         await Task.Run(async () =>
         {
-            using (var first = HostSingleInstanceLease.TryAcquire())
+            using (var first = HostSingleInstanceLease.TryAcquire(scope))
             {
                 Assert.NotNull(first);
                 await Task.Yield();
             }
 
-            using var next = HostSingleInstanceLease.TryAcquire();
+            using var next = HostSingleInstanceLease.TryAcquire(scope);
             Assert.NotNull(next);
         });
     }

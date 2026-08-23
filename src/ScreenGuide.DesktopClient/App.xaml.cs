@@ -33,6 +33,7 @@ public partial class App : System.Windows.Application
             var settings = await settingsStore.LoadAsync();
             DesktopClientFailureRecorder.RecordStage($"settings-loaded:onboarding={settings.OnboardingCompleted}");
             Guid? onboardingTaskId = null;
+            var openConversationAfterOnboarding = false;
             if (!settings.OnboardingCompleted)
             {
                 var onboarding = new OnboardingWindow(apiClient, settingsStore, settings);
@@ -43,6 +44,7 @@ public partial class App : System.Windows.Application
                 }
 
                 onboardingTaskId = onboarding.CreatedTaskId;
+                openConversationAfterOnboarding = onboarding.StartWithConversation;
                 settings = await settingsStore.LoadAsync();
             }
 
@@ -80,6 +82,11 @@ public partial class App : System.Windows.Application
             {
                 window.Show();
                 await window.OpenTaskFromNotificationAsync(taskId);
+            }
+            else if (openConversationAfterOnboarding)
+            {
+                window.Show();
+                window.OpenConversationCenterFromOnboarding();
             }
         }
         catch (Exception exception)

@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "dependencies": {
+    "net10.0": {
+      "screenguide.core": {
+        "type": "Project",
+        "dependencies": {
+          "ScreenGuide.Skills.Abstractions": "[0.2.1, )"
+        }
+      },
+      "screenguide.skills.abstractions": {
+        "type": "Project"
+      }
+    }
+  }
+}

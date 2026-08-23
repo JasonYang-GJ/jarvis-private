@@ -1,3 +1,6 @@
+using System.Security.Cryptography;
+using System.Text;
+using ScreenGuide.DesktopHost.Configuration;
 using ScreenGuide.DesktopProtocol;
 
 namespace ScreenGuide.DesktopHost.Runtime;
@@ -11,11 +14,17 @@ public sealed class HostSingleInstanceLease : IDisposable
         _mutex = mutex;
     }
 
-    public static HostSingleInstanceLease? TryAcquire()
+    public static HostSingleInstanceLease? TryAcquire(string? scope = null)
     {
+        var resolvedScope = string.IsNullOrWhiteSpace(scope)
+            ? Environment.GetEnvironmentVariable(DesktopHostOptions.PipeNameEnvironmentVariable)
+            : scope;
+        var component = string.IsNullOrWhiteSpace(resolvedScope)
+            ? "DesktopHost"
+            : $"DesktopHost.{Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(resolvedScope.Trim())))[..16]}";
         var mutex = new Mutex(
             initiallyOwned: false,
-            DesktopIpcEndpoint.CurrentUserMutexName("DesktopHost"));
+            DesktopIpcEndpoint.CurrentUserMutexName(component));
         try
         {
             if (!mutex.WaitOne(TimeSpan.Zero))

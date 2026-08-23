@@ -15,8 +15,8 @@ public sealed partial class TrayIconService : IDisposable
     {
         var menu = new Forms.ContextMenuStrip();
         menu.Items.Add("打开元枢", null, (_, _) => OpenRequested?.Invoke());
-        menu.Items.Add("新建任务", null, (_, _) => NewTaskRequested?.Invoke());
-        menu.Items.Add("当前任务", null, (_, _) => CurrentTaskRequested?.Invoke());
+        menu.Items.Add("说出或输入新指令", null, (_, _) => NewTaskRequested?.Invoke());
+        menu.Items.Add("当前编程任务", null, (_, _) => CurrentTaskRequested?.Invoke());
         menu.Items.Add(new Forms.ToolStripSeparator());
         menu.Items.Add("停止当前任务", null, (_, _) => CancelCurrentTaskRequested?.Invoke());
         menu.Items.Add("设置", null, (_, _) => SettingsRequested?.Invoke());
@@ -68,7 +68,7 @@ public sealed partial class TrayIconService : IDisposable
         _currentIcon = icon;
         _notifyIcon.Text = state switch
         {
-            TrayVisualState.Working => "元枢 · Codex 工作中",
+            TrayVisualState.Working => "元枢 · 编程任务执行中",
             TrayVisualState.WaitingForUser => "元枢 · 等待你的决定",
             TrayVisualState.Error => "元枢 · 需要检查",
             _ => "元枢 · 空闲"

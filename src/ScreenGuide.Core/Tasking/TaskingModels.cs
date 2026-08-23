@@ -7,7 +7,7 @@ public static class V01Contract
 
 public static class V02Contract
 {
-    public const int SchemaVersion = 4;
+    public const int SchemaVersion = 5;
 
     public const int ProtocolVersion = 2;
 

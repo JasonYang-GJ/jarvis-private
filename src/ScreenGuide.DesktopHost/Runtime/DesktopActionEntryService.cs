@@ -49,7 +49,8 @@ public sealed class DesktopActionEntryService(
             {
                 actionKind = normalized.ActionKind,
                 target = normalized.AuditTarget,
-                confirmed = true
+                confirmed = true,
+                authorizationSource = NormalizeAuthorizationSource(request.AuthorizationSource)
             }),
             ReceivedAtUtc = now,
             ExpiresAtUtc = now.AddMinutes(2),
@@ -75,11 +76,14 @@ public sealed class DesktopActionEntryService(
             normalized.Capability,
             JsonSerializer.Serialize(new WindowsDesktopActionInput(
                 normalized.ActionKind,
-                normalized.ExecutionTarget)),
+                normalized.ExecutionTarget,
+                normalized.WindowHandle,
+                normalized.WindowTitle,
+                normalized.Argument)),
             [new SkillResourceScope(
                 normalized.ScopeType,
                 null,
-                normalized.AuditTarget,
+                normalized.ScopeValue,
                 "Execute")],
             SkillAuthorizationOrigin.ExplicitUser,
             command.Id);
@@ -95,6 +99,7 @@ public sealed class DesktopActionEntryService(
                 normalized.Capability,
                 normalized.ActionKind,
                 target = normalized.AuditTarget,
+                authorizationSource = NormalizeAuthorizationSource(request.AuthorizationSource),
                 decision.Code
             },
             cancellationToken).ConfigureAwait(false);
@@ -134,8 +139,18 @@ public sealed class DesktopActionEntryService(
                     normalized.Capability,
                     normalized.ActionKind,
                     target = normalized.AuditTarget,
+                    authorizationSource = NormalizeAuthorizationSource(request.AuthorizationSource),
                     processId = result.ProcessId,
-                    status = result.Status.ToString()
+                    status = result.Status.ToString(),
+                    verificationStatus = normalized.Capability is
+                        WindowsDesktopCapabilities.OpenApplication or
+                        WindowsDesktopCapabilities.SearchForeground or
+                        WindowsDesktopCapabilities.DescribeForeground or
+                        WindowsDesktopCapabilities.OpenWebsiteSecure or
+                        WindowsDesktopCapabilities.OpenWebsiteInApplication
+                            ? "ExecutionVerified"
+                            : "LaunchRequested",
+                    resultSummary = final?.Summary
                 },
                 cancellationToken).ConfigureAwait(false);
             return new DesktopActionResultDto(
@@ -166,6 +181,7 @@ public sealed class DesktopActionEntryService(
                     normalized.Capability,
                     normalized.ActionKind,
                     target = normalized.AuditTarget,
+                    authorizationSource = NormalizeAuthorizationSource(request.AuthorizationSource),
                     error = exception.GetType().Name
                 },
                 cancellationToken).ConfigureAwait(false);
@@ -184,6 +200,11 @@ public sealed class DesktopActionEntryService(
         return snapshot;
     }
 
+    private static string NormalizeAuthorizationSource(string? value) =>
+        string.Equals(value, "ExplicitVoice", StringComparison.Ordinal)
+            ? "ExplicitVoice"
+            : "VisibleConfirmation";
+
     private NormalizedDesktopAction Normalize(ExecuteDesktopActionRequestDto request)
     {
         if (string.Equals(request.ActionKind, "OpenApplication", StringComparison.Ordinal))
@@ -200,6 +221,7 @@ public sealed class DesktopActionEntryService(
                 WindowsDesktopCapabilities.OpenApplication,
                 "Application",
                 application.Id,
+                application.Id,
                 application.Id);
         }
 
@@ -208,10 +230,86 @@ public sealed class DesktopActionEntryService(
             var website = SafeWebsitePolicy.RequireHttps(request.Target);
             return new NormalizedDesktopAction(
                 request.ActionKind,
-                WindowsDesktopCapabilities.OpenWebsite,
+                WindowsDesktopCapabilities.OpenWebsiteSecure,
                 "Website",
                 website.AbsoluteUri,
+                SafeWebsitePolicy.ForAudit(website),
                 SafeWebsitePolicy.ForAudit(website));
+        }
+
+        if (string.Equals(request.ActionKind, "OpenWebsiteInApplication", StringComparison.Ordinal))
+        {
+            var website = SafeWebsitePolicy.RequireHttps(request.Target);
+            var application = adapter.Applications.FirstOrDefault(item =>
+                string.Equals(item.Id, request.ApplicationId, StringComparison.Ordinal));
+            if (application is null)
+            {
+                throw new UnauthorizedAccessException("指定浏览器不在当前允许打开的清单中。");
+            }
+
+            var auditWebsite = SafeWebsitePolicy.ForAudit(website);
+            return new NormalizedDesktopAction(
+                request.ActionKind,
+                WindowsDesktopCapabilities.OpenWebsiteInApplication,
+                "ApplicationWebsite",
+                application.Id,
+                $"{application.Id}|{auditWebsite}",
+                $"{application.Id}:{auditWebsite}",
+                Argument: website.AbsoluteUri);
+        }
+
+        if (string.Equals(request.ActionKind, "OpenFile", StringComparison.Ordinal))
+        {
+            var fullPath = Path.GetFullPath(request.Target);
+            if (!File.Exists(fullPath))
+            {
+                throw new FileNotFoundException("刚才选择的文件已经不存在。", fullPath);
+            }
+
+            return new NormalizedDesktopAction(
+                request.ActionKind,
+                WindowsDesktopCapabilities.OpenFile,
+                "File",
+                fullPath,
+                fullPath,
+                Path.GetFileName(fullPath));
+        }
+
+        if (string.Equals(request.ActionKind, "SearchForeground", StringComparison.Ordinal))
+        {
+            var query = request.Target.Trim();
+            if (query.Length is < 1 or > 200 || request.WindowHandle is null)
+            {
+                throw new ArgumentException("搜索操作缺少有效内容或明确的目标窗口。");
+            }
+
+            return new NormalizedDesktopAction(
+                request.ActionKind,
+                WindowsDesktopCapabilities.SearchForeground,
+                "Window",
+                query,
+                request.WindowHandle.Value.ToString(),
+                request.WindowTitle ?? "前台窗口",
+                request.WindowHandle,
+                request.WindowTitle);
+        }
+
+        if (string.Equals(request.ActionKind, "DescribeForeground", StringComparison.Ordinal))
+        {
+            if (request.WindowHandle is null)
+            {
+                throw new ArgumentException("窗口查看缺少明确的目标窗口。");
+            }
+
+            return new NormalizedDesktopAction(
+                request.ActionKind,
+                WindowsDesktopCapabilities.DescribeForeground,
+                "Window",
+                request.WindowHandle.Value.ToString(),
+                request.WindowHandle.Value.ToString(),
+                request.WindowTitle ?? "前台窗口",
+                request.WindowHandle,
+                request.WindowTitle);
         }
 
         throw new UnauthorizedAccessException("这个桌面操作尚未开放。");
@@ -243,5 +341,9 @@ public sealed class DesktopActionEntryService(
         string Capability,
         string ScopeType,
         string ExecutionTarget,
-        string AuditTarget);
+        string ScopeValue,
+        string AuditTarget,
+        long? WindowHandle = null,
+        string? WindowTitle = null,
+        string? Argument = null);
 }

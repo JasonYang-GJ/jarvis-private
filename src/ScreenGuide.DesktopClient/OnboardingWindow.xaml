@@ -22,8 +22,8 @@
 
         <Grid Grid.Row="1" Margin="34,28">
             <StackPanel x:Name="CodexStepPanel">
-                <TextBlock Text="检查 Codex" Style="{StaticResource SectionTitle}" />
-                <TextBlock Text="元枢使用你电脑上的 Codex 执行任务。这里只检查安装和版本，不会运行任务。"
+                <TextBlock Text="先认识元枢" Style="{StaticResource SectionTitle}" />
+                <TextBlock Text="元枢是电脑上的 AI 入口：打开后自动聆听，你直接说出目标，它就能执行已经开放的低风险电脑操作。"
                            Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,8,0,20" />
                 <Border Style="{StaticResource SurfaceBorder}" Padding="20">
                     <Grid>
@@ -33,14 +33,19 @@
                                        HorizontalAlignment="Center" VerticalAlignment="Center" />
                         </Border>
                         <StackPanel Grid.Column="1">
-                            <TextBlock x:Name="CodexCheckTitleText" Text="正在检查 Codex…" FontSize="16" FontWeight="SemiBold" />
+                            <TextBlock x:Name="CodexCheckTitleText" Text="正在检查本机中枢…" FontSize="16" FontWeight="SemiBold" />
                             <TextBlock x:Name="CodexCheckDetailText" TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" Margin="0,6,0,0" />
                         </StackPanel>
                     </Grid>
                 </Border>
                 <Border x:Name="CodexHelpPanel" Visibility="Collapsed" Background="#FFF7E6" BorderBrush="#E4C47C"
                         BorderThickness="1" CornerRadius="4" Padding="14" Margin="0,14,0,0">
-                    <TextBlock Text="请先安装并登录 Codex，或安装经过 V0.1 验证的 0.147.0 版本，然后重新检查。"
+                    <TextBlock Text="编程助手是可选能力。即使没有 Codex，你仍然可以使用语音、打开应用/网页/文件等普通电脑功能。"
+                               TextWrapping="Wrap" />
+                </Border>
+                <Border Background="#EAF4F2" BorderBrush="#B7D8D0" BorderThickness="1" CornerRadius="4"
+                        Padding="14" Margin="0,14,0,0">
+                    <TextBlock Text="安全边界：监听状态始终可见，音频不保存；不会扫描硬盘、移动鼠标。发送、删除、支付、账号设置和密码输入不在当前开放范围。"
                                TextWrapping="Wrap" />
                 </Border>
                 <Button Content="重新检查" Style="{StaticResource SecondaryButton}" HorizontalAlignment="Left" Margin="0,14,0,0"
@@ -48,34 +53,38 @@
             </StackPanel>
 
             <StackPanel x:Name="ProjectStepPanel" Visibility="Collapsed">
-                <TextBlock Text="添加第一个项目" Style="{StaticResource SectionTitle}" />
-                <TextBlock Text="请手动选择一个 Git 项目。元枢不会扫描硬盘，也不会访问你没有选择的目录。"
+                <TextBlock Text="自动语音已经准备好" Style="{StaticResource SectionTitle}" />
+                <TextBlock Text="进入元枢后，麦克风会自动开始本机离线识别。你不需要点击按钮，也不需要输入文字。退出元枢后监听立即停止。"
                            Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,8,0,20" />
                 <Border Style="{StaticResource SurfaceBorder}" Padding="20">
-                    <StackPanel>
-                        <TextBlock Text="项目目录" FontWeight="SemiBold" />
-                        <TextBlock x:Name="OnboardingProjectPathText" Text="尚未选择" Foreground="{StaticResource MutedBrush}"
-                                   TextWrapping="Wrap" Margin="0,8,0,14" />
-                        <Button Content="选择 Git 项目" Style="{StaticResource PrimaryButton}" HorizontalAlignment="Left"
-                                Click="ChooseProjectButton_Click" />
-                    </StackPanel>
+                    <Grid>
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="56" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                        <Border Width="42" Height="42" CornerRadius="21" Background="#D8ECE7" HorizontalAlignment="Left">
+                            <Ellipse Width="14" Height="14" Fill="#1F8A6A" />
+                        </Border>
+                        <StackPanel Grid.Column="1">
+                            <TextBlock Text="直接说话即可" FontSize="17" FontWeight="SemiBold" />
+                            <TextBlock Text="例如：打开谷歌浏览器；用谷歌浏览器打开抖音；在当前窗口搜索天气。"
+                                       Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,6,0,0" />
+                        </StackPanel>
+                    </Grid>
                 </Border>
                 <TextBlock x:Name="ProjectStepMessageText" Foreground="{StaticResource DangerBrush}" TextWrapping="Wrap" Margin="0,12,0,0" />
             </StackPanel>
 
             <StackPanel x:Name="FirstTaskStepPanel" Visibility="Collapsed">
-                <TextBlock Text="尝试第一个任务" Style="{StaticResource SectionTitle}" />
-                <TextBlock Text="下面是一个不会主动修改文件的示例。你可以修改内容；只有点击确认后才会交给 Codex。"
+                <TextBlock Text="可以开始了" Style="{StaticResource SectionTitle}" />
+                <TextBlock Text="进入首页后，元枢会显示“正在聆听”。这时直接说出指令，明确的低风险操作会立即执行。"
                            Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,8,0,18" />
-                <Border Background="#EAF0FF" BorderBrush="#BCD0F6" BorderThickness="1" CornerRadius="5" Padding="18">
+                <Border Background="#EAF4F2" BorderBrush="#B7D8D0" BorderThickness="1" CornerRadius="5" Padding="18">
                     <StackPanel>
-                        <TextBlock x:Name="FirstTaskProjectText" FontWeight="SemiBold" />
-                        <TextBox x:Name="FirstTaskInstructionTextBox" MinHeight="120" AcceptsReturn="True" TextWrapping="Wrap"
-                                 Margin="0,12,0,0">请检查这个项目，告诉我它使用了哪些主要技术。不要修改任何文件。</TextBox>
+                        <TextBlock Text="当前可以直接执行" FontWeight="SemiBold" />
+                        <TextBlock Text="打开已知应用、打开已知网站、在可靠识别的当前窗口搜索。"
+                                   Foreground="{StaticResource MutedBrush}" Margin="0,8,0,0" TextWrapping="Wrap" />
+                        <TextBlock Text="查看屏幕、访问文件、运行编程任务等敏感能力仍会要求单独授权。"
+                                   Foreground="#A56210" Margin="0,10,0,0" TextWrapping="Wrap" />
                     </StackPanel>
                 </Border>
-                <TextBlock Text="确认后会立即创建任务。你也可以暂时跳过，稍后从首页开始。"
-                           Foreground="{StaticResource MutedBrush}" Margin="0,12,0,0" />
             </StackPanel>
         </Grid>
 
@@ -84,8 +93,6 @@
                 <Button x:Name="BackButton" Content="上一步" Style="{StaticResource SecondaryButton}" HorizontalAlignment="Left"
                         Visibility="Collapsed" Click="BackButton_Click" />
                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
-                    <Button x:Name="SkipTaskButton" Content="暂时跳过" Style="{StaticResource SecondaryButton}"
-                            Visibility="Collapsed" Margin="0,0,10,0" Click="SkipTaskButton_Click" />
                     <Button x:Name="NextButton" Content="下一步" Style="{StaticResource PrimaryButton}" IsEnabled="False"
                             Click="NextButton_Click" />
                 </StackPanel>

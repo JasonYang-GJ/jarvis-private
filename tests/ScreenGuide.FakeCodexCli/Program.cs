@@ -11,6 +11,8 @@ public static class Program
 
     public static async Task<int> Main(string[] args)
     {
+        Console.InputEncoding = System.Text.Encoding.UTF8;
+        Console.OutputEncoding = System.Text.Encoding.UTF8;
         if (args is ["--version"])
         {
             Console.WriteLine(
@@ -34,6 +36,16 @@ public static class Program
             : DefaultThreadId;
         Write(new { type = "thread.started", thread_id = threadId });
         Write(new { type = "turn.started" });
+
+        if (AppContext.BaseDirectory.Contains("conversation-no-terminal", StringComparison.OrdinalIgnoreCase))
+        {
+            Write(new
+            {
+                type = "item.started",
+                item = new { id = "conversation-missing-terminal", type = "agent_message", status = "in_progress" }
+            });
+            return 0;
+        }
 
         if (prompt.Contains("TEST_FAILURE", StringComparison.Ordinal))
         {
@@ -221,6 +233,34 @@ public static class Program
                 [],
                 ["added.txt", "modified.txt", "deleted.txt"],
                 []);
+            Write(new { type = "turn.completed", usage = Usage() });
+            return 0;
+        }
+
+        var isConversation = args.Any(value =>
+            value.EndsWith("conversation-output.schema.json", StringComparison.OrdinalIgnoreCase));
+        if (isConversation)
+        {
+            if (prompt.Contains("CONVERSATION_MISSING_TERMINAL", StringComparison.Ordinal))
+            {
+                return 0;
+            }
+
+            var reply = isResume
+                ? $"对话已续接:{threadId}"
+                : prompt.Contains("ECHO_CHAT_INPUT", StringComparison.Ordinal)
+                    ? "已收到对话正文"
+                    : "这是安全的本机对话回答";
+            Write(new
+            {
+                type = "item.completed",
+                item = new
+                {
+                    id = "conversation-message",
+                    type = "agent_message",
+                    text = JsonSerializer.Serialize(new { reply })
+                }
+            });
             Write(new { type = "turn.completed", usage = Usage() });
             return 0;
         }

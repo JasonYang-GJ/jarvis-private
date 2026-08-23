@@ -53,6 +53,39 @@ public interface IDesktopApiClient
         ExecuteDesktopActionRequestDto request,
         CancellationToken cancellationToken = default);
 
+    Task<AssistantIntentPlanDto> PlanAssistantCommandAsync(
+        PlanAssistantCommandRequestDto request,
+        CancellationToken cancellationToken = default);
+
+    Task<AssistantCommandResultDto> ExecuteAssistantCommandAsync(
+        ExecuteAssistantCommandRequestDto request,
+        CancellationToken cancellationToken = default);
+
+    Task<bool> CancelWindowObservationAsync(
+        string operationId,
+        CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<ConversationSummaryDto>> ListConversationsAsync(
+        CancellationToken cancellationToken = default);
+
+    Task<ConversationDetailsDto?> GetConversationAsync(
+        Guid conversationId,
+        CancellationToken cancellationToken = default);
+
+    Task<ConversationSummaryDto> CreateConversationAsync(
+        string? title = null,
+        CancellationToken cancellationToken = default);
+
+    Task<ConversationCommandResultDto> SendConversationMessageAsync(
+        Guid conversationId,
+        string message,
+        string? idempotencyKey = null,
+        CancellationToken cancellationToken = default);
+
+    Task CancelConversationTurnAsync(
+        Guid conversationId,
+        CancellationToken cancellationToken = default);
+
     Task ShutdownHostAsync(CancellationToken cancellationToken = default);
 }
 
@@ -76,6 +109,11 @@ public sealed class DesktopApiClient(
             return true;
         }
         catch (Exception exception) when (exception is IOException or TimeoutException)
+        {
+            return false;
+        }
+        catch (DesktopApiException exception) when (
+            string.Equals(exception.Error.Code, "protocol_version_unsupported", StringComparison.Ordinal))
         {
             return false;
         }
@@ -179,6 +217,71 @@ public sealed class DesktopApiClient(
         CallAsync<ExecuteDesktopActionRequestDto, DesktopActionResultDto>(
             DesktopApiMethods.ExecuteDesktopAction,
             request,
+            cancellationToken);
+
+    public Task<AssistantIntentPlanDto> PlanAssistantCommandAsync(
+        PlanAssistantCommandRequestDto request,
+        CancellationToken cancellationToken = default) =>
+        CallAsync<PlanAssistantCommandRequestDto, AssistantIntentPlanDto>(
+            DesktopApiMethods.PlanAssistantCommand,
+            request,
+            cancellationToken);
+
+    public Task<AssistantCommandResultDto> ExecuteAssistantCommandAsync(
+        ExecuteAssistantCommandRequestDto request,
+        CancellationToken cancellationToken = default) =>
+        CallAsync<ExecuteAssistantCommandRequestDto, AssistantCommandResultDto>(
+            DesktopApiMethods.ExecuteAssistantCommand,
+            request,
+            cancellationToken);
+
+    public Task<bool> CancelWindowObservationAsync(
+        string operationId,
+        CancellationToken cancellationToken = default) =>
+        CallAsync<CancelWindowObservationRequestDto, bool>(
+            DesktopApiMethods.CancelWindowObservation,
+            new CancelWindowObservationRequestDto(operationId),
+            cancellationToken);
+
+    public async Task<IReadOnlyList<ConversationSummaryDto>> ListConversationsAsync(
+        CancellationToken cancellationToken = default) =>
+        await CallAsync<EmptyRequest, ConversationSummaryDto[]>(
+            DesktopApiMethods.ListConversations,
+            new EmptyRequest(),
+            cancellationToken).ConfigureAwait(false);
+
+    public Task<ConversationDetailsDto?> GetConversationAsync(
+        Guid conversationId,
+        CancellationToken cancellationToken = default) =>
+        CallAsync<ConversationIdRequestDto, ConversationDetailsDto?>(
+            DesktopApiMethods.GetConversation,
+            new ConversationIdRequestDto(conversationId),
+            cancellationToken);
+
+    public Task<ConversationSummaryDto> CreateConversationAsync(
+        string? title = null,
+        CancellationToken cancellationToken = default) =>
+        CallAsync<CreateConversationRequestDto, ConversationSummaryDto>(
+            DesktopApiMethods.CreateConversation,
+            new CreateConversationRequestDto(title),
+            cancellationToken);
+
+    public Task<ConversationCommandResultDto> SendConversationMessageAsync(
+        Guid conversationId,
+        string message,
+        string? idempotencyKey = null,
+        CancellationToken cancellationToken = default) =>
+        CallAsync<SendConversationMessageRequestDto, ConversationCommandResultDto>(
+            DesktopApiMethods.SendConversationMessage,
+            new SendConversationMessageRequestDto(conversationId, message, idempotencyKey),
+            cancellationToken);
+
+    public Task CancelConversationTurnAsync(
+        Guid conversationId,
+        CancellationToken cancellationToken = default) =>
+        CallAsync<CancelConversationTurnRequestDto, bool>(
+            DesktopApiMethods.CancelConversationTurn,
+            new CancelConversationTurnRequestDto(conversationId),
             cancellationToken);
 
     public Task ShutdownHostAsync(CancellationToken cancellationToken = default) =>

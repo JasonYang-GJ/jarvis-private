@@ -1,4 +1,6 @@
-namespace ScreenGuide.Core;
+using System.Text;
+
+namespace ScreenGuide.Voice.Windows;
 
 public static class SpeechEchoMatcher
 {
@@ -14,18 +16,18 @@ public static class SpeechEchoMatcher
 
     public static bool CanInterrupt(string? recognizedText)
     {
-        var normalized = SpeechTextNormalizer.Normalize(recognizedText);
+        var normalized = Normalize(recognizedText);
         return normalized.Length >= 3
             || ImmediateInterruptions.Any(phrase => string.Equals(
                 normalized,
-                SpeechTextNormalizer.Normalize(phrase),
+                Normalize(phrase),
                 StringComparison.Ordinal));
     }
 
     public static bool IsLikelyAssistantEcho(string? recognizedText, string? assistantSpeech)
     {
-        var recognized = SpeechTextNormalizer.Normalize(recognizedText);
-        var assistant = SpeechTextNormalizer.Normalize(assistantSpeech);
+        var recognized = Normalize(recognizedText);
+        var assistant = Normalize(assistantSpeech);
         if (recognized.Length < 2 || assistant.Length < 2)
         {
             return false;
@@ -41,5 +43,24 @@ public static class SpeechEchoMatcher
         var overlap = recognizedCharacters.Count(assistant.Contains);
         return recognized.Length >= 4
             && overlap / (double)recognizedCharacters.Count >= 0.8;
+    }
+
+    private static string Normalize(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return string.Empty;
+        }
+
+        var normalized = new StringBuilder(text.Length);
+        foreach (var character in text)
+        {
+            if (char.IsLetterOrDigit(character))
+            {
+                normalized.Append(char.ToLowerInvariant(character));
+            }
+        }
+
+        return normalized.ToString();
     }
 }

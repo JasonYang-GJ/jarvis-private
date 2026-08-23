@@ -66,6 +66,10 @@ public sealed class CapabilityPolicyEngineTests
     [Theory]
     [InlineData("desktop.application.open", "Application", "notepad")]
     [InlineData("desktop.website.open", "Website", "https://example.com/")]
+    [InlineData("browser.open", "Website", "https://example.com/")]
+    [InlineData("file.open", "File", "selected-file.txt")]
+    [InlineData("desktop.search.submit", "Window", "42")]
+    [InlineData("desktop.window.describe", "Window", "42")]
     public void AllowsOnlyExplicitOneTimeDesktopLaunchWithMatchingScope(
         string capability,
         string scopeType,
@@ -79,7 +83,11 @@ public sealed class CapabilityPolicyEngineTests
             new HashSet<string>(StringComparer.Ordinal)
             {
                 "desktop.application.open",
-                "desktop.website.open"
+                "desktop.website.open",
+                "browser.open",
+                "file.open",
+                "desktop.search.submit",
+                "desktop.window.describe"
             });
         var request = new SkillInvocationRequest(
             Guid.Empty,

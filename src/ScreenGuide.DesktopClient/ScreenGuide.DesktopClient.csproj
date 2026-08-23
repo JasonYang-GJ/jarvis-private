@@ -20,6 +20,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\ScreenGuide.DesktopProtocol\ScreenGuide.DesktopProtocol.csproj" />
+    <ProjectReference Include="..\ScreenGuide.Voice.Windows\ScreenGuide.Voice.Windows.csproj" />
   </ItemGroup>
 
   <ItemGroup>

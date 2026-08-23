@@ -8,7 +8,7 @@ namespace ScreenGuide.DesktopProtocol;
 
 public static class DesktopProtocolVersion
 {
-    public const int Current = 2;
+    public const int Current = 6;
 
     public const int MinimumSupported = 1;
 }
@@ -29,6 +29,14 @@ public static class DesktopApiMethods
     public const string ClearHistory = "tasks.clear-history";
     public const string ListDesktopApplications = "desktop.applications.list";
     public const string ExecuteDesktopAction = "desktop.action.execute";
+    public const string PlanAssistantCommand = "assistant.command.plan";
+    public const string ExecuteAssistantCommand = "assistant.command.execute";
+    public const string CancelWindowObservation = "assistant.window-observation.cancel";
+    public const string ListConversations = "conversations.list";
+    public const string GetConversation = "conversations.get";
+    public const string CreateConversation = "conversations.create";
+    public const string SendConversationMessage = "conversations.send";
+    public const string CancelConversationTurn = "conversations.cancel";
     public const string Shutdown = "system.shutdown";
 }
 

@@ -65,7 +65,8 @@ public sealed class DesktopHostDependencyTests
                 new AgentConnectorRegistryTests.FakeConnector("CODEX"));
         });
 
-        await Assert.ThrowsAnyAsync<Exception>(() => host.StartAsync());
+        var startupException = await Assert.ThrowsAnyAsync<Exception>(() => host.StartAsync());
+        Assert.Contains("Agent Connector ID", startupException.ToString(), StringComparison.Ordinal);
         await using var store = await environment.OpenStoreAsync();
         var audit = await store.GetAuditLogAsync();
 

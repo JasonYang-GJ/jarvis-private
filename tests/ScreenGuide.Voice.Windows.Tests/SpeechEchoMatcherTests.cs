@@ -1,6 +1,6 @@
-using ScreenGuide.Core;
+using ScreenGuide.Voice.Windows;
 
-namespace ScreenGuide.Core.Tests;
+namespace ScreenGuide.Voice.Windows.Tests;
 
 public sealed class SpeechEchoMatcherTests
 {

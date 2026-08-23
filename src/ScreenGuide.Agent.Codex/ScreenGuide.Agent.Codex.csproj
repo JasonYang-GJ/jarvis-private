@@ -9,6 +9,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\ScreenGuide.Agent.Abstractions\ScreenGuide.Agent.Abstractions.csproj" />
+    <ProjectReference Include="..\ScreenGuide.Core\ScreenGuide.Core.csproj" />
     <ProjectReference Include="..\ScreenGuide.Skills.Abstractions\ScreenGuide.Skills.Abstractions.csproj" />
   </ItemGroup>
 

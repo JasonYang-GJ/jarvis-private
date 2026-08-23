@@ -91,7 +91,7 @@ public sealed class SqliteTaskStoreTests
 
             Assert.Single(Directory.GetFiles(
                 Path.GetDirectoryName(databasePath)!,
-                "tasking.pre-v4-from-v3-*.backup.db"));
+                $"tasking.pre-v{V02Contract.SchemaVersion}-from-v3-*.backup.db"));
         }
         finally
         {

@@ -23,11 +23,13 @@
             <StackPanel Grid.Row="1">
                 <Button x:Name="DashboardNavButton" Content="首页" Tag="Selected" Style="{StaticResource NavButton}"
                         Click="NavigationButton_Click" CommandParameter="Dashboard" />
+                <Button x:Name="ConversationsNavButton" Content="对话" Visibility="Collapsed" Style="{StaticResource NavButton}"
+                        Click="NavigationButton_Click" CommandParameter="Conversations" />
                 <Button x:Name="ProjectsNavButton" Content="项目" Style="{StaticResource NavButton}"
                         Click="NavigationButton_Click" CommandParameter="Projects" />
-                <Button x:Name="DesktopActionsNavButton" Content="电脑操作" Style="{StaticResource NavButton}"
+                <Button x:Name="DesktopActionsNavButton" Content="电脑操作" Visibility="Collapsed" Style="{StaticResource NavButton}"
                         Click="NavigationButton_Click" CommandParameter="DesktopActions" />
-                <Button x:Name="NewTaskNavButton" Content="新建任务" Style="{StaticResource NavButton}"
+                <Button x:Name="NewTaskNavButton" Content="编程任务" Style="{StaticResource NavButton}"
                         Click="NavigationButton_Click" CommandParameter="NewTask" />
                 <Button x:Name="CurrentTaskNavButton" Content="当前任务" Style="{StaticResource NavButton}"
                         Click="NavigationButton_Click" CommandParameter="CurrentTask" />
@@ -37,7 +39,7 @@
                         Click="NavigationButton_Click" CommandParameter="Settings" />
             </StackPanel>
             <StackPanel Grid.Row="2" Margin="25,0,18,18" VerticalAlignment="Bottom">
-                <TextBlock Text="YUANSHU V0.1" Foreground="#71858E" FontFamily="Consolas" FontSize="11" />
+                <TextBlock Text="YUANSHU V0.2" Foreground="#71858E" FontFamily="Consolas" FontSize="11" />
                 <TextBlock Text="本机执行 · 证据优先" Foreground="#8FA1A9" FontSize="11" Margin="0,4,0,0" />
             </StackPanel>
         </Grid>
@@ -62,9 +64,9 @@
                                FontSize="18" FontWeight="SemiBold" VerticalAlignment="Center" />
                     <Border x:Name="HostStatusPill" Grid.Column="1" Background="#EAF6F0" CornerRadius="12" Padding="10,5"
                             VerticalAlignment="Center">
-                        <TextBlock x:Name="HostStatusText" Text="Host 连接中" Foreground="{StaticResource SuccessBrush}" FontSize="12" />
+                        <TextBlock x:Name="HostStatusText" Text="本机中枢连接中" Foreground="{StaticResource SuccessBrush}" FontSize="12" />
                     </Border>
-                    <Border x:Name="CodexStatusPill" Grid.Column="3" Background="#EDF2FA" CornerRadius="12" Padding="10,5"
+                    <Border x:Name="CodexStatusPill" Grid.Column="3" Visibility="Collapsed" Background="#EDF2FA" CornerRadius="12" Padding="10,5"
                             VerticalAlignment="Center">
                         <TextBlock x:Name="CodexStatusText" Text="Codex 检查中" Foreground="{StaticResource BrandBrush}" FontSize="12" />
                     </Border>
@@ -92,31 +94,103 @@
             <Grid Grid.Row="2" Margin="22,16,22,18">
                 <ScrollViewer x:Name="DashboardPage" VerticalScrollBarVisibility="Auto">
                     <StackPanel>
-                        <Border Style="{StaticResource SurfaceBorder}" Background="#EAF0FF" BorderBrush="#BCD0F6" Padding="26,22">
+                        <Border Style="{StaticResource SurfaceBorder}" Background="#EAF4F2" BorderBrush="#B7D8D0" Padding="30,26">
                             <Grid>
                                 <Grid.RowDefinitions>
                                     <RowDefinition Height="Auto" />
                                     <RowDefinition Height="Auto" />
                                     <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
                                 </Grid.RowDefinitions>
-                                <TextBlock Text="今天想让电脑帮你做什么？" FontFamily="Segoe UI Variable Display"
-                                           FontSize="28" FontWeight="SemiBold" />
-                                <TextBlock Grid.Row="1" Text="选择一个已授权项目，直接描述希望完成的结果。"
-                                           Foreground="{StaticResource MutedBrush}" Margin="0,7,0,14" />
-                                <Grid Grid.Row="2">
+                                <Grid>
                                     <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="235" />
-                                        <ColumnDefinition Width="10" />
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="18" />
                                         <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="10" />
-                                        <ColumnDefinition Width="118" />
                                     </Grid.ColumnDefinitions>
-                                    <ComboBox x:Name="DashboardProjectComboBox" DisplayMemberPath="Name" />
-                                    <TextBox x:Name="DashboardTaskTextBox" Grid.Column="2" MinHeight="56"
-                                             AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" />
-                                    <Button x:Name="DashboardCreateButton" Grid.Column="4" Content="交给电脑"
-                                            Style="{StaticResource PrimaryButton}" Click="DashboardCreateButton_Click" />
+                                    <Border Width="66" Height="66" CornerRadius="33" Background="#D8ECE7">
+                                        <Border x:Name="VoiceStateDot" Width="22" Height="22" CornerRadius="11"
+                                                Background="#1F8A6A" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                    </Border>
+                                    <StackPanel Grid.Column="2" VerticalAlignment="Center">
+                                        <TextBlock x:Name="VoiceStateText" Text="正在启动语音中枢"
+                                                   FontFamily="Segoe UI Variable Display" FontSize="27" FontWeight="SemiBold" />
+                                        <TextBlock x:Name="VoicePrivacyText"
+                                                   Text="元枢打开后会自动聆听。直接说出指令，不需要点击、打字或按键。"
+                                                   Foreground="{StaticResource MutedBrush}" Margin="0,6,0,0" />
+                                    </StackPanel>
                                 </Grid>
+
+                                <Border x:Name="VoiceTranscriptBorder" Grid.Row="1" Margin="84,18,0,0" Padding="16,13"
+                                        Background="#F8FCFB" BorderBrush="#C9DED9" BorderThickness="1" CornerRadius="5">
+                                    <StackPanel>
+                                        <TextBlock Text="最近听到" Style="{StaticResource Eyebrow}" />
+                                        <TextBlock x:Name="VoiceTranscriptText" Text="等待你说话…" Margin="0,5,0,0"
+                                                   FontSize="16" TextWrapping="Wrap" Foreground="#52656D" />
+                                    </StackPanel>
+                                </Border>
+
+                                <Border x:Name="AssistantPlanBorder" Grid.Row="2" Visibility="Collapsed"
+                                        Margin="0,16,0,0" Padding="16" CornerRadius="6"
+                                        Background="White" BorderBrush="#8FC5B8" BorderThickness="1">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="8" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel>
+                                            <TextBlock Text="元枢理解为" Style="{StaticResource Eyebrow}" />
+                                            <TextBlock x:Name="AssistantPlanSummaryText" FontSize="16" FontWeight="SemiBold"
+                                                       Margin="0,5,0,0" TextWrapping="Wrap" />
+                                            <TextBlock x:Name="AssistantPlanDetailText" Foreground="{StaticResource MutedBrush}"
+                                                       Margin="0,5,0,0" TextWrapping="Wrap" />
+                                        </StackPanel>
+                                        <Button Grid.Column="1" Content="取消" Style="{StaticResource SecondaryButton}"
+                                                Click="CancelAssistantPlanButton_Click" />
+                                        <Button x:Name="ConfirmAssistantPlanButton" Grid.Column="3" Content="确认这一次"
+                                                Style="{StaticResource PrimaryButton}" Click="ConfirmAssistantPlanButton_Click" />
+                                    </Grid>
+                                </Border>
+
+                                <Border x:Name="WindowObservationBorder" Grid.Row="3" Visibility="Collapsed"
+                                        Margin="0,14,0,0" Padding="14" CornerRadius="6"
+                                        Background="#FFF6E8" BorderBrush="#E8C47D" BorderThickness="1">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="12" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <Border Width="10" Height="10" CornerRadius="5" Background="#D98B2B"
+                                                VerticalAlignment="Center" />
+                                        <StackPanel Grid.Column="2">
+                                            <TextBlock Text="正在查看你确认的单个窗口" FontWeight="SemiBold" />
+                                            <TextBlock x:Name="WindowObservationTargetText"
+                                                       Text="画面只在本机内存中识别，不会保存或上传。"
+                                                       Foreground="{StaticResource MutedBrush}" Margin="0,3,0,0" />
+                                        </StackPanel>
+                                        <Button Grid.Column="3" Content="停止查看" Style="{StaticResource SecondaryButton}"
+                                                Padding="14,6" Click="StopWindowObservationButton_Click" />
+                                    </Grid>
+                                </Border>
+
+                                <Border x:Name="AssistantResultBorder" Grid.Row="4" Visibility="Collapsed"
+                                        Margin="0,14,0,0" Padding="16" CornerRadius="6"
+                                        Background="#F7FAFB" BorderBrush="{StaticResource LineBrush}" BorderThickness="1">
+                                    <StackPanel>
+                                        <TextBlock x:Name="AssistantResultStatusText" Text="处理结果" Style="{StaticResource Eyebrow}" />
+                                        <TextBlock x:Name="AssistantResultText" Margin="0,5,0,0" FontSize="15"
+                                                   TextWrapping="Wrap" />
+                                        <Button x:Name="ReadAssistantResultButton" Content="朗读结果" Margin="0,12,0,0"
+                                                HorizontalAlignment="Left" Style="{StaticResource SecondaryButton}"
+                                                Padding="14,6" Click="ReadAssistantResultButton_Click" />
+                                    </StackPanel>
+                                </Border>
                             </Grid>
                         </Border>
 
@@ -143,8 +217,8 @@
                                     <TextBlock x:Name="FailedCountText" Text="0" FontSize="25" FontWeight="SemiBold" Margin="0,4,0,0" />
                                 </StackPanel>
                                 <StackPanel Margin="18,0">
-                                    <TextBlock Text="Codex 版本" Style="{StaticResource Eyebrow}" />
-                                    <TextBlock x:Name="DashboardCodexVersionText" Text="—" FontFamily="Consolas" FontSize="17"
+                                    <TextBlock Text="语音中枢" Style="{StaticResource Eyebrow}" />
+                                    <TextBlock x:Name="DashboardCodexVersionText" Text="检查中" FontSize="15"
                                                FontWeight="SemiBold" Margin="0,8,0,0" />
                                 </StackPanel>
                             </UniformGrid>
@@ -175,6 +249,132 @@
                         </Grid>
                     </StackPanel>
                 </ScrollViewer>
+
+                <Grid x:Name="ConversationsPage" Visibility="Collapsed">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="280" />
+                        <ColumnDefinition Width="14" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+
+                    <Border Style="{StaticResource SurfaceBorder}" Padding="12">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="10" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
+                            <Button Content="新对话" Style="{StaticResource PrimaryButton}"
+                                    HorizontalAlignment="Stretch" Click="NewConversationButton_Click" />
+                            <ListBox x:Name="ConversationListBox" Grid.Row="2" BorderThickness="0"
+                                     SelectionChanged="ConversationListBox_SelectionChanged">
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <StackPanel Margin="5,7">
+                                            <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                                            <TextBlock Text="{Binding StatusText}" Foreground="{StaticResource MutedBrush}"
+                                                       FontSize="11" Margin="0,3,0,0" />
+                                        </StackPanel>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
+                        </Grid>
+                    </Border>
+
+                    <Border Grid.Column="2" Style="{StaticResource SurfaceBorder}" Padding="0">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+                            <Border Padding="20,15" Background="#F7FAFB" BorderBrush="{StaticResource LineBrush}"
+                                    BorderThickness="0,0,0,1">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel>
+                                        <TextBlock x:Name="ConversationTitleText" Text="和元枢聊一聊"
+                                                   FontSize="17" FontWeight="SemiBold" />
+                                        <TextBlock x:Name="ConversationStateText" Text="新建对话后即可开始"
+                                                   Foreground="{StaticResource MutedBrush}" FontSize="12" Margin="0,4,0,0" />
+                                    </StackPanel>
+                                    <Border Grid.Column="1" Background="#EAF6F0" CornerRadius="12" Padding="11,5"
+                                            VerticalAlignment="Center">
+                                        <TextBlock Text="只聊天 · 不操作电脑" Foreground="#1F7A61" FontSize="12" />
+                                    </Border>
+                                </Grid>
+                            </Border>
+
+                            <Grid Grid.Row="1">
+                                <StackPanel x:Name="ConversationEmptyPanel" HorizontalAlignment="Center"
+                                            VerticalAlignment="Center" MaxWidth="560">
+                                    <TextBlock Text="从一个问题开始" FontSize="24" FontWeight="SemiBold"
+                                               HorizontalAlignment="Center" />
+                                    <TextBlock Text="这里适合讨论、解释和整理想法，不会读取项目、运行命令或操作电脑。"
+                                               Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap"
+                                               TextAlignment="Center" Margin="0,9,0,18" />
+                                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                                        <Button Content="去创建开发任务" Style="{StaticResource SecondaryButton}"
+                                                Margin="0,0,8,0" Click="ConversationOpenTaskButton_Click" />
+                                        <Button Content="去电脑操作" Style="{StaticResource SecondaryButton}"
+                                                Click="ConversationOpenActionsButton_Click" />
+                                    </StackPanel>
+                                </StackPanel>
+                                <ListBox x:Name="ConversationMessagesList" Margin="18,14" BorderThickness="0"
+                                         Background="Transparent" Visibility="Collapsed"
+                                         HorizontalContentAlignment="Stretch">
+                                    <ListBox.ItemTemplate>
+                                        <DataTemplate>
+                                            <Border Background="{Binding Background}" BorderBrush="{Binding BorderBrush}"
+                                                    BorderThickness="1" CornerRadius="6" Padding="14,11"
+                                                    Margin="{Binding Margin}" MaxWidth="760"
+                                                    HorizontalAlignment="{Binding Alignment}">
+                                                <StackPanel>
+                                                    <TextBlock Text="{Binding RoleText}" Foreground="{StaticResource MutedBrush}"
+                                                               FontSize="11" FontWeight="SemiBold" />
+                                                    <TextBlock Text="{Binding Content}" TextWrapping="Wrap" Margin="0,5,0,0"
+                                                               FontSize="14" LineHeight="22" />
+                                                    <TextBlock Text="{Binding TimeText}" Foreground="{StaticResource MutedBrush}"
+                                                               FontSize="10" Margin="0,6,0,0" HorizontalAlignment="Right" />
+                                                </StackPanel>
+                                            </Border>
+                                        </DataTemplate>
+                                    </ListBox.ItemTemplate>
+                                </ListBox>
+                            </Grid>
+
+                            <Border Grid.Row="2" Padding="16" Background="#F7FAFB" BorderBrush="{StaticResource LineBrush}"
+                                    BorderThickness="0,1,0,0">
+                                <Grid>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="8" />
+                                        <RowDefinition Height="Auto" />
+                                    </Grid.RowDefinitions>
+                                    <TextBox x:Name="ConversationInputTextBox" MinHeight="74" MaxHeight="150"
+                                             AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto"
+                                             IsEnabled="False" />
+                                    <Grid Grid.Row="2">
+                                        <TextBlock Text="Enter 换行 · 点击发送后由本机 Codex 回答"
+                                                   Foreground="{StaticResource MutedBrush}" FontSize="11"
+                                                   VerticalAlignment="Center" />
+                                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                                            <Button x:Name="StopConversationButton" Content="停止回答"
+                                                    Style="{StaticResource DangerButton}" Visibility="Collapsed"
+                                                    Margin="0,0,8,0" Click="StopConversationButton_Click" />
+                                            <Button x:Name="SendConversationButton" Content="发送"
+                                                    Style="{StaticResource PrimaryButton}" IsEnabled="False"
+                                                    Click="SendConversationButton_Click" />
+                                        </StackPanel>
+                                    </Grid>
+                                </Grid>
+                            </Border>
+                        </Grid>
+                    </Border>
+                </Grid>
 
                 <Grid x:Name="ProjectsPage" Visibility="Collapsed">
                     <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="12" /><RowDefinition Height="*" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
@@ -213,7 +413,7 @@
                 <ScrollViewer x:Name="NewTaskPage" Visibility="Collapsed" VerticalScrollBarVisibility="Auto">
                     <StackPanel MaxWidth="880" HorizontalAlignment="Left">
                         <TextBlock Text="新建任务" Style="{StaticResource SectionTitle}" />
-                        <TextBlock Text="描述目标，Codex 会在授权范围内工作。" Foreground="{StaticResource MutedBrush}" Margin="0,6,0,18" />
+                        <TextBlock Text="仅用于代码项目；编程助手会在你授权的项目范围内工作。" Foreground="{StaticResource MutedBrush}" Margin="0,6,0,18" />
                         <Border Style="{StaticResource SurfaceBorder}" Padding="22">
                             <StackPanel>
                                 <TextBlock Text="选择项目" FontWeight="SemiBold" />
@@ -221,7 +421,7 @@
                                           SelectionChanged="NewTaskProjectComboBox_SelectionChanged" />
                                 <Border Background="#FFF7E6" BorderBrush="#E4C47C" BorderThickness="1" CornerRadius="4"
                                         Padding="12" Margin="0,12,0,0">
-                                    <TextBlock x:Name="TaskDirectoryNoticeText" Text="Codex 将在所选项目目录内执行任务。" TextWrapping="Wrap" />
+                                    <TextBlock x:Name="TaskDirectoryNoticeText" Text="编程助手将在所选项目目录内执行任务。" TextWrapping="Wrap" />
                                 </Border>
                                 <TextBlock Text="任务标题（可选）" FontWeight="SemiBold" Margin="0,16,0,7" />
                                 <TextBox x:Name="NewTaskTitleTextBox" />
@@ -328,7 +528,7 @@
                         <StackPanel Grid.Row="2">
                             <Border x:Name="EvidenceConflictBanner" Visibility="Collapsed" Margin="0,10,0,0" Padding="12"
                                     Background="#FCECED" BorderBrush="#E3A1A5" BorderThickness="1" CornerRadius="4">
-                                <TextBlock Text="Codex 已完成执行，但系统验证未通过。" Foreground="#972F37" FontWeight="Bold" />
+                                <TextBlock Text="编程助手已完成执行，但系统验证未通过。" Foreground="#972F37" FontWeight="Bold" />
                             </Border>
                             <Border x:Name="DecisionCard" Visibility="Collapsed" Margin="0,10,0,0" Padding="14"
                                     Background="#FFF7E6" BorderBrush="#E4C47C" BorderThickness="1" CornerRadius="5">
@@ -362,7 +562,7 @@
                                         <ListBox x:Name="ChangedFilesList" MinHeight="50" BorderThickness="0" />
                                         <TextBlock Text="实际测试" FontWeight="SemiBold" Margin="0,15,0,6" />
                                         <ListBox x:Name="TestCommandsList" MinHeight="50" BorderThickness="0" />
-                                        <TextBlock Text="Codex 最终说明" FontWeight="SemiBold" Margin="0,15,0,6" />
+                                        <TextBlock Text="编程助手最终说明" FontWeight="SemiBold" Margin="0,15,0,6" />
                                         <TextBlock x:Name="AgentFinalExplanationText" TextWrapping="Wrap" />
                                         <Expander Header="技术信息" Margin="0,14,0,0">
                                             <TextBlock x:Name="TaskTechnicalInfoText" TextWrapping="Wrap" FontFamily="Consolas" Margin="0,7,0,0" />
@@ -429,19 +629,22 @@
                                 <Grid.RowDefinitions>
                                     <RowDefinition Height="44" /><RowDefinition Height="44" /><RowDefinition Height="44" />
                                     <RowDefinition Height="44" /><RowDefinition Height="44" /><RowDefinition Height="44" />
+                                    <RowDefinition Height="44" />
                                 </Grid.RowDefinitions>
-                                <TextBlock Text="Desktop Host" VerticalAlignment="Center" />
+                                <TextBlock Text="本机中枢服务" VerticalAlignment="Center" />
                                 <TextBlock x:Name="SettingsHostStatusText" Grid.Column="1" VerticalAlignment="Center" />
-                                <TextBlock Grid.Row="1" Text="Codex 状态" VerticalAlignment="Center" />
+                                <TextBlock Grid.Row="1" Text="编程技能状态" VerticalAlignment="Center" />
                                 <TextBlock x:Name="SettingsCodexStatusText" Grid.Row="1" Grid.Column="1" VerticalAlignment="Center" />
-                                <TextBlock Grid.Row="2" Text="Codex CLI 版本" VerticalAlignment="Center" />
+                                <TextBlock Grid.Row="2" Text="编程工具版本" VerticalAlignment="Center" />
                                 <TextBlock x:Name="SettingsCodexVersionText" Grid.Row="2" Grid.Column="1" VerticalAlignment="Center" FontFamily="Consolas" />
-                                <TextBlock Grid.Row="3" Text="数据库状态" VerticalAlignment="Center" />
-                                <TextBlock x:Name="SettingsDatabaseStatusText" Grid.Row="3" Grid.Column="1" VerticalAlignment="Center" />
-                                <TextBlock Grid.Row="4" Text="本机 Device ID" VerticalAlignment="Center" />
-                                <TextBlock x:Name="SettingsDeviceIdText" Grid.Row="4" Grid.Column="1" VerticalAlignment="Center" FontFamily="Consolas" />
-                                <TextBlock Grid.Row="5" Text="数据存储位置" VerticalAlignment="Center" />
-                                <TextBlock x:Name="SettingsDataPathText" Grid.Row="5" Grid.Column="1" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                                <TextBlock Grid.Row="3" Text="自动语音监听" VerticalAlignment="Center" />
+                                <TextBlock x:Name="SettingsVoiceStatusText" Grid.Row="3" Grid.Column="1" VerticalAlignment="Center" />
+                                <TextBlock Grid.Row="4" Text="数据库状态" VerticalAlignment="Center" />
+                                <TextBlock x:Name="SettingsDatabaseStatusText" Grid.Row="4" Grid.Column="1" VerticalAlignment="Center" />
+                                <TextBlock Grid.Row="5" Text="本机 Device ID" VerticalAlignment="Center" />
+                                <TextBlock x:Name="SettingsDeviceIdText" Grid.Row="5" Grid.Column="1" VerticalAlignment="Center" FontFamily="Consolas" />
+                                <TextBlock Grid.Row="6" Text="数据存储位置" VerticalAlignment="Center" />
+                                <TextBlock x:Name="SettingsDataPathText" Grid.Row="6" Grid.Column="1" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
                             </Grid>
                         </Border>
                         <Border Style="{StaticResource SurfaceBorder}" Padding="20" Margin="0,12,0,0">
@@ -458,7 +661,7 @@
                         <Border Style="{StaticResource SurfaceBorder}" Padding="20" Margin="0,12,0,0">
                             <StackPanel>
                                 <TextBlock Text="关于" FontSize="16" FontWeight="SemiBold" />
-                                <TextBlock Text="元枢 V0.1 · 个人电脑 AI 中枢" Margin="0,8,0,0" />
+                                <TextBlock Text="元枢 V0.2 · 个人电脑 AI 中枢" Margin="0,8,0,0" />
                                 <TextBlock x:Name="ProductVersionText" Foreground="{StaticResource MutedBrush}" Margin="0,4,0,0" />
                             </StackPanel>
                         </Border>
@@ -467,7 +670,7 @@
             </Grid>
 
             <Border Grid.Row="3" Background="#E6ECEA" Padding="22,0">
-                <TextBlock x:Name="StatusBarText" Text="正在连接 Desktop Host…" VerticalAlignment="Center"
+                <TextBlock x:Name="StatusBarText" Text="正在连接本机中枢…" VerticalAlignment="Center"
                            Foreground="{StaticResource MutedBrush}" FontSize="11" />
             </Border>
         </Grid>

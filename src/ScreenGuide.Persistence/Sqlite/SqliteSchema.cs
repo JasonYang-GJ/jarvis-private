@@ -309,4 +309,61 @@ internal static class SqliteSchema
         CREATE INDEX ix_skill_invocations_task
             ON skill_invocations(task_id, sequence_number);
         """;
+
+    public const string CreateVersion5 = """
+        CREATE TABLE conversations (
+            id TEXT NOT NULL PRIMARY KEY,
+            created_by_device_id TEXT NOT NULL,
+            title TEXT NOT NULL,
+            provider_id TEXT NOT NULL,
+            external_thread_id TEXT NULL,
+            status TEXT NOT NULL,
+            created_at_utc TEXT NOT NULL,
+            updated_at_utc TEXT NOT NULL,
+            last_message_at_utc TEXT NULL,
+            failure_code TEXT NULL,
+            failure_message TEXT NULL,
+            version INTEGER NOT NULL,
+            FOREIGN KEY (created_by_device_id) REFERENCES devices(id)
+        );
+
+        CREATE TABLE conversation_messages (
+            id TEXT NOT NULL PRIMARY KEY,
+            conversation_id TEXT NOT NULL,
+            sequence_number INTEGER NOT NULL,
+            role TEXT NOT NULL,
+            content TEXT NOT NULL,
+            created_at_utc TEXT NOT NULL,
+            provider_message_id TEXT NULL,
+            FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE,
+            UNIQUE (conversation_id, sequence_number)
+        );
+
+        CREATE TABLE conversation_turns (
+            id TEXT NOT NULL PRIMARY KEY,
+            conversation_id TEXT NOT NULL,
+            sequence_number INTEGER NOT NULL,
+            user_message_id TEXT NOT NULL,
+            assistant_message_id TEXT NULL,
+            idempotency_key TEXT NOT NULL,
+            status TEXT NOT NULL,
+            process_id INTEGER NULL,
+            started_at_utc TEXT NOT NULL,
+            completed_at_utc TEXT NULL,
+            failure_code TEXT NULL,
+            failure_message TEXT NULL,
+            FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE,
+            FOREIGN KEY (user_message_id) REFERENCES conversation_messages(id),
+            FOREIGN KEY (assistant_message_id) REFERENCES conversation_messages(id),
+            UNIQUE (conversation_id, sequence_number),
+            UNIQUE (conversation_id, idempotency_key)
+        );
+
+        CREATE INDEX ix_conversations_updated
+            ON conversations(updated_at_utc DESC);
+        CREATE INDEX ix_conversation_messages_sequence
+            ON conversation_messages(conversation_id, sequence_number);
+        CREATE INDEX ix_conversation_turns_status
+            ON conversation_turns(conversation_id, status, sequence_number);
+        """;
 }

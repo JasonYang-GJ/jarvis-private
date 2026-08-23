@@ -2,6 +2,7 @@ using System.Reflection;
 using System.Text.Json;
 using Microsoft.Extensions.Hosting;
 using ScreenGuide.Agent.Codex;
+using ScreenGuide.Core.Conversations;
 using ScreenGuide.DesktopHost.Configuration;
 using ScreenGuide.DesktopProtocol;
 
@@ -14,6 +15,8 @@ public sealed class DesktopApiDispatcher(
     CodexDiagnosticsService codexDiagnostics,
     ProjectInspector projectInspector,
     DesktopActionEntryService desktopActions,
+    AssistantCommandService assistantCommands,
+    ConversationService conversations,
     IHostApplicationLifetime applicationLifetime)
 {
     public async Task<DesktopApiResponse> DispatchAsync(
@@ -84,6 +87,36 @@ public sealed class DesktopApiDispatcher(
                     DesktopProtocolJson.ToElement(await desktopActions.ExecuteAsync(
                         Deserialize<ExecuteDesktopActionRequestDto>(request),
                         cancellationToken).ConfigureAwait(false)),
+                DesktopApiMethods.PlanAssistantCommand =>
+                    DesktopProtocolJson.ToElement(await assistantCommands.PlanAsync(
+                        Deserialize<PlanAssistantCommandRequestDto>(request),
+                        cancellationToken).ConfigureAwait(false)),
+                DesktopApiMethods.ExecuteAssistantCommand =>
+                    DesktopProtocolJson.ToElement(await assistantCommands.ExecuteAsync(
+                        Deserialize<ExecuteAssistantCommandRequestDto>(request),
+                        cancellationToken).ConfigureAwait(false)),
+                DesktopApiMethods.CancelWindowObservation =>
+                    DesktopProtocolJson.ToElement(assistantCommands.CancelWindowObservation(
+                        Deserialize<CancelWindowObservationRequestDto>(request).OperationId)),
+                DesktopApiMethods.ListConversations =>
+                    DesktopProtocolJson.ToElement(await ListConversationsAsync(cancellationToken)
+                        .ConfigureAwait(false)),
+                DesktopApiMethods.GetConversation =>
+                    DesktopProtocolJson.ToElement(await GetConversationAsync(
+                        Deserialize<ConversationIdRequestDto>(request).ConversationId,
+                        cancellationToken).ConfigureAwait(false)),
+                DesktopApiMethods.CreateConversation =>
+                    DesktopProtocolJson.ToElement(await CreateConversationAsync(
+                        Deserialize<CreateConversationRequestDto>(request),
+                        cancellationToken).ConfigureAwait(false)),
+                DesktopApiMethods.SendConversationMessage =>
+                    DesktopProtocolJson.ToElement(await SendConversationMessageAsync(
+                        Deserialize<SendConversationMessageRequestDto>(request),
+                        cancellationToken).ConfigureAwait(false)),
+                DesktopApiMethods.CancelConversationTurn =>
+                    DesktopProtocolJson.ToElement(await CancelConversationTurnAsync(
+                        Deserialize<CancelConversationTurnRequestDto>(request),
+                        cancellationToken).ConfigureAwait(false)),
                 DesktopApiMethods.Shutdown => Shutdown(),
                 _ => throw new NotSupportedException("当前 Desktop Host 不支持这个操作。")
             };
@@ -105,7 +138,7 @@ public sealed class DesktopApiDispatcher(
         var schemaVersion = await taskEntry.GetSchemaVersionAsync(cancellationToken).ConfigureAwait(false);
         return new SystemStatusDto(
             state.IsStarted,
-            Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "0.1.0",
+            Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "0.2.0",
             ProcessStartTime.Value,
             state.LocalDevice?.Id.ToString("D") ?? string.Empty,
             state.IsStarted ? "Ready" : "Offline",
@@ -303,6 +336,77 @@ public sealed class DesktopApiDispatcher(
         return new CommandResultDto(result.TaskId, result.WasDuplicate);
     }
 
+    private async Task<ConversationSummaryDto[]> ListConversationsAsync(
+        CancellationToken cancellationToken) =>
+        (await conversations.GetConversationsAsync(cancellationToken).ConfigureAwait(false))
+        .Select(MapConversation)
+        .ToArray();
+
+    private async Task<ConversationDetailsDto?> GetConversationAsync(
+        Guid conversationId,
+        CancellationToken cancellationToken)
+    {
+        var details = await conversations.GetDetailsAsync(conversationId, cancellationToken)
+            .ConfigureAwait(false);
+        return details is null
+            ? null
+            : new ConversationDetailsDto(
+                MapConversation(details.Conversation),
+                details.Messages.Select(message => new ConversationMessageDto(
+                    message.Id,
+                    message.SequenceNumber,
+                    message.Role.ToString(),
+                    message.Content,
+                    message.CreatedAtUtc)).ToArray(),
+                details.Turns.Select(turn => new ConversationTurnDto(
+                    turn.Id,
+                    turn.SequenceNumber,
+                    turn.Status.ToString(),
+                    turn.StartedAtUtc,
+                    turn.CompletedAtUtc,
+                    turn.FailureMessage)).ToArray());
+    }
+
+    private async Task<ConversationSummaryDto> CreateConversationAsync(
+        CreateConversationRequestDto request,
+        CancellationToken cancellationToken) =>
+        MapConversation(await conversations.CreateAsync(request.Title, cancellationToken)
+            .ConfigureAwait(false));
+
+    private async Task<ConversationCommandResultDto> SendConversationMessageAsync(
+        SendConversationMessageRequestDto request,
+        CancellationToken cancellationToken)
+    {
+        var result = await conversations.SendAsync(
+                request.ConversationId,
+                request.Message,
+                request.IdempotencyKey,
+                cancellationToken)
+            .ConfigureAwait(false);
+        return new ConversationCommandResultDto(
+            result.ConversationId,
+            result.TurnId,
+            result.WasDuplicate);
+    }
+
+    private async Task<bool> CancelConversationTurnAsync(
+        CancelConversationTurnRequestDto request,
+        CancellationToken cancellationToken)
+    {
+        await conversations.CancelAsync(request.ConversationId, cancellationToken)
+            .ConfigureAwait(false);
+        return true;
+    }
+
+    private static ConversationSummaryDto MapConversation(ConversationRecord conversation) => new(
+        conversation.Id,
+        conversation.Title,
+        conversation.Status.ToString(),
+        conversation.CreatedAtUtc,
+        conversation.UpdatedAtUtc,
+        conversation.LastMessageAtUtc,
+        conversation.FailureMessage);
+
     private JsonElement Shutdown()
     {
         _ = Task.Run(async () =>
@@ -338,6 +442,8 @@ internal static class DesktopApiErrors
                 ("desktop_action_not_authorized", exception.Message),
             UnauthorizedAccessException => ("project_not_authorized", "这个项目没有授权，无法执行任务。"),
             DirectoryNotFoundException => ("project_missing", "项目目录不存在，请重新选择项目。"),
+            FileNotFoundException when ContainsAny(exception.Message, "文件", "选择") =>
+                ("file_missing", "刚才选择的文件已经不存在，请重新选择。"),
             FileNotFoundException => ("codex_not_found", "没有找到 Codex，请先安装并登录 Codex。"),
             NotSupportedException when exception.Message.Contains("版本", StringComparison.Ordinal) =>
                 ("codex_version_incompatible", "当前 Codex 版本尚未通过兼容验证。"),
@@ -347,6 +453,11 @@ internal static class DesktopApiErrors
                 ("codex_login_required", "Codex 登录已经失效。"),
             InvalidOperationException when ContainsAny(exception.Message, "网络", "network", "connection") =>
                 ("network_unavailable", "当前网络不可用，Codex 无法继续。"),
+            InvalidOperationException when ContainsAny(
+                exception.Message, "搜索框", "输入框", "目标窗口", "控件结构", "切到前台") =>
+                ("desktop_target_unavailable", exception.Message.Trim()),
+            InvalidOperationException when ContainsAny(exception.Message, "操作计划", "操作确认", "超时", "失效") =>
+                ("action_plan_expired", "这次确认已经失效，请重新说出或输入指令。"),
             InvalidOperationException when exception.Message.Contains("启动", StringComparison.OrdinalIgnoreCase) =>
                 ("codex_start_failed", "Codex 没有成功启动。"),
             InvalidDataException => ("data_invalid", "本地任务数据无法读取。"),

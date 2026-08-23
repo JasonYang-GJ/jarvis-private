@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.IO;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using ScreenGuide.Skills.Abstractions;
@@ -10,6 +11,11 @@ public static class WindowsDesktopCapabilities
 {
     public const string OpenApplication = "desktop.application.open";
     public const string OpenWebsite = "desktop.website.open";
+    public const string OpenWebsiteSecure = "browser.open";
+    public const string OpenWebsiteInApplication = "browser.open.visible-in-app";
+    public const string OpenFile = "file.open";
+    public const string SearchForeground = "desktop.search.submit";
+    public const string DescribeForeground = "desktop.window.describe";
 }
 
 public sealed record KnownDesktopApplication(
@@ -17,11 +23,27 @@ public sealed record KnownDesktopApplication(
     string DisplayName,
     string LaunchTarget);
 
-public sealed record WindowsDesktopActionInput(string ActionKind, string Target);
+public sealed record WindowsDesktopActionInput(
+    string ActionKind,
+    string Target,
+    long? WindowHandle = null,
+    string? WindowTitle = null,
+    string? Argument = null);
+
+public sealed record VisibleDesktopLaunchResult(
+    int? ProcessId,
+    long WindowHandle,
+    string WindowTitle);
 
 public interface IDesktopProcessLauncher
 {
     int? Start(string target);
+
+    VisibleDesktopLaunchResult OpenApplicationVisible(string applicationLaunchTarget);
+
+    VisibleDesktopLaunchResult OpenWebsiteVisible(
+        string? browserLaunchTarget,
+        Uri website);
 }
 
 public sealed class DesktopProcessLauncher : IDesktopProcessLauncher
@@ -34,6 +56,14 @@ public sealed class DesktopProcessLauncher : IDesktopProcessLauncher
         });
         return process?.Id;
     }
+
+    public VisibleDesktopLaunchResult OpenWebsiteVisible(
+        string? browserLaunchTarget,
+        Uri website) =>
+        VisibleBrowserWindowLauncher.Open(browserLaunchTarget, website);
+
+    public VisibleDesktopLaunchResult OpenApplicationVisible(string applicationLaunchTarget) =>
+        VisibleBrowserWindowLauncher.OpenApplication(applicationLaunchTarget);
 }
 
 public static class SafeWebsitePolicy
@@ -67,33 +97,31 @@ public static class SafeWebsitePolicy
     }
 }
 
-public sealed class WindowsDesktopSkillAdapter(IDesktopProcessLauncher launcher) : ISkillAdapter
+public sealed class WindowsDesktopSkillAdapter(
+    IDesktopProcessLauncher launcher,
+    IInstalledApplicationCatalog applications,
+    IReliableDesktopAutomation automation) : ISkillAdapter
 {
-    private static readonly IReadOnlyDictionary<string, KnownDesktopApplication> ApplicationMap =
-        new Dictionary<string, KnownDesktopApplication>(StringComparer.Ordinal)
-        {
-            ["file-explorer"] = new("file-explorer", "文件资源管理器", "explorer.exe"),
-            ["notepad"] = new("notepad", "记事本", "notepad.exe"),
-            ["calculator"] = new("calculator", "计算器", "calc.exe"),
-            ["paint"] = new("paint", "画图", "mspaint.exe"),
-            ["windows-settings"] = new("windows-settings", "Windows 设置", "ms-settings:")
-        };
-
     private readonly ConcurrentDictionary<Guid, RunState> _runs = new();
 
     public SkillDescriptor Descriptor { get; } = new(
         "windows.safe-launch",
         "0.2.0",
-        "Windows 安全启动",
+        "Windows 安全操作",
         true,
         new HashSet<string>(StringComparer.Ordinal)
         {
             WindowsDesktopCapabilities.OpenApplication,
-            WindowsDesktopCapabilities.OpenWebsite
+            WindowsDesktopCapabilities.OpenWebsite,
+            WindowsDesktopCapabilities.OpenWebsiteSecure,
+            WindowsDesktopCapabilities.OpenWebsiteInApplication,
+            WindowsDesktopCapabilities.OpenFile,
+            WindowsDesktopCapabilities.SearchForeground,
+            WindowsDesktopCapabilities.DescribeForeground
         });
 
     public IReadOnlyList<KnownDesktopApplication> Applications =>
-        ApplicationMap.Values.OrderBy(item => item.DisplayName, StringComparer.CurrentCulture).ToArray();
+        applications.GetApplications();
 
     public Task<SkillStartResult> StartAsync(
         SkillInvocationRequest request,
@@ -110,8 +138,7 @@ public sealed class WindowsDesktopSkillAdapter(IDesktopProcessLauncher launcher)
         var input = JsonSerializer.Deserialize<WindowsDesktopActionInput>(request.InputJson)
             ?? throw new InvalidDataException("桌面操作内容无效。");
         var now = DateTimeOffset.UtcNow;
-        var (launchTarget, message) = ResolveTarget(request.Capability, input);
-        var processId = launcher.Start(launchTarget);
+        var (processId, message) = Execute(request.Capability, input);
         var run = new SkillRunReference(request.TaskId, request.InvocationId, null, request.AttemptId);
         _runs[request.InvocationId] = new RunState(
             run,
@@ -213,28 +240,106 @@ public sealed class WindowsDesktopSkillAdapter(IDesktopProcessLauncher launcher)
             state.Message));
     }
 
-    private static (string LaunchTarget, string Message) ResolveTarget(
+    private (int? ProcessId, string Message) Execute(
         string capability,
         WindowsDesktopActionInput input)
     {
         if (string.Equals(capability, WindowsDesktopCapabilities.OpenApplication, StringComparison.Ordinal))
         {
             if (!string.Equals(input.ActionKind, "OpenApplication", StringComparison.Ordinal)
-                || !ApplicationMap.TryGetValue(input.Target, out var application))
+                || applications.FindById(input.Target) is not { } application)
             {
                 throw new UnauthorizedAccessException("这个应用不在当前允许打开的清单中。");
             }
 
-            return (application.LaunchTarget, $"已请求 Windows 打开{application.DisplayName}。");
+            var launch = launcher.OpenApplicationVisible(application.LaunchTarget);
+            return (launch.ProcessId,
+                $"已确认“{application.DisplayName}”窗口已经显示在你眼前。");
         }
 
-        if (!string.Equals(input.ActionKind, "OpenWebsite", StringComparison.Ordinal))
+        if (string.Equals(capability, WindowsDesktopCapabilities.OpenWebsite, StringComparison.Ordinal)
+            || string.Equals(capability, WindowsDesktopCapabilities.OpenWebsiteSecure, StringComparison.Ordinal))
         {
-            throw new UnauthorizedAccessException("桌面操作类型与授权不匹配。");
+            if (!string.Equals(input.ActionKind, "OpenWebsite", StringComparison.Ordinal))
+            {
+                throw new UnauthorizedAccessException("桌面操作类型与授权不匹配。");
+            }
+
+            var website = SafeWebsitePolicy.RequireHttps(input.Target);
+            var launch = launcher.OpenWebsiteVisible(null, website);
+            return (launch.ProcessId,
+                $"已确认默认浏览器窗口显示在前台，并打开 {website.Host}；页面内容是否完全加载尚未验证。");
         }
 
-        var website = SafeWebsitePolicy.RequireHttps(input.Target);
-        return (website.AbsoluteUri, $"已请求浏览器打开 {website.Host}。");
+        if (string.Equals(capability, WindowsDesktopCapabilities.OpenWebsiteInApplication,
+                StringComparison.Ordinal))
+        {
+            if (!string.Equals(input.ActionKind, "OpenWebsiteInApplication", StringComparison.Ordinal)
+                || applications.FindById(input.Target) is not { } browser
+                || string.IsNullOrWhiteSpace(input.Argument))
+            {
+                throw new UnauthorizedAccessException("指定浏览器操作缺少明确的应用或网站。");
+            }
+
+            var allowedBrowser = new[]
+            {
+                applications.FindBrowser("Google Chrome"),
+                applications.FindBrowser("Microsoft Edge")
+            }.Any(item => item is not null
+                          && string.Equals(item.Id, browser.Id, StringComparison.Ordinal));
+            if (!allowedBrowser)
+            {
+                throw new UnauthorizedAccessException("当前只允许在明确识别的浏览器中打开网站。");
+            }
+
+            var website = SafeWebsitePolicy.RequireHttps(input.Argument);
+            var launch = launcher.OpenWebsiteVisible(browser.LaunchTarget, website);
+            return (launch.ProcessId,
+                $"已确认“{browser.DisplayName}”的新窗口显示在前台，并打开 {website.Host}；页面内容是否完全加载尚未验证。");
+        }
+
+        if (string.Equals(capability, WindowsDesktopCapabilities.OpenFile, StringComparison.Ordinal))
+        {
+            if (!string.Equals(input.ActionKind, "OpenFile", StringComparison.Ordinal))
+            {
+                throw new UnauthorizedAccessException("桌面操作类型与授权不匹配。");
+            }
+
+            var fullPath = Path.GetFullPath(input.Target);
+            if (!File.Exists(fullPath))
+            {
+                throw new FileNotFoundException("刚才选择的文件已经不存在。", fullPath);
+            }
+
+            return (launcher.Start(fullPath),
+                $"Windows 已接受打开“{Path.GetFileName(fullPath)}”的请求；文件是否完成加载尚未验证。");
+        }
+
+        if (string.Equals(capability, WindowsDesktopCapabilities.SearchForeground, StringComparison.Ordinal))
+        {
+            if (!string.Equals(input.ActionKind, "SearchForeground", StringComparison.Ordinal)
+                || input.WindowHandle is null)
+            {
+                throw new UnauthorizedAccessException("搜索操作缺少明确的目标窗口。");
+            }
+
+            var result = automation.Search(input.WindowHandle.Value, input.Target);
+            return (null, result.Summary);
+        }
+
+        if (string.Equals(capability, WindowsDesktopCapabilities.DescribeForeground, StringComparison.Ordinal))
+        {
+            if (!string.Equals(input.ActionKind, "DescribeForeground", StringComparison.Ordinal)
+                || input.WindowHandle is null)
+            {
+                throw new UnauthorizedAccessException("窗口查看缺少明确的目标窗口。");
+            }
+
+            var result = automation.Describe(input.WindowHandle.Value);
+            return (null, result.Summary);
+        }
+
+        throw new UnauthorizedAccessException("这个桌面能力尚未开放。");
     }
 
     private sealed record RunState(

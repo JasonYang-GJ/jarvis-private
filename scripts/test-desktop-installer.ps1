@@ -1,3 +1,8 @@
+param(
+    [string]$InstallerPath,
+    [string]$ExpectedFileVersion = '0.2.1.0'
+)
+
 $ErrorActionPreference = 'Stop'
 
 $token = [Guid]::NewGuid().ToString('N')
@@ -5,7 +10,8 @@ $tempRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath())
 $testRoot = [IO.Path]::GetFullPath((Join-Path $tempRoot "ScreenGuideInstallAcceptance-$token"))
 $installRoot = Join-Path $testRoot 'Program'
 $dataRoot = Join-Path $testRoot 'UserData'
-$setup = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\artifacts\release\元枢-V0.1.0-安装包.exe'))
+$defaultSetup = Join-Path $PSScriptRoot '..\artifacts\release\元枢-V0.2.1-安装包.exe'
+$setup = [IO.Path]::GetFullPath($(if ($InstallerPath) { $InstallerPath } else { $defaultSetup }))
 
 function Invoke-HiddenProcess([string]$file, [string[]]$arguments) {
     $process = Start-Process -FilePath $file -ArgumentList $arguments -Wait -PassThru -WindowStyle Hidden
@@ -36,6 +42,13 @@ try {
     foreach ($file in 'ScreenGuide.DesktopClient.exe', 'ScreenGuide.DesktopHost.exe', 'unins000.exe') {
         if (-not (Test-Path -LiteralPath (Join-Path $installRoot $file))) {
             throw "安装后缺少文件：$file"
+        }
+    }
+
+    foreach ($file in 'ScreenGuide.DesktopClient.exe', 'ScreenGuide.DesktopHost.exe') {
+        $actualVersion = [Diagnostics.FileVersionInfo]::GetVersionInfo((Join-Path $installRoot $file)).FileVersion
+        if ($actualVersion -ne $ExpectedFileVersion) {
+            throw "安装后版本不符：$file 预期 $ExpectedFileVersion，实际 $actualVersion。"
         }
     }
 

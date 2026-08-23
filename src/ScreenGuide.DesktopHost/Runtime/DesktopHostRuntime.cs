@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
+using ScreenGuide.Core.Conversations;
 using ScreenGuide.Core.Tasking;
 using ScreenGuide.Evidence;
 using ScreenGuide.Persistence.Runtime;
@@ -8,6 +9,7 @@ namespace ScreenGuide.DesktopHost.Runtime;
 
 public sealed class DesktopHostRuntime(
     ILocalTaskStore store,
+    IConversationStore conversationStore,
     LocalDeviceInitializer deviceInitializer,
     TaskRecoveryService recoveryService,
     TaskCancellationService cancellationService,
@@ -15,6 +17,7 @@ public sealed class DesktopHostRuntime(
     AgentConnectorRegistry connectorRegistry,
     SkillAdapterRegistry skillAdapterRegistry,
     AgentTaskExecutionService executionService,
+    ConversationService conversationService,
     TaskEvidenceService evidenceService,
     RuntimeDataMaintenance maintenance,
     DesktopHostState state,
@@ -42,6 +45,7 @@ public sealed class DesktopHostRuntime(
             maintenance.CleanupStaleFiles();
             await store.InitializeAsync(cancellationToken).ConfigureAwait(false);
             storeInitialized = true;
+            await conversationStore.InitializeAsync(cancellationToken).ConfigureAwait(false);
             localDevice = await deviceInitializer.InitializeAsync(cancellationToken).ConfigureAwait(false);
             await AppendAuditAsync(
                 "HostStarting",
@@ -52,6 +56,9 @@ public sealed class DesktopHostRuntime(
 
             var projects = await store.GetAuthorizedProjectsAsync(cancellationToken).ConfigureAwait(false);
             var recovery = await recoveryService.RecoverAsync(
+                timeProvider.GetUtcNow(),
+                cancellationToken).ConfigureAwait(false);
+            var conversationRecovery = await conversationStore.RecoverInterruptedAsync(
                 timeProvider.GetUtcNow(),
                 cancellationToken).ConfigureAwait(false);
             await evidenceService.FinalizeRecoveredTasksAsync(
@@ -71,6 +78,7 @@ public sealed class DesktopHostRuntime(
                 {
                     authorizedProjectCount = projects.Count,
                     recoveredTaskCount = recovery.InterruptedTaskIds.Count,
+                    recoveredConversationCount = conversationRecovery.InterruptedConversationIds.Count,
                     connectorCount = connectorIds.Count,
                     skillCount = skillIds.Count
                 }),
@@ -90,7 +98,7 @@ public sealed class DesktopHostRuntime(
                     "HostStartupFailed",
                     localDevice?.Id,
                     exception,
-                    cancellationToken).ConfigureAwait(false);
+                    CancellationToken.None).ConfigureAwait(false);
             }
 
             throw;
@@ -116,6 +124,7 @@ public sealed class DesktopHostRuntime(
             try
             {
                 await executionService.StopAsync(cancellationToken).ConfigureAwait(false);
+                await conversationService.StopAsync(cancellationToken).ConfigureAwait(false);
                 await AppendAuditAsync(
                     "HostStopping",
                     snapshot.LocalDevice?.Id,

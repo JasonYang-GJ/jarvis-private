@@ -112,5 +112,19 @@ public sealed class DesktopActionEntryServiceTests
             Targets.Add(target);
             return 4242;
         }
+
+        public VisibleDesktopLaunchResult OpenApplicationVisible(string applicationLaunchTarget)
+        {
+            Targets.Add(applicationLaunchTarget);
+            return new VisibleDesktopLaunchResult(4242, 87, "测试应用");
+        }
+
+        public VisibleDesktopLaunchResult OpenWebsiteVisible(
+            string? browserLaunchTarget,
+            Uri website)
+        {
+            Targets.Add(website.AbsoluteUri);
+            return new VisibleDesktopLaunchResult(4242, 88, "测试浏览器");
+        }
     }
 }

@@ -6,6 +6,8 @@ var smokeOnly = args.Any(argument =>
     string.Equals(argument, "--smoke", StringComparison.OrdinalIgnoreCase));
 var desktopActionSmoke = args.Any(argument =>
     string.Equals(argument, "--desktop-action-smoke", StringComparison.OrdinalIgnoreCase));
+var conversationSmoke = args.Any(argument =>
+    string.Equals(argument, "--conversation-smoke", StringComparison.OrdinalIgnoreCase));
 var repositoryRoot = FindRepositoryRoot();
 var localData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
 var runRoot = Path.Combine(
@@ -74,7 +76,54 @@ try
             $"Codex 兼容门禁未通过：{status.Codex.Version ?? "not-found"}。 ");
     }
 
-    if (desktopActionSmoke)
+    if (conversationSmoke)
+    {
+        var validationWord = $"蓝鹭-{Guid.NewGuid():N}";
+        var conversation = await api.CreateConversationAsync("真实连续对话验收");
+        var first = await api.SendConversationMessageAsync(
+            conversation.Id,
+            $"请记住校验词“{validationWord}”，现在只回答“已记住”。",
+            $"real-chat-first-{Guid.NewGuid():N}");
+        var firstDetails = await WaitForConversationAsync(
+            api,
+            conversation.Id,
+            2,
+            TimeSpan.FromMinutes(2));
+        var second = await api.SendConversationMessageAsync(
+            conversation.Id,
+            "我刚才让你记住的校验词是什么？只回答校验词。",
+            $"real-chat-second-{Guid.NewGuid():N}");
+        var secondDetails = await WaitForConversationAsync(
+            api,
+            conversation.Id,
+            4,
+            TimeSpan.FromMinutes(2));
+        var passed = !first.WasDuplicate
+                     && !second.WasDuplicate
+                     && firstDetails.Summary.Status == "Ready"
+                     && secondDetails.Summary.Status == "Ready"
+                     && secondDetails.Messages[^1].Content.Contains(validationWord, StringComparison.Ordinal)
+                     && secondDetails.Turns.Count == 2
+                     && secondDetails.Turns.All(turn => turn.Status == "Succeeded");
+        results.Add(new
+        {
+            Number = 1,
+            Scenario = "real two-turn local conversation",
+            Status = secondDetails.Summary.Status,
+            Verification = "ConversationContinuity",
+            ThreadId = (string?)null,
+            CurrentAttempt = 2,
+            Passed = passed,
+            UserSummary = secondDetails.Messages[^1].Content
+        });
+        Console.WriteLine($"[conversation] status={secondDetails.Summary.Status}, continuity={passed}");
+        if (!passed)
+        {
+            Console.WriteLine(JsonSerializer.Serialize(secondDetails, DesktopProtocolJson.Options));
+            throw new InvalidOperationException("真实连续对话验收未通过。 ");
+        }
+    }
+    else if (desktopActionSmoke)
     {
         var applications = await api.ListDesktopApplicationsAsync();
         if (!applications.Any(item => item.Id == "notepad"))
@@ -111,12 +160,12 @@ try
         }
     }
 
-    var project = desktopActionSmoke
+    var project = desktopActionSmoke || conversationSmoke
         ? null
         : await api.AddProjectAsync(new AddProjectRequestDto(
             projectRoot,
             "Desktop V0.1 real acceptance"));
-    var regularTaskCount = desktopActionSmoke ? 0 : smokeOnly ? 1 : 18;
+    var regularTaskCount = desktopActionSmoke || conversationSmoke ? 0 : smokeOnly ? 1 : 18;
     for (var number = 1; number <= regularTaskCount; number++)
     {
         var fileName = $"result-{number:D2}.txt";
@@ -147,7 +196,7 @@ try
         }
     }
 
-    if (!smokeOnly && !desktopActionSmoke)
+    if (!smokeOnly && !desktopActionSmoke && !conversationSmoke)
     {
     var waitingCommand = await api.CreateTaskAsync(new CreateTaskRequestDto(
         project!.Id,
@@ -293,6 +342,30 @@ static async Task<TaskDetailsDto> WaitForTerminalEvidenceAsync(
             details = await api.GetTaskAsync(taskId);
             return details?.Summary.Status is "Succeeded" or "Failed"
                    && details.Evidence is not null;
+        },
+        timeout);
+    return details!;
+}
+
+static async Task<ConversationDetailsDto> WaitForConversationAsync(
+    IDesktopApiClient api,
+    Guid conversationId,
+    int expectedMessageCount,
+    TimeSpan timeout)
+{
+    ConversationDetailsDto? details = null;
+    await WaitAsync(
+        async () =>
+        {
+            details = await api.GetConversationAsync(conversationId);
+            if (details?.Summary.Status is "Failed" or "Interrupted")
+            {
+                throw new InvalidOperationException(
+                    details.Summary.FailureMessage ?? "真实对话执行失败。 ");
+            }
+
+            return details?.Summary.Status == "Ready"
+                   && details.Messages.Count >= expectedMessageCount;
         },
         timeout);
     return details!;

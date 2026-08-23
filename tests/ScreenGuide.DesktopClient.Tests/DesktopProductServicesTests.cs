@@ -129,15 +129,25 @@ public sealed class DesktopProductServicesTests
     [Fact]
     public async Task SecondClientInstanceSignalsExistingCurrentUserInstance()
     {
-        using var first = DesktopClientSingleInstance.TryAcquire();
-        Assert.NotNull(first);
-        var activated = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        first.SetActivationHandler(() => activated.TrySetResult());
+        const string variable = "SCREEN_GUIDE_PIPE_NAME";
+        var previous = Environment.GetEnvironmentVariable(variable);
+        Environment.SetEnvironmentVariable(variable, $"ScreenGuide.DesktopClient.Tests.{Guid.NewGuid():N}");
+        try
+        {
+            using var first = DesktopClientSingleInstance.TryAcquire();
+            Assert.NotNull(first);
+            var activated = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            first.SetActivationHandler(() => activated.TrySetResult());
 
-        var second = await System.Threading.Tasks.Task.Run(DesktopClientSingleInstance.TryAcquire);
-        Assert.Null(second);
-        Assert.True(await DesktopClientSingleInstance.TrySignalExistingAsync());
-        await activated.Task.WaitAsync(TimeSpan.FromSeconds(3));
+            var second = await System.Threading.Tasks.Task.Run(DesktopClientSingleInstance.TryAcquire);
+            Assert.Null(second);
+            Assert.True(await DesktopClientSingleInstance.TrySignalExistingAsync());
+            await activated.Task.WaitAsync(TimeSpan.FromSeconds(3));
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(variable, previous);
+        }
     }
 
     [Fact]
@@ -164,6 +174,46 @@ public sealed class DesktopProductServicesTests
 
         Assert.True(router.TryActivate(out var activated));
         Assert.Equal(taskId, activated);
+    }
+
+    [Fact]
+    public void VoiceFirstHomeRemovesTextAndPushToTalkControls()
+    {
+        var root = FindRepositoryRoot();
+        var mainWindow = File.ReadAllText(Path.Combine(
+            root,
+            "src",
+            "ScreenGuide.DesktopClient",
+            "MainWindow.xaml"));
+        var onboarding = File.ReadAllText(Path.Combine(
+            root,
+            "src",
+            "ScreenGuide.DesktopClient",
+            "OnboardingWindow.xaml"));
+
+        Assert.Contains("VoiceStateText", mainWindow, StringComparison.Ordinal);
+        Assert.Contains("自动聆听", mainWindow, StringComparison.Ordinal);
+        Assert.DoesNotContain("DashboardTaskTextBox", mainWindow, StringComparison.Ordinal);
+        Assert.DoesNotContain("PushToTalkButton", mainWindow, StringComparison.Ordinal);
+        Assert.DoesNotContain("发送文字", mainWindow, StringComparison.Ordinal);
+        Assert.DoesNotContain("OnboardingPushToTalkButton", onboarding, StringComparison.Ordinal);
+        Assert.DoesNotContain("FirstTaskInstructionTextBox", onboarding, StringComparison.Ordinal);
+    }
+
+    private static string FindRepositoryRoot()
+    {
+        var current = new DirectoryInfo(AppContext.BaseDirectory);
+        while (current is not null)
+        {
+            if (File.Exists(Path.Combine(current.FullName, "ScreenGuide.slnx")))
+            {
+                return current.FullName;
+            }
+
+            current = current.Parent;
+        }
+
+        throw new DirectoryNotFoundException("ScreenGuide repository root was not found.");
     }
 
     private static TaskSummaryDto Task(string status, string? summary) =>

@@ -10,6 +10,7 @@ using System.Windows.Threading;
 using Microsoft.Win32;
 using ScreenGuide.DesktopClient.Services;
 using ScreenGuide.DesktopProtocol;
+using ScreenGuide.Voice.Windows;
 using WpfComboBox = System.Windows.Controls.ComboBox;
 using WpfComboBoxItem = System.Windows.Controls.ComboBoxItem;
 
@@ -23,16 +24,33 @@ public partial class MainWindow : Window
     private readonly WindowsStartupService _startupService;
     private readonly TrayIconService _tray;
     private readonly DesktopNotificationCoordinator _notifications;
+    private readonly IContinuousVoiceListener _voice;
+    private readonly WindowsSpeechOutput _speechOutput = new();
     private readonly DispatcherTimer _refreshTimer;
     private readonly CancellationTokenSource _lifetime = new();
     private IReadOnlyList<ProjectDto> _projects = [];
     private IReadOnlyList<DesktopApplicationDto> _desktopApplications = [];
     private IReadOnlyList<TaskSummaryDto> _tasks = [];
+    private IReadOnlyList<ConversationSummaryDto> _conversations = [];
     private SystemStatusDto? _systemStatus;
     private Guid? _selectedTaskId;
+    private Guid? _selectedConversationId;
+    private Guid? _assistantConversationId;
+    private AssistantIntentPlanDto? _pendingAssistantPlan;
+    private CancellationTokenSource? _windowObservationCancellation;
+    private string? _activeWindowObservationId;
     private bool _isRefreshing;
     private bool _isHostOnline;
     private bool _forceClose;
+    private bool _voiceCommandBusy;
+    private VoiceUtterance? _queuedVoiceUtterance;
+    private CancellationTokenSource? _activeVoiceCommandCancellation;
+    private CancellationTokenSource? _speechCancellation;
+    private string? _activeSpeechText;
+    private string? _lastAssistantSpeechText;
+    private DateTimeOffset _lastAssistantSpeechEndedAt;
+    private string? _lastVoiceUtterance;
+    private DateTimeOffset _lastVoiceUtteranceAt;
     private DesktopClientSettings _settings;
 
     public MainWindow(
@@ -41,7 +59,8 @@ public partial class MainWindow : Window
         DesktopClientSettingsStore? settingsStore = null,
         WindowsStartupService? startupService = null,
         TrayIconService? tray = null,
-        DesktopClientSettings? settings = null)
+        DesktopClientSettings? settings = null,
+        IContinuousVoiceListener? voice = null)
     {
         InitializeComponent();
         _api = api;
@@ -50,6 +69,10 @@ public partial class MainWindow : Window
         _startupService = startupService ?? new WindowsStartupService();
         _tray = tray ?? new TrayIconService();
         _settings = settings ?? new DesktopClientSettings();
+        _voice = voice ?? new OfflineContinuousVoiceListener();
+        _voice.PartialTextChanged += Voice_PartialTextChanged;
+        _voice.UtteranceRecognized += Voice_UtteranceRecognized;
+        _voice.StateChanged += Voice_StateChanged;
         _notifications = new DesktopNotificationCoordinator(_tray, _settingsStore);
         _refreshTimer = new DispatcherTimer(DispatcherPriority.Background)
         {
@@ -63,15 +86,27 @@ public partial class MainWindow : Window
 
     private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
     {
-        ProductVersionText.Text = $"版本 {Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "0.1.0"}";
+        ProductVersionText.Text = $"版本 {Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "0.2.0"}";
+        RenderVoiceStatus();
         await RefreshAllAsync(showErrors: true);
+        await StartContinuousVoiceAsync();
         _refreshTimer.Start();
     }
 
-    private void MainWindow_Closed(object? sender, EventArgs e)
+    private async void MainWindow_Closed(object? sender, EventArgs e)
     {
         _refreshTimer.Stop();
+        _windowObservationCancellation?.Cancel();
+        _windowObservationCancellation?.Dispose();
+        _activeVoiceCommandCancellation?.Cancel();
+        _activeVoiceCommandCancellation?.Dispose();
+        _speechCancellation?.Cancel();
+        _speechCancellation?.Dispose();
         _lifetime.Cancel();
+        _voice.PartialTextChanged -= Voice_PartialTextChanged;
+        _voice.UtteranceRecognized -= Voice_UtteranceRecognized;
+        _voice.StateChanged -= Voice_StateChanged;
+        await _voice.DisposeAsync();
         _lifetime.Dispose();
     }
 
@@ -79,6 +114,7 @@ public partial class MainWindow : Window
     {
         if (_forceClose)
         {
+            _ = _voice.StopAsync();
             return;
         }
 
@@ -91,6 +127,7 @@ public partial class MainWindow : Window
         }
 
         _forceClose = true;
+        _ = _voice.StopAsync();
         Dispatcher.BeginInvoke(() => System.Windows.Application.Current.Shutdown());
     }
 
@@ -111,11 +148,18 @@ public partial class MainWindow : Window
             var projectsTask = _api.ListProjectsAsync(_lifetime.Token);
             var tasksTask = _api.ListTasksAsync(cancellationToken: _lifetime.Token);
             var desktopApplicationsTask = _api.ListDesktopApplicationsAsync(_lifetime.Token);
-            await Task.WhenAll(dashboardTask, projectsTask, tasksTask, desktopApplicationsTask);
+            var conversationsTask = _api.ListConversationsAsync(_lifetime.Token);
+            await Task.WhenAll(
+                dashboardTask,
+                projectsTask,
+                tasksTask,
+                desktopApplicationsTask,
+                conversationsTask);
             var dashboard = await dashboardTask;
             _projects = await projectsTask;
             _tasks = await tasksTask;
             _desktopApplications = await desktopApplicationsTask;
+            _conversations = await conversationsTask;
             _systemStatus = dashboard.System;
             SetHostOnline(true);
             RenderDashboard(dashboard);
@@ -123,6 +167,7 @@ public partial class MainWindow : Window
             RenderTaskSelectors();
             RenderDesktopActions();
             RenderHistory();
+            RenderConversations();
             RenderSettings();
             _settings = await _notifications.ProcessAsync(_tasks, _settings, _lifetime.Token);
             if (_selectedTaskId is { } taskId)
@@ -140,6 +185,16 @@ public partial class MainWindow : Window
                 }
             }
 
+            if (_selectedConversationId is { } conversationId)
+            {
+                await LoadConversationAsync(conversationId, navigate: false);
+            }
+
+            if (_assistantConversationId is { } assistantConversationId)
+            {
+                await RefreshAssistantConversationAsync(assistantConversationId);
+            }
+
             StatusBarText.Text = $"已连接本机服务 · 最后刷新 {DateTime.Now:HH:mm:ss}";
         }
         catch (OperationCanceledException) when (_lifetime.IsCancellationRequested)
@@ -149,7 +204,7 @@ public partial class MainWindow : Window
         {
             SetHostOnline(false);
             _tray.UpdateState(TrayVisualState.Error);
-            StatusBarText.Text = "Desktop Host 离线，正在尝试恢复连接。";
+            StatusBarText.Text = "本机中枢暂时离线，正在尝试恢复连接。";
             if (showErrors)
             {
                 ShowError("本机任务服务暂时无法连接。", exception);
@@ -176,13 +231,13 @@ public partial class MainWindow : Window
         ProjectCountText.Text = dashboard.AuthorizedProjectCount.ToString();
         TodayCompletedCountText.Text = dashboard.CompletedTodayCount.ToString();
         FailedCountText.Text = dashboard.FailedTaskCount.ToString();
-        DashboardCodexVersionText.Text = dashboard.System.Codex.Version ?? "未检测到";
+        RenderVoiceStatus();
         DashboardActiveList.ItemsSource = dashboard.WaitingTasks
             .Concat(dashboard.ActiveTasks)
             .Select(TaskRow.From)
             .ToArray();
         DashboardRecentList.ItemsSource = dashboard.RecentTasks.Select(TaskRow.From).ToArray();
-        HostStatusText.Text = dashboard.System.HostOnline ? "Host 在线" : "Host 离线";
+        HostStatusText.Text = dashboard.System.HostOnline ? "本机中枢在线" : "本机中枢离线";
         CodexStatusText.Text = dashboard.System.Codex.IsCompatible
             ? $"Codex {dashboard.System.Codex.Version} 可用"
             : dashboard.System.Codex.IsInstalled ? "Codex 版本不兼容" : "未找到 Codex";
@@ -205,9 +260,7 @@ public partial class MainWindow : Window
         var authorized = _projects
             .Where(project => project.AuthorizationState == "Authorized")
             .ToArray();
-        PreserveProjectSelection(DashboardProjectComboBox, authorized);
         PreserveProjectSelection(NewTaskProjectComboBox, authorized);
-        DashboardCreateButton.IsEnabled = authorized.Length > 0 && _isHostOnline;
         NewTaskSubmitButton.IsEnabled = authorized.Length > 0 && _isHostOnline;
     }
 
@@ -241,6 +294,52 @@ public partial class MainWindow : Window
         HistoryListView.ItemsSource = filtered.Select(HistoryRow.From).ToArray();
     }
 
+    private void RenderConversations()
+    {
+        var rows = _conversations.Select(ConversationRow.From).ToArray();
+        ConversationListBox.ItemsSource = rows;
+        ConversationListBox.SelectedItem = rows.FirstOrDefault(row => row.Id == _selectedConversationId);
+        if (_selectedConversationId is null && rows.Length > 0)
+        {
+            _selectedConversationId = rows[0].Id;
+            ConversationListBox.SelectedItem = rows[0];
+        }
+
+        var online = _isHostOnline && _systemStatus?.Codex.IsCompatible == true;
+        ConversationInputTextBox.IsEnabled = online && _selectedConversationId is not null;
+        SendConversationButton.IsEnabled = ConversationInputTextBox.IsEnabled;
+    }
+
+    private async Task LoadConversationAsync(Guid conversationId, bool navigate)
+    {
+        var details = await _api.GetConversationAsync(conversationId, _lifetime.Token);
+        if (details is null)
+        {
+            return;
+        }
+
+        _selectedConversationId = conversationId;
+        ConversationTitleText.Text = details.Summary.Title;
+        ConversationStateText.Text = ConversationStatusLabel(details.Summary.Status, details.Summary.FailureMessage);
+        var messages = details.Messages.Select(ConversationMessageRow.From).ToArray();
+        ConversationMessagesList.ItemsSource = messages;
+        ConversationMessagesList.Visibility = messages.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
+        ConversationEmptyPanel.Visibility = messages.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
+        var responding = details.Summary.Status == "Responding";
+        StopConversationButton.Visibility = responding ? Visibility.Visible : Visibility.Collapsed;
+        SendConversationButton.IsEnabled = !responding && _isHostOnline && _systemStatus?.Codex.IsCompatible == true;
+        ConversationInputTextBox.IsEnabled = SendConversationButton.IsEnabled;
+        if (messages.Length > 0)
+        {
+            ConversationMessagesList.ScrollIntoView(messages[^1]);
+        }
+
+        if (navigate)
+        {
+            ShowPage(AppPage.Conversations);
+        }
+    }
+
     private void RenderSettings()
     {
         if (_systemStatus is null)
@@ -251,6 +350,9 @@ public partial class MainWindow : Window
         SettingsHostStatusText.Text = _systemStatus.HostOnline ? "在线" : "离线";
         SettingsCodexStatusText.Text = _systemStatus.Codex.Message;
         SettingsCodexVersionText.Text = _systemStatus.Codex.Version ?? "未检测到";
+        SettingsVoiceStatusText.Text = _voice.IsListening
+            ? "自动监听已开启；音频只在本机内存中识别。"
+            : _voice.GetCapabilityReport().Message;
         SettingsDatabaseStatusText.Text = _systemStatus.DatabaseStatus == "Ready" ? "正常" : _systemStatus.DatabaseStatus;
         SettingsDeviceIdText.Text = _systemStatus.DeviceId;
         SettingsDataPathText.Text = _systemStatus.DataDirectory;
@@ -320,12 +422,12 @@ public partial class MainWindow : Window
             ChangedFilesList.ItemsSource = evidence.ChangedFiles.Select(FileRow.From).ToArray();
             TestCommandsList.ItemsSource = evidence.TestCommands.Select(TestRow.From).ToArray();
             AgentFinalExplanationText.Text = string.IsNullOrWhiteSpace(evidence.AgentFinalExplanation)
-                ? "Codex 没有提供最终说明。"
+                ? "编程助手没有提供最终说明。"
                 : evidence.AgentFinalExplanation;
         }
 
         TaskTechnicalInfoText.Text =
-            $"Thread ID: {details.ThreadId ?? "—"}\n" +
+            $"运行标识: {details.ThreadId ?? "—"}\n" +
             $"Attempt: {details.CurrentAttempt}\n" +
             $"Connector: {details.ConnectorVersion ?? "—"}\n" +
             $"Working directory: {details.WorkingDirectoryRelativePath}";
@@ -371,7 +473,9 @@ public partial class MainWindow : Window
         });
     }
 
-    private async Task RunCommandAsync(Func<Task> operation)
+    private async Task RunCommandAsync(
+        Func<Task> operation,
+        CancellationToken operationToken = default)
     {
         try
         {
@@ -379,7 +483,8 @@ public partial class MainWindow : Window
             await operation();
             ErrorBanner.Visibility = Visibility.Collapsed;
         }
-        catch (OperationCanceledException) when (_lifetime.IsCancellationRequested)
+        catch (OperationCanceledException) when (
+            _lifetime.IsCancellationRequested || operationToken.IsCancellationRequested)
         {
         }
         catch (Exception exception)
@@ -393,13 +498,432 @@ public partial class MainWindow : Window
         }
     }
 
-    private async void DashboardCreateButton_Click(object sender, RoutedEventArgs e)
+    private async Task SubmitVoiceCommandAsync(
+        string text,
+        CancellationToken cancellationToken)
     {
-        await CreateTaskAsync(
-            DashboardProjectComboBox.SelectedItem as ProjectDto,
-            DashboardTaskTextBox.Text,
-            null);
-        DashboardTaskTextBox.Clear();
+        await RunCommandAsync(async () =>
+        {
+            var plan = await _api.PlanAssistantCommandAsync(
+                new PlanAssistantCommandRequestDto(
+                    text,
+                    InputModality: "Voice"),
+                cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            _pendingAssistantPlan = plan;
+            var ready = string.Equals(plan.Readiness, "Ready", StringComparison.Ordinal);
+            var directVoiceAction = ready
+                                    && IsDirectVoiceAction(plan.IntentKind);
+            if (ready && (!plan.RequiresConfirmation || directVoiceAction))
+            {
+                AssistantPlanBorder.Visibility = Visibility.Collapsed;
+                AssistantResultBorder.Visibility = Visibility.Visible;
+                AssistantResultStatusText.Text = directVoiceAction
+                    ? "正在执行语音指令"
+                    : "正在回答";
+                AssistantResultText.Text = plan.UserSummary;
+                StatusBarText.Text = plan.UserSummary;
+                await ExecutePendingAssistantPlanAsync(
+                    confirmed: false,
+                    authorizationSource: directVoiceAction
+                        ? "ExplicitVoice"
+                        : "VisibleConfirmation",
+                    cancellationToken);
+                return;
+            }
+
+            RenderAssistantPlan(plan);
+        }, cancellationToken);
+    }
+
+    private static bool IsDirectVoiceAction(string intentKind) =>
+        intentKind is "OpenApplication" or "OpenWebsite" or "SearchForeground";
+
+    private void RenderAssistantPlan(AssistantIntentPlanDto plan)
+    {
+        AssistantPlanBorder.Visibility = Visibility.Visible;
+        AssistantPlanSummaryText.Text = plan.UserSummary;
+        var foreground = plan.ForegroundApplication is null
+            ? string.Empty
+            : $"\n目标窗口：{plan.ForegroundApplication.WindowTitle}";
+        AssistantPlanDetailText.Text = plan.Readiness switch
+        {
+            "NeedsContext" => $"还需要：{plan.MissingContext}{foreground}",
+            "Unsupported" => "当前版本不能安全执行这条请求。",
+            _ => $"{plan.ConfirmationText ?? "这条请求不会操作电脑。"}{foreground}"
+        };
+        ConfirmAssistantPlanButton.Visibility =
+            string.Equals(plan.Readiness, "Ready", StringComparison.Ordinal)
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+        ConfirmAssistantPlanButton.Content = plan.RequiresConfirmation ? "确认这一次" : "开始回答";
+    }
+
+    private async void ConfirmAssistantPlanButton_Click(object sender, RoutedEventArgs e) =>
+        await RunCommandAsync(() => ExecutePendingAssistantPlanAsync(
+            confirmed: true,
+            authorizationSource: "VisibleConfirmation"));
+
+    private async Task ExecutePendingAssistantPlanAsync(
+        bool confirmed,
+        string authorizationSource,
+        CancellationToken commandCancellationToken = default)
+    {
+        var plan = _pendingAssistantPlan
+            ?? throw new InvalidOperationException("这条操作计划已经失效，请重新说一次。 ");
+        var isWindowObservation = string.Equals(
+            plan.IntentKind,
+            "DescribeForeground",
+            StringComparison.Ordinal);
+        CancellationToken executionToken = commandCancellationToken.CanBeCanceled
+            ? commandCancellationToken
+            : _lifetime.Token;
+        if (isWindowObservation)
+        {
+            _windowObservationCancellation?.Dispose();
+            _windowObservationCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+                _lifetime.Token,
+                executionToken);
+            executionToken = _windowObservationCancellation.Token;
+            WindowObservationTargetText.Text = plan.ForegroundApplication is null
+                ? "只读取本次确认的单个窗口；图像不保存、不上传。"
+                : $"目标：{plan.ForegroundApplication.WindowTitle}。图像不保存、不上传。";
+            WindowObservationBorder.Visibility = Visibility.Visible;
+        }
+
+        var operationId = $"assistant-ui-{Guid.NewGuid():N}";
+        if (isWindowObservation)
+        {
+            _activeWindowObservationId = operationId;
+        }
+
+        AssistantCommandResultDto result;
+        try
+        {
+            result = await _api.ExecuteAssistantCommandAsync(
+                new ExecuteAssistantCommandRequestDto(
+                    plan.PlanId,
+                    confirmed,
+                    operationId,
+                    authorizationSource),
+                executionToken);
+            executionToken.ThrowIfCancellationRequested();
+        }
+        catch (OperationCanceledException) when (
+            _windowObservationCancellation?.IsCancellationRequested == true
+            && !_lifetime.IsCancellationRequested)
+        {
+            _pendingAssistantPlan = null;
+            AssistantPlanBorder.Visibility = Visibility.Collapsed;
+            AssistantResultBorder.Visibility = Visibility.Visible;
+            AssistantResultStatusText.Text = "已停止查看";
+            AssistantResultText.Text = "本次窗口读取已停止，捕获到的临时画面已从内存清理。";
+            StatusBarText.Text = "已停止查看窗口。";
+            return;
+        }
+        finally
+        {
+            if (isWindowObservation)
+            {
+                WindowObservationBorder.Visibility = Visibility.Collapsed;
+                _windowObservationCancellation?.Dispose();
+                _windowObservationCancellation = null;
+                _activeWindowObservationId = null;
+            }
+        }
+        _pendingAssistantPlan = null;
+        AssistantPlanBorder.Visibility = Visibility.Collapsed;
+        AssistantResultBorder.Visibility = Visibility.Visible;
+        AssistantResultStatusText.Text = result.VerificationStatus switch
+        {
+            "ExecutionVerified" => "本次操作已核实执行",
+            "ObservationCompleted" => "已完成本次窗口识别",
+            "LaunchRequested" => "Windows 已接受启动请求",
+            "Pending" => "任务执行中",
+            _ => "元枢正在处理"
+        };
+        AssistantResultText.Text = result.Evidence is null
+            ? result.UserSummary
+            : string.Join("\n", new[]
+            {
+                result.UserSummary,
+                result.Evidence.VerifiedFacts.Count == 0
+                    ? string.Empty
+                    : "已核实：" + string.Join("；", result.Evidence.VerifiedFacts),
+                result.Evidence.UnverifiedFacts.Count == 0
+                    ? string.Empty
+                    : "尚未核实：" + string.Join("；", result.Evidence.UnverifiedFacts)
+            }.Where(line => !string.IsNullOrWhiteSpace(line)));
+        AssistantResultBorder.Background = BrushFrom(
+            result.Status == "Failed" ? "#FCECED" : "#F7FAFB");
+        if (result.TaskId is { } taskId)
+        {
+            _selectedTaskId = taskId;
+        }
+
+        if (result.ConversationId is { } conversationId)
+        {
+            _assistantConversationId = conversationId;
+        }
+
+        StatusBarText.Text = result.UserSummary;
+        await RefreshAllAsync(showErrors: false);
+    }
+
+    private async void StopWindowObservationButton_Click(object sender, RoutedEventArgs e)
+    {
+        _windowObservationCancellation?.Cancel();
+        WindowObservationTargetText.Text = "正在停止并清理临时画面…";
+        var operationId = _activeWindowObservationId;
+        if (string.IsNullOrWhiteSpace(operationId))
+        {
+            return;
+        }
+
+        try
+        {
+            await _api.CancelWindowObservationAsync(operationId, _lifetime.Token);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            ShowError("停止请求没有成功送达本机中枢，请稍后再试。", exception);
+        }
+    }
+
+    private void CancelAssistantPlanButton_Click(object sender, RoutedEventArgs e)
+    {
+        _pendingAssistantPlan = null;
+        AssistantPlanBorder.Visibility = Visibility.Collapsed;
+        StatusBarText.Text = "已取消，不会执行任何电脑操作。";
+    }
+
+    private async Task StartContinuousVoiceAsync()
+    {
+        var report = _voice.GetCapabilityReport();
+        if (!report.RecognitionModelAvailable || report.MicrophoneCount == 0)
+        {
+            RenderVoiceStatus();
+            return;
+        }
+
+        try
+        {
+            await Task.Run(() => _voice.StartAsync(_lifetime.Token), _lifetime.Token);
+        }
+        catch (OperationCanceledException) when (_lifetime.IsCancellationRequested)
+        {
+        }
+        catch (Exception exception)
+        {
+            RenderVoiceState(
+                ContinuousVoiceState.Faulted,
+                UserFacingErrorMapper.Map(exception).Message);
+        }
+    }
+
+    private void Voice_PartialTextChanged(object? sender, string text) =>
+        Dispatcher.BeginInvoke(() =>
+        {
+            if (_voice.IsListening && !string.IsNullOrWhiteSpace(text))
+            {
+                VoiceTranscriptText.Text = text;
+                if (SpeechEchoMatcher.CanInterrupt(text) && !IsAssistantSpeechEcho(text))
+                {
+                    _speechCancellation?.Cancel();
+                    _activeVoiceCommandCancellation?.Cancel();
+                    VoiceStateText.Text = "听到你插话，正在停止上一条";
+                }
+            }
+        });
+
+    private void Voice_UtteranceRecognized(object? sender, VoiceUtterance utterance) =>
+        Dispatcher.BeginInvoke(() => QueueVoiceUtterance(utterance));
+
+    private void QueueVoiceUtterance(VoiceUtterance utterance)
+    {
+        var text = utterance.Text.Trim();
+        if (text.Length == 0 || IsAssistantSpeechEcho(text))
+        {
+            return;
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        if (string.Equals(text, _lastVoiceUtterance, StringComparison.Ordinal)
+            && now - _lastVoiceUtteranceAt < TimeSpan.FromSeconds(3))
+        {
+            return;
+        }
+
+        _lastVoiceUtterance = text;
+        _lastVoiceUtteranceAt = now;
+        VoiceTranscriptText.Text = text;
+        AssistantPlanBorder.Visibility = Visibility.Collapsed;
+        AssistantResultBorder.Visibility = Visibility.Collapsed;
+        ErrorBanner.Visibility = Visibility.Collapsed;
+        _pendingAssistantPlan = null;
+        _queuedVoiceUtterance = utterance with { Text = text };
+        _speechCancellation?.Cancel();
+        _activeVoiceCommandCancellation?.Cancel();
+        if (_voiceCommandBusy)
+        {
+            VoiceStateText.Text = "已收到新指令，正在停止上一条";
+            StatusBarText.Text = $"新指令优先：{text}";
+            return;
+        }
+
+        _ = ProcessVoiceQueueAsync();
+    }
+
+    private async Task ProcessVoiceQueueAsync()
+    {
+        _voiceCommandBusy = true;
+        try
+        {
+            while (_queuedVoiceUtterance is { } utterance)
+            {
+                _queuedVoiceUtterance = null;
+                _activeVoiceCommandCancellation?.Dispose();
+                _activeVoiceCommandCancellation =
+                    CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
+                var cancellationToken = _activeVoiceCommandCancellation.Token;
+                try
+                {
+                    RenderVoiceState(ContinuousVoiceState.HearingSpeech, "已听懂，正在处理");
+                    StatusBarText.Text = $"已听到：{utterance.Text}";
+                    await SubmitVoiceCommandAsync(utterance.Text, cancellationToken);
+                }
+                catch (OperationCanceledException) when (
+                    cancellationToken.IsCancellationRequested
+                    && !_lifetime.IsCancellationRequested)
+                {
+                    StatusBarText.Text = _queuedVoiceUtterance is null
+                        ? "上一条指令已停止。"
+                        : "上一条指令已停止，正在处理你的新指令。";
+                }
+            }
+        }
+        finally
+        {
+            _activeVoiceCommandCancellation?.Dispose();
+            _activeVoiceCommandCancellation = null;
+            _voiceCommandBusy = false;
+            if (_voice.IsListening)
+            {
+                RenderVoiceState(ContinuousVoiceState.Listening, "正在聆听");
+            }
+        }
+    }
+
+    private bool IsAssistantSpeechEcho(string text)
+    {
+        var reference = _activeSpeechText;
+        if (string.IsNullOrWhiteSpace(reference)
+            && DateTimeOffset.UtcNow - _lastAssistantSpeechEndedAt < TimeSpan.FromSeconds(3))
+        {
+            reference = _lastAssistantSpeechText;
+        }
+
+        return !string.IsNullOrWhiteSpace(reference)
+               && SpeechEchoMatcher.IsLikelyAssistantEcho(text, reference);
+    }
+
+    private void Voice_StateChanged(object? sender, ContinuousVoiceStatus status) =>
+        Dispatcher.BeginInvoke(() => RenderVoiceState(status.State, status.Message));
+
+    private void RenderVoiceState(ContinuousVoiceState state, string message)
+    {
+        VoiceStateText.Text = message;
+        DashboardCodexVersionText.Text = state switch
+        {
+            ContinuousVoiceState.Listening => "自动聆听中",
+            ContinuousVoiceState.HearingSpeech => "正在识别",
+            ContinuousVoiceState.Faulted => "需要检查",
+            _ => "未启动"
+        };
+        var color = state switch
+        {
+            ContinuousVoiceState.Listening => "#1F8A6A",
+            ContinuousVoiceState.HearingSpeech => "#2E6DD8",
+            ContinuousVoiceState.Faulted => "#C94C4C",
+            _ => "#A56210"
+        };
+        VoiceStateDot.Background = BrushFrom(color);
+        DashboardCodexVersionText.Foreground = BrushFrom(color);
+    }
+
+    private void RenderVoiceStatus()
+    {
+        var report = _voice.GetCapabilityReport();
+        if (report.RecognitionModelAvailable && report.MicrophoneCount > 0)
+        {
+            RenderVoiceState(
+                _voice.IsListening ? ContinuousVoiceState.Listening : ContinuousVoiceState.Stopped,
+                _voice.IsListening ? "正在聆听" : "正在启动语音中枢");
+            return;
+        }
+
+        RenderVoiceState(
+            ContinuousVoiceState.Faulted,
+            report.RecognitionModelAvailable ? "没有检测到麦克风" : "需要安装本地语音模型");
+        VoicePrivacyText.Text = report.Message;
+    }
+
+    private async Task RefreshAssistantConversationAsync(Guid conversationId)
+    {
+        var details = await _api.GetConversationAsync(conversationId, _lifetime.Token);
+        if (details is null)
+        {
+            return;
+        }
+
+        var assistantMessage = details.Messages.LastOrDefault(message =>
+            string.Equals(message.Role, "Assistant", StringComparison.OrdinalIgnoreCase));
+        AssistantResultBorder.Visibility = Visibility.Visible;
+        if (assistantMessage is not null)
+        {
+            AssistantResultStatusText.Text = "元枢回答";
+            AssistantResultText.Text = assistantMessage.Content;
+        }
+        else
+        {
+            AssistantResultStatusText.Text = "正在思考";
+            AssistantResultText.Text = details.Summary.FailureMessage ?? "正在准备回答…";
+        }
+    }
+
+    private async void ReadAssistantResultButton_Click(object sender, RoutedEventArgs e)
+    {
+        var text = AssistantResultText.Text;
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return;
+        }
+
+        await RunCommandAsync(async () =>
+        {
+            ReadAssistantResultButton.IsEnabled = false;
+            _speechCancellation?.Cancel();
+            _speechCancellation?.Dispose();
+            _speechCancellation = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
+            _activeSpeechText = text;
+            try
+            {
+                await _speechOutput.SpeakAsync(text, _speechCancellation.Token);
+            }
+            catch (OperationCanceledException) when (_speechCancellation.IsCancellationRequested)
+            {
+                StatusBarText.Text = "已听到你插话，元枢已停止朗读。";
+            }
+            finally
+            {
+                _lastAssistantSpeechText = text;
+                _lastAssistantSpeechEndedAt = DateTimeOffset.UtcNow;
+                _activeSpeechText = null;
+                _speechCancellation.Dispose();
+                _speechCancellation = null;
+                ReadAssistantResultButton.IsEnabled = true;
+            }
+        });
     }
 
     private async void NewTaskSubmitButton_Click(object sender, RoutedEventArgs e)
@@ -415,15 +939,15 @@ public partial class MainWindow : Window
     private void NewTaskProjectComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         TaskDirectoryNoticeText.Text = NewTaskProjectComboBox.SelectedItem is ProjectDto project
-            ? $"Codex 将在这个项目目录内执行任务：\n{project.RootPath}"
-            : "Codex 将在所选项目目录内执行任务。";
+            ? $"编程助手将在这个项目目录内执行任务：\n{project.RootPath}"
+            : "编程助手将在所选项目目录内执行任务。";
     }
 
     private async void AddProjectButton_Click(object sender, RoutedEventArgs e)
     {
         var dialog = new OpenFolderDialog
         {
-            Title = "选择要授权给 Codex 的 Git 项目",
+            Title = "选择要授权给编程助手的 Git 项目",
             Multiselect = false
         };
         if (dialog.ShowDialog(this) != true)
@@ -483,7 +1007,7 @@ public partial class MainWindow : Window
         }
 
         if (MessageBox.Show(
-                "取消当前任务？Codex 及其子进程会被停止。",
+                "取消当前任务？编程助手及其子进程会被停止。",
                 "取消任务",
                 MessageBoxButton.YesNo,
                 MessageBoxImage.Warning) != MessageBoxResult.Yes)
@@ -559,6 +1083,76 @@ public partial class MainWindow : Window
             $"desktop-ui-app-{Guid.NewGuid():N}"));
     }
 
+    private async void NewConversationButton_Click(object sender, RoutedEventArgs e)
+    {
+        await RunCommandAsync(async () =>
+        {
+            var conversation = await _api.CreateConversationAsync(cancellationToken: _lifetime.Token);
+            _selectedConversationId = conversation.Id;
+            ConversationInputTextBox.Clear();
+            await RefreshAllAsync(showErrors: false);
+            await LoadConversationAsync(conversation.Id, navigate: true);
+            ConversationInputTextBox.Focus();
+        });
+    }
+
+    private async void ConversationListBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (ConversationListBox.SelectedItem is ConversationRow row && row.Id != _selectedConversationId)
+        {
+            await RunCommandAsync(() => LoadConversationAsync(row.Id, navigate: false));
+        }
+    }
+
+    private async void SendConversationButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_selectedConversationId is not { } conversationId)
+        {
+            ShowError("请先新建一个对话。", null);
+            return;
+        }
+
+        var message = ConversationInputTextBox.Text;
+        if (string.IsNullOrWhiteSpace(message))
+        {
+            ShowError("请输入想聊的内容。", null);
+            return;
+        }
+
+        await RunCommandAsync(async () =>
+        {
+            await _api.SendConversationMessageAsync(
+                conversationId,
+                message,
+                $"desktop-chat-{Guid.NewGuid():N}",
+                _lifetime.Token);
+            ConversationInputTextBox.Clear();
+            await LoadConversationAsync(conversationId, navigate: false);
+        });
+    }
+
+    private async void StopConversationButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_selectedConversationId is not { } conversationId)
+        {
+            return;
+        }
+
+        await RunCommandAsync(async () =>
+        {
+            await _api.CancelConversationTurnAsync(conversationId, _lifetime.Token);
+            StatusBarText.Text = "正在停止回答。";
+            await Task.Delay(150, _lifetime.Token);
+            await LoadConversationAsync(conversationId, navigate: false);
+        });
+    }
+
+    private void ConversationOpenTaskButton_Click(object sender, RoutedEventArgs e) =>
+        ShowPage(AppPage.NewTask);
+
+    private void ConversationOpenActionsButton_Click(object sender, RoutedEventArgs e) =>
+        ShowPage(AppPage.DesktopActions);
+
     private async void OpenDesktopWebsiteButton_Click(object sender, RoutedEventArgs e)
     {
         var website = DesktopWebsiteTextBox.Text.Trim();
@@ -617,7 +1211,7 @@ public partial class MainWindow : Window
 
     public void OpenDashboardFromTray() => ShowWindowAndPage(AppPage.Dashboard);
 
-    public void OpenNewTaskFromTray() => ShowWindowAndPage(AppPage.NewTask);
+    public void OpenNewTaskFromTray() => ShowWindowAndPage(AppPage.Dashboard);
 
     public void OpenCurrentTaskFromTray() => ShowWindowAndPage(AppPage.CurrentTask);
 
@@ -628,6 +1222,9 @@ public partial class MainWindow : Window
         ShowWindowAndPage(AppPage.CurrentTask);
         await RunCommandAsync(() => LoadTaskDetailsAsync(taskId, navigate: false));
     }
+
+    public void OpenConversationCenterFromOnboarding()
+        => ShowWindowAndPage(AppPage.Conversations);
 
     public async Task CancelCurrentTaskFromTrayAsync()
     {
@@ -723,6 +1320,7 @@ public partial class MainWindow : Window
     private void ShowPage(AppPage page)
     {
         DashboardPage.Visibility = page == AppPage.Dashboard ? Visibility.Visible : Visibility.Collapsed;
+        ConversationsPage.Visibility = page == AppPage.Conversations ? Visibility.Visible : Visibility.Collapsed;
         ProjectsPage.Visibility = page == AppPage.Projects ? Visibility.Visible : Visibility.Collapsed;
         DesktopActionsPage.Visibility = page == AppPage.DesktopActions ? Visibility.Visible : Visibility.Collapsed;
         NewTaskPage.Visibility = page == AppPage.NewTask ? Visibility.Visible : Visibility.Collapsed;
@@ -731,7 +1329,7 @@ public partial class MainWindow : Window
         SettingsPage.Visibility = page == AppPage.Settings ? Visibility.Visible : Visibility.Collapsed;
         foreach (var button in new[]
                  {
-                     DashboardNavButton, ProjectsNavButton, DesktopActionsNavButton, NewTaskNavButton,
+                     DashboardNavButton, ConversationsNavButton, ProjectsNavButton, DesktopActionsNavButton, NewTaskNavButton,
                      CurrentTaskNavButton, HistoryNavButton, SettingsNavButton
                  })
         {
@@ -741,6 +1339,7 @@ public partial class MainWindow : Window
         var selected = page switch
         {
             AppPage.Dashboard => DashboardNavButton,
+            AppPage.Conversations => ConversationsNavButton,
             AppPage.Projects => ProjectsNavButton,
             AppPage.DesktopActions => DesktopActionsNavButton,
             AppPage.NewTask => NewTaskNavButton,
@@ -752,9 +1351,10 @@ public partial class MainWindow : Window
         PageTitleText.Text = page switch
         {
             AppPage.Dashboard => "首页",
+            AppPage.Conversations => "对话",
             AppPage.Projects => "项目",
             AppPage.DesktopActions => "电脑操作",
-            AppPage.NewTask => "新建任务",
+            AppPage.NewTask => "编程任务",
             AppPage.CurrentTask => "当前任务",
             AppPage.History => "任务历史",
             _ => "设置"
@@ -764,7 +1364,7 @@ public partial class MainWindow : Window
     private void SetHostOnline(bool online)
     {
         _isHostOnline = online;
-        HostStatusText.Text = online ? "Host 在线" : "Host 离线";
+        HostStatusText.Text = online ? "本机中枢在线" : "本机中枢离线";
         HostStatusPill.Background = BrushFrom(online ? "#EAF6F0" : "#FCECED");
         HostStatusText.Foreground = BrushFrom(online ? "#1F8A6A" : "#C94C4C");
     }
@@ -814,6 +1414,15 @@ public partial class MainWindow : Window
         _ => status
     };
 
+    private static string ConversationStatusLabel(string status, string? failureMessage) => status switch
+    {
+        "Ready" => "可以继续聊天",
+        "Responding" => "元枢正在回答…",
+        "Failed" => string.IsNullOrWhiteSpace(failureMessage) ? "上次回答失败" : failureMessage,
+        "Interrupted" => "上次回答意外中断，可以继续发送消息",
+        _ => status
+    };
+
     private static string DurationText(TaskSummaryDto task)
     {
         if (task.StartedAtUtc is null)
@@ -834,6 +1443,7 @@ public partial class MainWindow : Window
     private enum AppPage
     {
         Dashboard,
+        Conversations,
         Projects,
         DesktopActions,
         NewTask,
@@ -848,6 +1458,37 @@ public partial class MainWindow : Window
             new(task.Id, $"{task.Title}  ·  {StatusLabel(task.Status)}");
 
         public override string ToString() => Text;
+    }
+
+    private sealed record ConversationRow(Guid Id, string Title, string StatusText)
+    {
+        public static ConversationRow From(ConversationSummaryDto conversation) => new(
+            conversation.Id,
+            conversation.Title,
+            ConversationStatusLabel(conversation.Status, conversation.FailureMessage));
+    }
+
+    private sealed record ConversationMessageRow(
+        string RoleText,
+        string Content,
+        string TimeText,
+        Brush Background,
+        Brush BorderBrush,
+        HorizontalAlignment Alignment,
+        Thickness Margin)
+    {
+        public static ConversationMessageRow From(ConversationMessageDto message)
+        {
+            var isUser = message.Role == "User";
+            return new ConversationMessageRow(
+                isUser ? "你" : "元枢",
+                message.Content,
+                message.CreatedAtUtc.ToLocalTime().ToString("HH:mm"),
+                BrushFrom(isUser ? "#EAF0FF" : "#F7FAFB"),
+                BrushFrom(isUser ? "#BCD0F6" : "#DDE5E8"),
+                isUser ? HorizontalAlignment.Right : HorizontalAlignment.Left,
+                isUser ? new Thickness(90, 5, 0, 5) : new Thickness(0, 5, 90, 5));
+        }
     }
 
     private sealed record ProjectRow(

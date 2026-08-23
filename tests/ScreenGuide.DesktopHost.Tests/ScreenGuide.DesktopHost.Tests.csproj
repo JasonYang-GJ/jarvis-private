@@ -24,6 +24,7 @@
     <ProjectReference Include="..\..\src\ScreenGuide.Core\ScreenGuide.Core.csproj" />
     <ProjectReference Include="..\..\src\ScreenGuide.DesktopHost\ScreenGuide.DesktopHost.csproj" />
     <ProjectReference Include="..\..\src\ScreenGuide.Persistence\ScreenGuide.Persistence.csproj" />
+    <ProjectReference Include="..\..\src\ScreenGuide.Vision.Abstractions\ScreenGuide.Vision.Abstractions.csproj" />
     <ProjectReference Include="..\ScreenGuide.FakeCodexCli\ScreenGuide.FakeCodexCli.csproj" />
   </ItemGroup>
 

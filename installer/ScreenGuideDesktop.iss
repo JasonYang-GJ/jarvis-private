@@ -1,5 +1,5 @@
 #define MyAppName "元枢"
-#define MyAppVersion "0.1.0"
+#define MyAppVersion "0.2.1"
 #define MyAppPublisher "元枢"
 #define MyAppExeName "ScreenGuide.DesktopClient.exe"
 
@@ -8,13 +8,13 @@ AppId={{E2B9C242-2965-48BC-B2C6-CF83A2B11953}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
-DefaultDirName={localappdata}\Programs\Yuanshu
+DefaultDirName={localappdata}\Programs\YuanshuDesktop
 DefaultGroupName=元枢
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
 OutputDir=..\artifacts\release
-OutputBaseFilename=元枢-V0.1.0-安装包
+OutputBaseFilename=元枢-V0.2.1-安装包
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern

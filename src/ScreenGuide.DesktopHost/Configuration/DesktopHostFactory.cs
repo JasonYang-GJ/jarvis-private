@@ -3,6 +3,8 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using ScreenGuide.Agent.Abstractions;
 using ScreenGuide.Agent.Codex;
+using ScreenGuide.AI.Core;
+using ScreenGuide.Core.Conversations;
 using ScreenGuide.Core.Security;
 using ScreenGuide.Core.Tasking;
 using ScreenGuide.DesktopHost.Runtime;
@@ -11,6 +13,8 @@ using ScreenGuide.Persistence.Runtime;
 using ScreenGuide.Persistence.Sqlite;
 using ScreenGuide.Skills.Abstractions;
 using ScreenGuide.Skills.Windows;
+using ScreenGuide.Vision.Abstractions;
+using ScreenGuide.Vision.Windows;
 
 namespace ScreenGuide.DesktopHost.Configuration;
 
@@ -24,6 +28,7 @@ public static class DesktopHostFactory
         ArgumentNullException.ThrowIfNull(args);
         var builder = Host.CreateApplicationBuilder(args);
         var resolvedOptions = options ?? DesktopHostOptions.FromEnvironment();
+        builder.Logging.ClearProviders();
         builder.Logging.AddProvider(new RollingFileLoggerProvider(resolvedOptions.LogsDirectory));
 
         builder.Services.AddSingleton(resolvedOptions);
@@ -32,6 +37,11 @@ public static class DesktopHostFactory
         {
             var hostOptions = services.GetRequiredService<DesktopHostOptions>();
             return new SqliteTaskStore(hostOptions.DatabasePath);
+        });
+        builder.Services.AddSingleton<IConversationStore>(services =>
+        {
+            var hostOptions = services.GetRequiredService<DesktopHostOptions>();
+            return new SqliteConversationStore(hostOptions.DatabasePath);
         });
         builder.Services.AddSingleton<TaskCancellationRegistry>();
         builder.Services.AddSingleton<TaskCancellationService>();
@@ -53,14 +63,31 @@ public static class DesktopHostFactory
                     hostOptions.CodexExecutablePath);
         });
         builder.Services.AddSingleton<CodexConnector>();
+        builder.Services.AddSingleton<CodexConversationProvider>();
         builder.Services.AddSingleton<CodexDiagnosticsService>();
         builder.Services.AddSingleton<IAgentConnector>(services =>
             services.GetRequiredService<CodexConnector>());
+        builder.Services.AddSingleton<IConversationProvider>(services =>
+            services.GetRequiredService<CodexConversationProvider>());
         builder.Services.AddSingleton<CapabilityPolicyEngine>();
+        builder.Services.AddSingleton<IIntentPlanner, DeterministicIntentPlanner>();
         builder.Services.AddSingleton<CodexSkillAdapter>();
         builder.Services.AddSingleton<ISkillAdapter>(services =>
             services.GetRequiredService<CodexSkillAdapter>());
         builder.Services.AddSingleton<IDesktopProcessLauncher, DesktopProcessLauncher>();
+        builder.Services.AddSingleton<IInstalledApplicationCatalog, InstalledApplicationCatalog>();
+        builder.Services.AddSingleton<IReliableDesktopAutomation, WindowsUiAutomationService>();
+        builder.Services.AddSingleton<ForegroundWindowTracker>();
+        builder.Services.AddSingleton<IForegroundWindowContextProvider>(services =>
+            services.GetRequiredService<ForegroundWindowTracker>());
+        builder.Services.AddSingleton<ISensitiveWindowPolicy, WindowsSensitiveWindowPolicy>();
+        builder.Services.AddSingleton<WindowsGraphicsCaptureBackend>();
+        builder.Services.AddSingleton<PrintWindowCaptureBackend>();
+        builder.Services.AddSingleton<IExactWindowCaptureBackend, ResilientExactWindowCaptureBackend>();
+        builder.Services.AddSingleton<IWindowCaptureService, WindowsSingleWindowCaptureService>();
+        builder.Services.AddSingleton<ILocalOcrTextExtractor, WindowsLocalOcrTextExtractor>();
+        builder.Services.AddSingleton<IWindowVisionProvider, WindowsLocalWindowVisionProvider>();
+        builder.Services.AddSingleton<WindowUnderstandingService>();
         builder.Services.AddSingleton<WindowsDesktopSkillAdapter>();
         builder.Services.AddSingleton<ISkillAdapter>(services =>
             services.GetRequiredService<WindowsDesktopSkillAdapter>());
@@ -70,7 +97,9 @@ public static class DesktopHostFactory
         builder.Services.AddSingleton<AgentConnectorRegistry>();
         builder.Services.AddSingleton<AgentTaskExecutionService>();
         builder.Services.AddSingleton<LocalTaskEntryService>();
+        builder.Services.AddSingleton<ConversationService>();
         builder.Services.AddSingleton<DesktopActionEntryService>();
+        builder.Services.AddSingleton<AssistantCommandService>();
         builder.Services.AddSingleton<ProjectInspector>();
         builder.Services.AddSingleton<DesktopHostState>();
         builder.Services.AddSingleton<DesktopHostRuntime>();

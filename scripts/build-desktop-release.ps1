@@ -9,6 +9,7 @@ $publishRoot = Join-Path $artifactsRoot 'publish\win-x64'
 $clientStage = Join-Path $artifactsRoot 'staging\client'
 $hostStage = Join-Path $artifactsRoot 'staging\host'
 $releaseRoot = Join-Path $artifactsRoot 'release'
+$solution = Join-Path $repoRoot 'ScreenGuide.slnx'
 
 function Reset-BuildDirectory([string]$path) {
     $fullPath = [System.IO.Path]::GetFullPath($path)
@@ -24,8 +25,13 @@ function Reset-BuildDirectory([string]$path) {
     New-Item -ItemType Directory -Path $fullPath -Force | Out-Null
 }
 
+dotnet restore $solution --locked-mode --disable-parallel
+if ($LASTEXITCODE -ne 0) { throw 'Locked release restore failed.' }
+
 if (-not $SkipTests) {
-    dotnet test (Join-Path $repoRoot 'ScreenGuide.slnx') --configuration Release
+    # IPC and single-instance tests share current-user Windows resources, so keep
+    # release verification sequential to prevent cross-assembly pipe collisions.
+    dotnet test $solution --configuration Release --no-restore --maxcpucount:1
     if ($LASTEXITCODE -ne 0) { throw 'Release tests failed.' }
 }
 
@@ -36,12 +42,12 @@ New-Item -ItemType Directory -Path $releaseRoot -Force | Out-Null
 
 dotnet publish (Join-Path $repoRoot 'src\ScreenGuide.DesktopClient\ScreenGuide.DesktopClient.csproj') `
     --configuration Release --runtime win-x64 --self-contained true `
-    -p:PublishSingleFile=false -p:DebugType=None -p:DebugSymbols=false --output $clientStage
+    -p:RestoreLockedMode=true -p:PublishSingleFile=false -p:DebugType=None -p:DebugSymbols=false --output $clientStage
 if ($LASTEXITCODE -ne 0) { throw 'DesktopClient publish failed.' }
 
 dotnet publish (Join-Path $repoRoot 'src\ScreenGuide.DesktopHost\ScreenGuide.DesktopHost.csproj') `
     --configuration Release --runtime win-x64 --self-contained true `
-    -p:PublishSingleFile=false -p:DebugType=None -p:DebugSymbols=false --output $hostStage
+    -p:RestoreLockedMode=true -p:PublishSingleFile=false -p:DebugType=None -p:DebugSymbols=false --output $hostStage
 if ($LASTEXITCODE -ne 0) { throw 'DesktopHost publish failed.' }
 
 Copy-Item -Path (Join-Path $hostStage '*') -Destination $publishRoot -Recurse -Force
@@ -62,7 +68,7 @@ if (-not $iscc) {
 & $iscc (Join-Path $repoRoot 'installer\ScreenGuideDesktop.iss')
 if ($LASTEXITCODE -ne 0) { throw 'Installer compilation failed.' }
 
-$installer = Join-Path $releaseRoot '元枢-V0.1.0-安装包.exe'
+$installer = Join-Path $releaseRoot '元枢-V0.2.1-安装包.exe'
 if (-not (Test-Path -LiteralPath $installer)) { throw 'Installer was not produced.' }
 Get-FileHash -Algorithm SHA256 -LiteralPath $installer
 Write-Host "Release installer: $installer"

@@ -27,7 +27,10 @@ public static class UserFacingErrorMapper
                 "project_missing" => "重新选择存在的 Git 项目目录。",
                 "project_not_git" => "选择包含 Git 仓库的项目目录。",
                 "project_not_authorized" => "在项目页面重新授权该目录。",
+                "file_missing" => "重新选择这次要打开的文件。",
                 "desktop_action_not_authorized" => "重新选择受控清单中的目标，并在确认窗口中明确同意本次操作。",
+                "desktop_target_unavailable" => "切回目标软件，确认其中只有一个明确搜索框后重试。",
+                "action_plan_expired" => "为防止误操作，元枢不会自动重放旧指令。",
                 "input_invalid" => "检查输入内容；网站地址必须以 https:// 开头。",
                 "database_unavailable" => "关闭程序并备份数据目录，再查看日志中的数据库错误。",
                 "codex_exited" => "打开任务查看已保存的修改证据，不会自动重新执行。",
@@ -42,11 +45,11 @@ public static class UserFacingErrorMapper
         return exception switch
         {
             TimeoutException => new UserFacingError(
-                "Desktop Host 没有响应。",
+                "本机中枢没有响应。",
                 "等待几秒后重试，程序会自动尝试恢复连接。",
                 $"{exception.GetType().Name}: {exception.Message}"),
             IOException => new UserFacingError(
-                "Desktop Host 当前离线。",
+                "本机中枢当前离线。",
                 "保持窗口打开，服务恢复后会自动重新连接。",
                 $"{exception.GetType().Name}: {exception.Message}"),
             _ => new UserFacingError(

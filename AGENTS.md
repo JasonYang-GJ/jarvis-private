@@ -28,3 +28,13 @@ Build a Windows learning assistant that follows the foreground app at question t
 - Review staged changes before every commit.
 - Keep generated files, local configuration, logs, recordings, and captures ignored.
 - Do not add an open-source license until the owner explicitly chooses one.
+
+## Project source of truth
+
+- `PRODUCT.md` records implemented product capability and known gaps.
+- `ARCHITECTURE.md` records the current as-built system only.
+- `MEMORY.md` records durable project decisions and current stage state.
+- `CHANGELOG.md` records released changes; `ROADMAP.md` records future plans.
+- `docs/baselines/` records exact version, tests, installer hashes, and freeze evidence.
+- Historical V0.1/V0.2 reports remain evidence but must not override the files above.
+- A version is frozen only when its baseline tag exists, locked clean-source build and tests pass, installer acceptance passes, and the working tree is clean.
