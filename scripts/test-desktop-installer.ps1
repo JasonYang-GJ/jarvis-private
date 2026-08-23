@@ -12,6 +12,12 @@ $installRoot = Join-Path $testRoot 'Program'
 $dataRoot = Join-Path $testRoot 'UserData'
 $defaultSetup = Join-Path $PSScriptRoot '..\artifacts\release\元枢-V0.2.1-安装包.exe'
 $setup = [IO.Path]::GetFullPath($(if ($InstallerPath) { $InstallerPath } else { $defaultSetup }))
+$existingProductRoot = Join-Path $env:LOCALAPPDATA 'Programs\YuanshuDesktop'
+$existingUninstallKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\{E2B9C242-2965-48BC-B2C6-CF83A2B11953}_is1'
+
+if ((Test-Path -LiteralPath $existingProductRoot) -or (Test-Path -LiteralPath $existingUninstallKey)) {
+    throw '检测到本机已有元枢正式安装。相同 AppId 的临时安装/卸载会改动正式卸载登记；请改在干净 Windows 测试机或虚拟机运行安装验收。'
+}
 
 function Invoke-HiddenProcess([string]$file, [string[]]$arguments) {
     $process = Start-Process -FilePath $file -ArgumentList $arguments -Wait -PassThru -WindowStyle Hidden
