@@ -8,5 +8,6 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\ScreenGuide.DesktopProtocol\ScreenGuide.DesktopProtocol.csproj" />
+    <ProjectReference Include="..\..\src\ScreenGuide.Skills.Windows\ScreenGuide.Skills.Windows.csproj" />
   </ItemGroup>
 </Project>

@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text.Json;
 using ScreenGuide.DesktopProtocol;
+using ScreenGuide.Skills.Windows;
 
 var smokeOnly = args.Any(argument =>
     string.Equals(argument, "--smoke", StringComparison.OrdinalIgnoreCase));
@@ -535,8 +536,7 @@ static async Task RunStage1SessionAcceptanceAsync(
     Console.WriteLine("[stage1 file context] passed");
 
     using var notepad = await StartVisibleNotepadAsync(selectedFile);
-    NativeMethods.SetForegroundWindow(notepad.MainWindowHandle);
-    await Task.Delay(900);
+    await ActivateExactForegroundWindowAsync(notepad);
     var windowReject = await api.SubmitSessionInputAsync(new SessionInputRequestDto(
         "看看这个窗口是什么",
         "Text",
@@ -551,10 +551,14 @@ static async Task RunStage1SessionAcceptanceAsync(
         session.SessionId,
         windowReject.TurnId,
         granted: false);
-    var rejectedPassed = rejected.Turns.Single(turn => turn.Id == windowReject.TurnId).Phase == "Cancelled";
+    var rejectedTurn = rejected.Turns.Single(turn => turn.Id == windowReject.TurnId);
+    var rejectedPassed = rejectedTurn.Phase == "Cancelled"
+                         && rejectedTurn.WindowHandle == notepad.MainWindowHandle.ToInt64()
+                         && rejectedTurn.WindowTitle?.Contains(
+                             Path.GetFileName(selectedFile),
+                             StringComparison.OrdinalIgnoreCase) == true;
 
-    NativeMethods.SetForegroundWindow(notepad.MainWindowHandle);
-    await Task.Delay(900);
+    await ActivateExactForegroundWindowAsync(notepad);
     var windowApprove = await api.SubmitSessionInputAsync(new SessionInputRequestDto(
         "看看这个窗口是什么",
         "Text",
@@ -572,6 +576,10 @@ static async Task RunStage1SessionAcceptanceAsync(
     var approvedTurn = approved.Turns.Single(turn => turn.Id == windowApprove.TurnId);
     var windowPassed = rejectedPassed
                        && approvedTurn.Phase == "Completed"
+                       && approvedTurn.WindowHandle == notepad.MainWindowHandle.ToInt64()
+                       && approvedTurn.WindowTitle?.Contains(
+                           Path.GetFileName(selectedFile),
+                           StringComparison.OrdinalIgnoreCase) == true
                        && !string.IsNullOrWhiteSpace(approvedTurn.ResultSummary);
     results.Add(new
     {
@@ -692,6 +700,30 @@ static async Task<Process> StartVisibleNotepadAsync(string filePath)
     }
 
     return visible!;
+}
+
+static async Task ActivateExactForegroundWindowAsync(Process process)
+{
+    await WaitAsync(() =>
+    {
+        process.Refresh();
+        if (process.HasExited || process.MainWindowHandle == IntPtr.Zero)
+        {
+            return Task.FromResult(false);
+        }
+
+        _ = VisibleWindowActivation.TryActivate(process.MainWindowHandle, TimeSpan.FromSeconds(1));
+        return Task.FromResult(NativeMethods.GetForegroundWindow() == process.MainWindowHandle);
+    }, TimeSpan.FromSeconds(15));
+
+    await Task.Delay(300);
+    process.Refresh();
+    if (process.HasExited
+        || process.MainWindowHandle == IntPtr.Zero
+        || NativeMethods.GetForegroundWindow() != process.MainWindowHandle)
+    {
+        throw new InvalidOperationException("真实验收未能把指定记事本窗口保持在前台。 ");
+    }
 }
 
 static void TryCloseAcceptanceProcess(int processId)
@@ -912,6 +944,5 @@ static string FindRepositoryRoot()
 internal static class NativeMethods
 {
     [System.Runtime.InteropServices.DllImport("user32.dll")]
-    [return: System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.Bool)]
-    internal static extern bool SetForegroundWindow(IntPtr windowHandle);
+    internal static extern IntPtr GetForegroundWindow();
 }
