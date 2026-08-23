@@ -366,4 +366,90 @@ internal static class SqliteSchema
         CREATE INDEX ix_conversation_turns_status
             ON conversation_turns(conversation_id, status, sequence_number);
         """;
+
+    public const string CreateVersion6 = """
+        CREATE TABLE sessions (
+            id TEXT NOT NULL PRIMARY KEY,
+            conversation_id TEXT NOT NULL UNIQUE,
+            created_by_device_id TEXT NOT NULL,
+            title TEXT NOT NULL,
+            status TEXT NOT NULL,
+            is_current INTEGER NOT NULL DEFAULT 0 CHECK(is_current IN (0, 1)),
+            selected_project_id TEXT NULL,
+            created_at_utc TEXT NOT NULL,
+            updated_at_utc TEXT NOT NULL,
+            last_active_at_utc TEXT NOT NULL,
+            version INTEGER NOT NULL,
+            FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE,
+            FOREIGN KEY (created_by_device_id) REFERENCES devices(id),
+            FOREIGN KEY (selected_project_id) REFERENCES projects(id)
+        );
+
+        CREATE UNIQUE INDEX ux_sessions_current
+            ON sessions(is_current)
+            WHERE is_current = 1;
+        CREATE INDEX ix_sessions_last_active
+            ON sessions(last_active_at_utc DESC);
+
+        CREATE TABLE session_turns (
+            id TEXT NOT NULL PRIMARY KEY,
+            session_id TEXT NOT NULL,
+            sequence_number INTEGER NOT NULL,
+            input_text TEXT NOT NULL,
+            input_modality TEXT NOT NULL,
+            idempotency_key TEXT NOT NULL,
+            work_kind TEXT NOT NULL,
+            phase TEXT NOT NULL,
+            missing_context TEXT NOT NULL,
+            intent_kind TEXT NULL,
+            plan_id TEXT NULL,
+            conversation_turn_id TEXT NULL,
+            task_id TEXT NULL,
+            operation_id TEXT NULL,
+            project_id TEXT NULL,
+            file_path TEXT NULL,
+            window_handle INTEGER NULL,
+            window_title TEXT NULL,
+            window_process_name TEXT NULL,
+            requires_confirmation INTEGER NOT NULL DEFAULT 0 CHECK(requires_confirmation IN (0, 1)),
+            confirmation_granted INTEGER NOT NULL DEFAULT 0 CHECK(confirmation_granted IN (0, 1)),
+            cancellation_requested INTEGER NOT NULL DEFAULT 0 CHECK(cancellation_requested IN (0, 1)),
+            result_summary TEXT NULL,
+            failure_code TEXT NULL,
+            failure_message TEXT NULL,
+            created_at_utc TEXT NOT NULL,
+            updated_at_utc TEXT NOT NULL,
+            completed_at_utc TEXT NULL,
+            version INTEGER NOT NULL,
+            FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE,
+            FOREIGN KEY (conversation_turn_id) REFERENCES conversation_turns(id),
+            FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE SET NULL,
+            FOREIGN KEY (project_id) REFERENCES projects(id),
+            UNIQUE (session_id, sequence_number),
+            UNIQUE (session_id, idempotency_key)
+        );
+
+        CREATE INDEX ix_session_turns_phase
+            ON session_turns(session_id, phase, sequence_number);
+        CREATE INDEX ix_session_turns_task
+            ON session_turns(task_id);
+
+        INSERT INTO sessions(
+            id, conversation_id, created_by_device_id, title, status, is_current,
+            selected_project_id, created_at_utc, updated_at_utc, last_active_at_utc, version)
+        SELECT
+            id, id, created_by_device_id, title, 'Active',
+            CASE WHEN id = (
+                SELECT id FROM conversations ORDER BY updated_at_utc DESC, created_at_utc DESC LIMIT 1
+            ) THEN 1 ELSE 0 END,
+            NULL, created_at_utc, updated_at_utc,
+            COALESCE(last_message_at_utc, updated_at_utc), 0
+        FROM conversations;
+        """;
+
+    public const string CreateVersion7 = """
+        ALTER TABLE session_turns ADD COLUMN expected_intent_kind TEXT NULL;
+        ALTER TABLE session_turns ADD COLUMN expected_target TEXT NULL;
+        ALTER TABLE session_turns ADD COLUMN plan_target TEXT NULL;
+        """;
 }

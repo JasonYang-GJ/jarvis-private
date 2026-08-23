@@ -39,7 +39,7 @@
                         Click="NavigationButton_Click" CommandParameter="Settings" />
             </StackPanel>
             <StackPanel Grid.Row="2" Margin="25,0,18,18" VerticalAlignment="Bottom">
-                <TextBlock Text="YUANSHU V0.2" Foreground="#71858E" FontFamily="Consolas" FontSize="11" />
+                <TextBlock Text="YUANSHU V2 · 阶段 1" Foreground="#71858E" FontFamily="Consolas" FontSize="11" />
                 <TextBlock Text="本机执行 · 证据优先" Foreground="#8FA1A9" FontSize="11" Margin="0,4,0,0" />
             </StackPanel>
         </Grid>
@@ -132,8 +132,38 @@
                                     </StackPanel>
                                 </Border>
 
-                                <Border x:Name="AssistantPlanBorder" Grid.Row="2" Visibility="Collapsed"
-                                        Margin="0,16,0,0" Padding="16" CornerRadius="6"
+                                <Border x:Name="SessionHeaderBorder" Grid.Row="2" Margin="0,16,0,0" Padding="16"
+                                        Background="#F8FCFB" BorderBrush="#C9DED9" BorderThickness="1" CornerRadius="6"
+                                        AutomationProperties.AutomationId="SessionHeader">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="8" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel>
+                                            <TextBlock x:Name="SessionTitleText" Text="还没有开始话题"
+                                                       FontSize="16" FontWeight="SemiBold"
+                                                       AutomationProperties.AutomationId="SessionTitle" />
+                                            <TextBlock x:Name="SessionStatusText" Text="直接说出你想聊或想做的事情"
+                                                       Foreground="#52656D" Margin="0,4,0,0"
+                                                       AutomationProperties.AutomationId="SessionStatus" />
+                                            <TextBlock x:Name="SessionProjectText" Text="未选择项目"
+                                                       Foreground="{StaticResource MutedBrush}" FontSize="11" Margin="0,4,0,0" />
+                                        </StackPanel>
+                                        <Button x:Name="StopSessionButton" Grid.Column="1" Content="停止当前请求"
+                                                Style="{StaticResource DangerButton}" Visibility="Collapsed"
+                                                Click="StopSessionButton_Click"
+                                                AutomationProperties.AutomationId="StopSession" />
+                                        <Button x:Name="NewTopicButton" Grid.Column="3" Content="新话题"
+                                                Style="{StaticResource SecondaryButton}" Click="NewTopicButton_Click"
+                                                AutomationProperties.AutomationId="NewTopic" />
+                                    </Grid>
+                                </Border>
+
+                                <ContentControl x:Name="AssistantPlanBorder" Grid.Row="3" Visibility="Collapsed"
+                                        Margin="0,16,0,0" Padding="16"
                                         Background="White" BorderBrush="#8FC5B8" BorderThickness="1">
                                     <Grid>
                                         <Grid.ColumnDefinitions>
@@ -143,20 +173,35 @@
                                             <ColumnDefinition Width="Auto" />
                                         </Grid.ColumnDefinitions>
                                         <StackPanel>
-                                            <TextBlock Text="元枢理解为" Style="{StaticResource Eyebrow}" />
+                                            <TextBlock Text="继续刚才的请求" Style="{StaticResource Eyebrow}"
+                                                       AutomationProperties.AutomationId="SessionContextCard" />
                                             <TextBlock x:Name="AssistantPlanSummaryText" FontSize="16" FontWeight="SemiBold"
                                                        Margin="0,5,0,0" TextWrapping="Wrap" />
                                             <TextBlock x:Name="AssistantPlanDetailText" Foreground="{StaticResource MutedBrush}"
                                                        Margin="0,5,0,0" TextWrapping="Wrap" />
+                                            <StackPanel x:Name="SessionProjectPickerPanel" Visibility="Collapsed"
+                                                        Orientation="Horizontal" Margin="0,10,0,0">
+                                                <ComboBox x:Name="SessionProjectComboBox" MinWidth="260"
+                                                          DisplayMemberPath="Name"
+                                                          AutomationProperties.AutomationId="SessionProjectPicker" />
+                                            </StackPanel>
+                                            <StackPanel x:Name="SessionFilePickerPanel" Visibility="Collapsed"
+                                                        Margin="0,8,0,0">
+                                                <TextBlock Text="文件只用于这一次请求；选择后仍会让你确认。"
+                                                           Foreground="{StaticResource MutedBrush}" FontSize="11" />
+                                            </StackPanel>
                                         </StackPanel>
-                                        <Button Grid.Column="1" Content="取消" Style="{StaticResource SecondaryButton}"
-                                                Click="CancelAssistantPlanButton_Click" />
+                                        <Button Grid.Column="1" x:Name="CancelSessionContextButton" Content="取消这条请求"
+                                                Style="{StaticResource SecondaryButton}"
+                                                Click="CancelAssistantPlanButton_Click"
+                                                AutomationProperties.AutomationId="CancelSessionContext" />
                                         <Button x:Name="ConfirmAssistantPlanButton" Grid.Column="3" Content="确认这一次"
-                                                Style="{StaticResource PrimaryButton}" Click="ConfirmAssistantPlanButton_Click" />
+                                                Style="{StaticResource PrimaryButton}" Click="ConfirmAssistantPlanButton_Click"
+                                                AutomationProperties.AutomationId="ContinueSessionContext" />
                                     </Grid>
-                                </Border>
+                                </ContentControl>
 
-                                <Border x:Name="WindowObservationBorder" Grid.Row="3" Visibility="Collapsed"
+                                <Border x:Name="WindowObservationBorder" Grid.Row="4" Visibility="Collapsed"
                                         Margin="0,14,0,0" Padding="14" CornerRadius="6"
                                         Background="#FFF6E8" BorderBrush="#E8C47D" BorderThickness="1">
                                     <Grid>
@@ -179,7 +224,7 @@
                                     </Grid>
                                 </Border>
 
-                                <Border x:Name="AssistantResultBorder" Grid.Row="4" Visibility="Collapsed"
+                                <Border x:Name="AssistantResultBorder" Grid.Row="5" Visibility="Collapsed"
                                         Margin="0,14,0,0" Padding="16" CornerRadius="6"
                                         Background="#F7FAFB" BorderBrush="{StaticResource LineBrush}" BorderThickness="1">
                                     <StackPanel>
@@ -191,6 +236,40 @@
                                                 Padding="14,6" Click="ReadAssistantResultButton_Click" />
                                     </StackPanel>
                                 </Border>
+                            </Grid>
+                        </Border>
+
+                        <Border x:Name="SessionMessagesBorder" Style="{StaticResource SurfaceBorder}"
+                                Margin="0,14,0,0" Padding="18" Visibility="Collapsed"
+                                AutomationProperties.AutomationId="SessionMessages">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+                                <TextBlock Text="当前话题" FontSize="16" FontWeight="SemiBold" />
+                                <ListBox x:Name="SessionMessagesList" Grid.Row="1" Margin="0,10,0,0"
+                                         MaxHeight="360" BorderThickness="0" Background="Transparent"
+                                         HorizontalContentAlignment="Stretch"
+                                         AutomationProperties.AutomationId="SessionMessagesList">
+                                    <ListBox.ItemTemplate>
+                                        <DataTemplate>
+                                            <Border Background="{Binding Background}" BorderBrush="{Binding BorderBrush}"
+                                                    BorderThickness="1" CornerRadius="6" Padding="14,11"
+                                                    Margin="{Binding Margin}" MaxWidth="880"
+                                                    HorizontalAlignment="{Binding Alignment}">
+                                                <StackPanel>
+                                                    <TextBlock Text="{Binding RoleText}" Foreground="{StaticResource MutedBrush}"
+                                                               FontSize="11" FontWeight="SemiBold" />
+                                                    <TextBlock Text="{Binding Content}" TextWrapping="Wrap" Margin="0,5,0,0"
+                                                               FontSize="14" LineHeight="22" />
+                                                    <TextBlock Text="{Binding TimeText}" Foreground="{StaticResource MutedBrush}"
+                                                               FontSize="10" Margin="0,6,0,0" HorizontalAlignment="Right" />
+                                                </StackPanel>
+                                            </Border>
+                                        </DataTemplate>
+                                    </ListBox.ItemTemplate>
+                                </ListBox>
                             </Grid>
                         </Border>
 
@@ -661,7 +740,7 @@
                         <Border Style="{StaticResource SurfaceBorder}" Padding="20" Margin="0,12,0,0">
                             <StackPanel>
                                 <TextBlock Text="关于" FontSize="16" FontWeight="SemiBold" />
-                                <TextBlock Text="元枢 V0.2 · 个人电脑 AI 中枢" Margin="0,8,0,0" />
+                                <TextBlock Text="元枢 · 个人电脑 AI 中枢" Margin="0,8,0,0" />
                                 <TextBlock x:Name="ProductVersionText" Foreground="{StaticResource MutedBrush}" Margin="0,4,0,0" />
                             </StackPanel>
                         </Border>

@@ -10,6 +10,7 @@ public sealed class IntentPlannerTests
     [Theory]
     [InlineData("打开记事本", UniversalIntentKind.OpenApplication, "记事本")]
     [InlineData("请启动计算器", UniversalIntentKind.OpenApplication, "计算器")]
+    [InlineData("启动“GitHub Desktop”", UniversalIntentKind.OpenApplication, "GitHub Desktop")]
     [InlineData("打开百度", UniversalIntentKind.OpenWebsite, "https://www.baidu.com/")]
     [InlineData("访问 https://example.com/", UniversalIntentKind.OpenWebsite, "https://example.com/")]
     public void PlansExplicitLowRiskAction(string text, UniversalIntentKind kind, string target)
@@ -102,6 +103,28 @@ public sealed class IntentPlannerTests
 
         Assert.Equal(UniversalIntentKind.CodingTask, result.Kind);
         Assert.Equal(IntentPlanReadiness.NeedsContext, result.Readiness);
+    }
+
+    [Fact]
+    public void ExplicitProgrammingSurfaceKeepsAnAmbiguousInstructionInTheCodingFlow()
+    {
+        var result = _planner.Plan(
+            "把刚才那个问题处理好",
+            new IntentPlanningContext(ExplicitUserIntent: UniversalIntentKind.CodingTask));
+
+        Assert.Equal(UniversalIntentKind.CodingTask, result.Kind);
+        Assert.Equal(IntentPlanReadiness.NeedsContext, result.Readiness);
+        Assert.Equal("把刚才那个问题处理好", result.OriginalText);
+    }
+
+    [Fact]
+    public void FileRequestWaitsForAUserSelectedFileInsteadOfBecomingChat()
+    {
+        var result = _planner.Plan("帮我打开这个文件", new IntentPlanningContext());
+
+        Assert.Equal(UniversalIntentKind.OpenFile, result.Kind);
+        Assert.Equal(IntentPlanReadiness.NeedsContext, result.Readiness);
+        Assert.Equal("文件", result.MissingContext);
     }
 
     [Fact]

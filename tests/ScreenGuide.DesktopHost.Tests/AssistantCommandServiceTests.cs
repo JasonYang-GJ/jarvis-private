@@ -33,6 +33,7 @@ public sealed class AssistantCommandServiceTests
 
         Assert.Equal("Ready", plan.Readiness);
         Assert.Equal("OpenApplication", plan.IntentKind);
+        Assert.Equal("notepad", plan.CanonicalTarget);
         Assert.True(plan.RequiresConfirmation);
         Assert.Equal("desktop_action_not_authorized", rejected.Error.Code);
         Assert.Equal("Completed", completed.Status);
@@ -82,6 +83,7 @@ public sealed class AssistantCommandServiceTests
         await host.StopAsync();
 
         Assert.Contains("Google Chrome", plan.UserSummary, StringComparison.Ordinal);
+        Assert.Equal("https://www.douyin.com/", plan.CanonicalTarget);
         Assert.Equal("ExecutionVerified", result.VerificationStatus);
         Assert.Equal("chrome.exe", launcher.VisibleBrowserTarget);
         Assert.Equal("https://www.douyin.com/", launcher.VisibleWebsite?.AbsoluteUri);

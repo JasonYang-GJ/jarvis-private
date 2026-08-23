@@ -1,6 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using System.IO.Pipes;
 using System.Security.Principal;
+using ScreenGuide.Core.Tasking;
 using ScreenGuide.DesktopHost.Runtime;
 using ScreenGuide.DesktopProtocol;
 
@@ -24,7 +25,7 @@ public sealed class DesktopIpcIntegrationTests
         var projects = await client.ListProjectsAsync();
         Assert.True(status.HostOnline);
         Assert.Equal(DesktopProtocolVersion.Current, status.ProtocolVersion);
-        Assert.Equal(5, status.DatabaseSchemaVersion);
+        Assert.Equal(V02Contract.SchemaVersion, status.DatabaseSchemaVersion);
         Assert.Contains(projects, item => item.Id == project.Id);
 
         var created = await client.CreateTaskAsync(new CreateTaskRequestDto(

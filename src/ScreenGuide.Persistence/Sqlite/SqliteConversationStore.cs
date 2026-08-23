@@ -410,6 +410,7 @@ public sealed class SqliteConversationStore : IConversationStore
         };
         await using var connection = await OpenAsync(cancellationToken).ConfigureAwait(false);
         await using var transaction = connection.BeginTransaction();
+        var turnChanged = false;
         await using (var command = connection.CreateCommand())
         {
             command.Transaction = transaction;
@@ -427,11 +428,12 @@ public sealed class SqliteConversationStore : IConversationStore
             command.Parameters.AddWithValue("$failureMessage", failureMessage);
             Add(command, "$turnId", turnId);
             Add(command, "$conversationId", conversationId);
-            await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            turnChanged = await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) == 1;
         }
 
-        await using (var command = connection.CreateCommand())
+        if (turnChanged)
         {
+            await using var command = connection.CreateCommand();
             command.Transaction = transaction;
             command.CommandText = """
                 UPDATE conversations

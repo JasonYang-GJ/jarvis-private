@@ -6,6 +6,7 @@ using ScreenGuide.Agent.Codex;
 using ScreenGuide.AI.Core;
 using ScreenGuide.Core.Conversations;
 using ScreenGuide.Core.Security;
+using ScreenGuide.Core.Sessions;
 using ScreenGuide.Core.Tasking;
 using ScreenGuide.DesktopHost.Runtime;
 using ScreenGuide.Evidence;
@@ -42,6 +43,11 @@ public static class DesktopHostFactory
         {
             var hostOptions = services.GetRequiredService<DesktopHostOptions>();
             return new SqliteConversationStore(hostOptions.DatabasePath);
+        });
+        builder.Services.AddSingleton<ISessionStore>(services =>
+        {
+            var hostOptions = services.GetRequiredService<DesktopHostOptions>();
+            return new SqliteSessionStore(hostOptions.DatabasePath);
         });
         builder.Services.AddSingleton<TaskCancellationRegistry>();
         builder.Services.AddSingleton<TaskCancellationService>();
@@ -98,6 +104,7 @@ public static class DesktopHostFactory
         builder.Services.AddSingleton<AgentTaskExecutionService>();
         builder.Services.AddSingleton<LocalTaskEntryService>();
         builder.Services.AddSingleton<ConversationService>();
+        builder.Services.AddSingleton<SessionCoordinator>();
         builder.Services.AddSingleton<DesktopActionEntryService>();
         builder.Services.AddSingleton<AssistantCommandService>();
         builder.Services.AddSingleton<ProjectInspector>();

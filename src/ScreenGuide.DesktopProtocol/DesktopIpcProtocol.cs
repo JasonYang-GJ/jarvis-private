@@ -8,7 +8,7 @@ namespace ScreenGuide.DesktopProtocol;
 
 public static class DesktopProtocolVersion
 {
-    public const int Current = 6;
+    public const int Current = 7;
 
     public const int MinimumSupported = 1;
 }
@@ -37,6 +37,17 @@ public static class DesktopApiMethods
     public const string CreateConversation = "conversations.create";
     public const string SendConversationMessage = "conversations.send";
     public const string CancelConversationTurn = "conversations.cancel";
+    public const string GetCurrentSession = "sessions.current";
+    public const string StartNewSession = "sessions.new";
+    public const string SetCurrentSession = "sessions.select";
+    public const string SubmitSessionInput = "sessions.submit";
+    public const string ProvideSessionProject = "sessions.context.project";
+    public const string ProvideSessionFile = "sessions.context.file";
+    public const string RespondSessionWindowConsent = "sessions.context.window-consent";
+    public const string RetrySessionTurn = "sessions.context.retry";
+    public const string ConfirmSessionTurn = "sessions.turn.confirm";
+    public const string CancelSessionTurn = "sessions.turn.cancel";
+    public const string WaitForSessionUpdate = "sessions.wait";
     public const string Shutdown = "system.shutdown";
 }
 

@@ -68,7 +68,8 @@ public sealed record AssistantIntentPlanDto(
     string? ConfirmationText,
     string? MissingContext,
     DateTimeOffset? ExpiresAtUtc,
-    ForegroundApplicationDto? ForegroundApplication = null);
+    ForegroundApplicationDto? ForegroundApplication = null,
+    string? CanonicalTarget = null);
 
 public sealed record ExecuteAssistantCommandRequestDto(
     Guid PlanId,
@@ -141,6 +142,92 @@ public sealed record ConversationDetailsDto(
     ConversationSummaryDto Summary,
     IReadOnlyList<ConversationMessageDto> Messages,
     IReadOnlyList<ConversationTurnDto> Turns);
+
+public sealed record SessionIdRequestDto(Guid SessionId);
+
+public sealed record StartNewSessionRequestDto(string? Title = null);
+
+public sealed record SessionInputRequestDto(
+    string Text,
+    string InputModality = "Text",
+    string? IdempotencyKey = null,
+    Guid? SessionId = null,
+    string? ExpectedIntentKind = null,
+    string? ExpectedTarget = null);
+
+public sealed record ProvideSessionProjectRequestDto(
+    Guid SessionId,
+    Guid TurnId,
+    Guid ProjectId);
+
+public sealed record ProvideSessionFileRequestDto(
+    Guid SessionId,
+    Guid TurnId,
+    string FilePath);
+
+public sealed record SessionWindowConsentRequestDto(
+    Guid SessionId,
+    Guid TurnId,
+    bool Granted);
+
+public sealed record SessionTurnConfirmationRequestDto(
+    Guid SessionId,
+    Guid TurnId,
+    bool Confirmed);
+
+public sealed record CancelSessionTurnRequestDto(
+    Guid SessionId,
+    Guid TurnId);
+
+public sealed record WaitForSessionUpdateRequestDto(
+    long KnownChangeVersion,
+    int WaitMilliseconds = 20_000);
+
+public sealed record SessionTurnCommandResultDto(
+    Guid SessionId,
+    Guid TurnId,
+    bool WasDuplicate);
+
+public sealed record UnifiedSessionTurnDto(
+    Guid Id,
+    int SequenceNumber,
+    string InputText,
+    string InputModality,
+    string WorkKind,
+    string Phase,
+    string MissingContext,
+    string? IntentKind,
+    Guid? ConversationTurnId,
+    Guid? TaskId,
+    Guid? ProjectId,
+    string? FilePath,
+    long? WindowHandle,
+    string? WindowTitle,
+    bool RequiresConfirmation,
+    bool CancellationRequested,
+    string? ResultSummary,
+    string? FailureMessage,
+    DateTimeOffset CreatedAtUtc,
+    DateTimeOffset UpdatedAtUtc,
+    DateTimeOffset? CompletedAtUtc,
+    string? ExpectedIntentKind = null,
+    string? ExpectedTarget = null,
+    string? PlanTarget = null);
+
+public sealed record SessionSnapshotDto(
+    long ChangeVersion,
+    string CoordinatorInstanceId,
+    DateTimeOffset CoordinatorStartedAtUtc,
+    Guid SessionId,
+    Guid ConversationId,
+    string Title,
+    string Status,
+    Guid? SelectedProjectId,
+    string? SelectedProjectName,
+    UnifiedSessionTurnDto? ForegroundTurn,
+    IReadOnlyList<UnifiedSessionTurnDto> ActiveTurns,
+    IReadOnlyList<UnifiedSessionTurnDto> Turns,
+    IReadOnlyList<ConversationMessageDto> Messages);
 
 public sealed record CommandResultDto(Guid TaskId, bool WasDuplicate);
 

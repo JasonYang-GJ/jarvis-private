@@ -100,6 +100,18 @@ public sealed class SqliteTaskStore : ILocalTaskStore
                 await ApplyMigrationAsync(connection, 5, SqliteSchema.CreateVersion5, cancellationToken)
                     .ConfigureAwait(false);
             }
+
+            if (storedVersion < 6)
+            {
+                await ApplyMigrationAsync(connection, 6, SqliteSchema.CreateVersion6, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+
+            if (storedVersion < 7)
+            {
+                await ApplyMigrationAsync(connection, 7, SqliteSchema.CreateVersion7, cancellationToken)
+                    .ConfigureAwait(false);
+            }
         }
         catch (Exception exception) when (backupPath is not null)
         {

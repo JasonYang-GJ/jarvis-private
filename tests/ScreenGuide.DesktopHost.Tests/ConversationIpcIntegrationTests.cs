@@ -2,6 +2,7 @@ using Microsoft.Extensions.DependencyInjection;
 using ScreenGuide.Core.Conversations;
 using ScreenGuide.DesktopHost.Runtime;
 using ScreenGuide.DesktopProtocol;
+using ScreenGuide.Persistence.Sqlite;
 
 namespace ScreenGuide.DesktopHost.Tests;
 
@@ -91,6 +92,75 @@ public sealed class ConversationIpcIntegrationTests
         Assert.Equal(1, provider.CancelCount);
     }
 
+    [Fact]
+    public async Task CancellationReachesTheProviderAndALateReplyCannotBeCommitted()
+    {
+        await using var environment = DesktopHostTestEnvironment.Create();
+        var provider = new CancellationAwareLateReplyProvider();
+        using var host = environment.BuildHost(services =>
+            services.AddSingleton<IConversationProvider>(provider));
+        await host.StartAsync();
+        IDesktopApiClient client = new DesktopApiClient(environment.Options.PipeName);
+        var conversation = await client.CreateConversationAsync();
+        var sent = await client.SendConversationMessageAsync(conversation.Id, "旧问题", "late-reply-cancel");
+        await provider.Started.Task.WaitAsync(TimeSpan.FromSeconds(3));
+
+        var cancellation = client.CancelConversationTurnAsync(conversation.Id);
+        await provider.CancellationObserved.Task.WaitAsync(TimeSpan.FromSeconds(3));
+        provider.AllowLateReply.TrySetResult();
+        await cancellation;
+        await host.Services.GetRequiredService<ConversationService>().WaitForTurnAsync(sent.TurnId);
+        var details = await client.GetConversationAsync(conversation.Id);
+        await host.StopAsync();
+
+        Assert.Equal("Ready", details?.Summary.Status);
+        Assert.Equal(["旧问题"], details!.Messages.Select(message => message.Content).ToArray());
+        Assert.Equal("Cancelled", Assert.Single(details.Turns).Status);
+        Assert.Equal(1, provider.CancelCount);
+    }
+
+    [Fact]
+    public async Task CancellationWinsBeforeAProviderReplyCanCommitAfterItsTokenCheck()
+    {
+        await using var environment = DesktopHostTestEnvironment.Create();
+        await using var barrierStore = new CompletionBarrierConversationStore(
+            new SqliteConversationStore(environment.Options.DatabasePath));
+        var provider = new RecordingConversationProvider();
+        using var host = environment.BuildHost(services =>
+        {
+            services.AddSingleton<IConversationStore>(barrierStore);
+            services.AddSingleton<IConversationProvider>(provider);
+        });
+        await host.StartAsync();
+        IDesktopApiClient client = new DesktopApiClient(environment.Options.PipeName);
+        var conversation = await client.CreateConversationAsync("完成与取消竞争");
+        var sent = await client.SendConversationMessageAsync(
+            conversation.Id,
+            "旧回答不能在停止后落库",
+            "cancel-during-completion");
+        await barrierStore.CompletionEntered.Task.WaitAsync(TimeSpan.FromSeconds(3));
+
+        var cancellation = client.CancelConversationTurnAsync(conversation.Id);
+        try
+        {
+            await barrierStore.CancellationPersisted.Task.WaitAsync(TimeSpan.FromSeconds(3));
+        }
+        finally
+        {
+            barrierStore.AllowCompletion.TrySetResult();
+        }
+
+        await cancellation;
+        await host.Services.GetRequiredService<ConversationService>().WaitForTurnAsync(sent.TurnId);
+        var details = await client.GetConversationAsync(conversation.Id);
+        await host.StopAsync();
+
+        Assert.Equal("Ready", details?.Summary.Status);
+        Assert.Equal(["旧回答不能在停止后落库"], details!.Messages.Select(message => message.Content).ToArray());
+        Assert.Equal("Cancelled", Assert.Single(details.Turns).Status);
+        Assert.Equal(1, provider.CancelCount);
+    }
+
     private sealed class RecordingConversationProvider(bool blockUntilCancelled = false) : IConversationProvider
     {
         private readonly TaskCompletionSource _cancelled = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -147,6 +217,178 @@ public sealed class ConversationIpcIntegrationTests
         {
             _cancelled.TrySetResult();
             return ValueTask.CompletedTask;
+        }
+    }
+
+    private sealed class CancellationAwareLateReplyProvider : IConversationProvider
+    {
+        public string ProviderId => "cancellation-aware-test";
+
+        public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource CancellationObserved { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource AllowLateReply { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public int CancelCount { get; private set; }
+
+        public async Task<ConversationProviderResult> SendAsync(
+            ConversationProviderRequest request,
+            Func<string, int, Task>? started = null,
+            CancellationToken cancellationToken = default)
+        {
+            if (started is not null)
+            {
+                await started("thread-late-reply", 5252);
+            }
+
+            using var registration = cancellationToken.Register(() => CancellationObserved.TrySetResult());
+            Started.TrySetResult();
+            await AllowLateReply.Task;
+            return new ConversationProviderResult(
+                ConversationProviderOutcome.Succeeded,
+                "thread-late-reply",
+                "不应该出现的旧回答",
+                "late-message",
+                5252);
+        }
+
+        public Task CancelAsync(Guid conversationId, CancellationToken cancellationToken = default)
+        {
+            CancelCount++;
+            return Task.CompletedTask;
+        }
+
+        public ValueTask DisposeAsync()
+        {
+            AllowLateReply.TrySetResult();
+            return ValueTask.CompletedTask;
+        }
+    }
+
+    private sealed class CompletionBarrierConversationStore(IConversationStore inner)
+        : IConversationStore, IAsyncDisposable
+    {
+        public TaskCompletionSource CompletionEntered { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource AllowCompletion { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource CancellationPersisted { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public Task InitializeAsync(CancellationToken cancellationToken = default) =>
+            inner.InitializeAsync(cancellationToken);
+
+        public Task CreateConversationAsync(
+            ConversationRecord conversation,
+            CancellationToken cancellationToken = default) =>
+            inner.CreateConversationAsync(conversation, cancellationToken);
+
+        public Task<ConversationRecord?> GetConversationAsync(
+            Guid conversationId,
+            CancellationToken cancellationToken = default) =>
+            inner.GetConversationAsync(conversationId, cancellationToken);
+
+        public Task<IReadOnlyList<ConversationRecord>> GetConversationsAsync(
+            CancellationToken cancellationToken = default) =>
+            inner.GetConversationsAsync(cancellationToken);
+
+        public Task<IReadOnlyList<ConversationMessageRecord>> GetMessagesAsync(
+            Guid conversationId,
+            CancellationToken cancellationToken = default) =>
+            inner.GetMessagesAsync(conversationId, cancellationToken);
+
+        public Task<IReadOnlyList<ConversationTurnRecord>> GetTurnsAsync(
+            Guid conversationId,
+            CancellationToken cancellationToken = default) =>
+            inner.GetTurnsAsync(conversationId, cancellationToken);
+
+        public Task<ConversationTurnRegistration> StartTurnAsync(
+            Guid conversationId,
+            Guid turnId,
+            string message,
+            string idempotencyKey,
+            DateTimeOffset startedAtUtc,
+            CancellationToken cancellationToken = default) =>
+            inner.StartTurnAsync(
+                conversationId,
+                turnId,
+                message,
+                idempotencyKey,
+                startedAtUtc,
+                cancellationToken);
+
+        public Task RecordProviderStartedAsync(
+            Guid conversationId,
+            Guid turnId,
+            string externalThreadId,
+            int processId,
+            DateTimeOffset startedAtUtc,
+            CancellationToken cancellationToken = default) =>
+            inner.RecordProviderStartedAsync(
+                conversationId,
+                turnId,
+                externalThreadId,
+                processId,
+                startedAtUtc,
+                cancellationToken);
+
+        public async Task CompleteTurnAsync(
+            Guid conversationId,
+            Guid turnId,
+            string reply,
+            string? providerMessageId,
+            DateTimeOffset completedAtUtc,
+            CancellationToken cancellationToken = default)
+        {
+            CompletionEntered.TrySetResult();
+            await AllowCompletion.Task.WaitAsync(cancellationToken);
+            await inner.CompleteTurnAsync(
+                conversationId,
+                turnId,
+                reply,
+                providerMessageId,
+                completedAtUtc,
+                cancellationToken);
+        }
+
+        public async Task FailTurnAsync(
+            Guid conversationId,
+            Guid turnId,
+            ConversationTurnStatus status,
+            string failureCode,
+            string failureMessage,
+            DateTimeOffset completedAtUtc,
+            CancellationToken cancellationToken = default)
+        {
+            await inner.FailTurnAsync(
+                conversationId,
+                turnId,
+                status,
+                failureCode,
+                failureMessage,
+                completedAtUtc,
+                cancellationToken);
+            if (status == ConversationTurnStatus.Cancelled)
+            {
+                CancellationPersisted.TrySetResult();
+            }
+        }
+
+        public Task<ConversationRecoveryResult> RecoverInterruptedAsync(
+            DateTimeOffset recoveredAtUtc,
+            CancellationToken cancellationToken = default) =>
+            inner.RecoverInterruptedAsync(recoveredAtUtc, cancellationToken);
+
+        public async ValueTask DisposeAsync()
+        {
+            AllowCompletion.TrySetResult();
+            if (inner is IAsyncDisposable disposable)
+            {
+                await disposable.DisposeAsync();
+            }
         }
     }
 }

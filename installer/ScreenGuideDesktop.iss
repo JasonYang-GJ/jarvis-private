@@ -1,5 +1,5 @@
 #define MyAppName "元枢"
-#define MyAppVersion "0.2.1"
+#define MyAppVersion "0.3.0"
 #define MyAppPublisher "元枢"
 #define MyAppExeName "ScreenGuide.DesktopClient.exe"
 
@@ -14,7 +14,7 @@ DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
 OutputDir=..\artifacts\release
-OutputBaseFilename=元枢-V0.2.1-安装包
+OutputBaseFilename=元枢-V0.3.0-安装包
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern

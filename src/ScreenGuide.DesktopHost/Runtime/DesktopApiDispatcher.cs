@@ -3,6 +3,7 @@ using System.Text.Json;
 using Microsoft.Extensions.Hosting;
 using ScreenGuide.Agent.Codex;
 using ScreenGuide.Core.Conversations;
+using ScreenGuide.Core.Sessions;
 using ScreenGuide.DesktopHost.Configuration;
 using ScreenGuide.DesktopProtocol;
 
@@ -17,6 +18,7 @@ public sealed class DesktopApiDispatcher(
     DesktopActionEntryService desktopActions,
     AssistantCommandService assistantCommands,
     ConversationService conversations,
+    SessionCoordinator sessions,
     IHostApplicationLifetime applicationLifetime)
 {
     public async Task<DesktopApiResponse> DispatchAsync(
@@ -116,6 +118,57 @@ public sealed class DesktopApiDispatcher(
                 DesktopApiMethods.CancelConversationTurn =>
                     DesktopProtocolJson.ToElement(await CancelConversationTurnAsync(
                         Deserialize<CancelConversationTurnRequestDto>(request),
+                        cancellationToken).ConfigureAwait(false)),
+                DesktopApiMethods.GetCurrentSession =>
+                    DesktopProtocolJson.ToElement(MapSession(
+                        await sessions.GetCurrentAsync(cancellationToken).ConfigureAwait(false))),
+                DesktopApiMethods.StartNewSession =>
+                    DesktopProtocolJson.ToElement(MapSession(
+                        await sessions.StartNewAsync(
+                            Deserialize<StartNewSessionRequestDto>(request).Title,
+                            cancellationToken).ConfigureAwait(false))!),
+                DesktopApiMethods.SetCurrentSession =>
+                    DesktopProtocolJson.ToElement(MapSession(
+                        await sessions.SetCurrentAsync(
+                            Deserialize<SessionIdRequestDto>(request).SessionId,
+                            cancellationToken).ConfigureAwait(false))!),
+                DesktopApiMethods.SubmitSessionInput =>
+                    DesktopProtocolJson.ToElement(await SubmitSessionInputAsync(
+                        Deserialize<SessionInputRequestDto>(request),
+                        cancellationToken).ConfigureAwait(false)),
+                DesktopApiMethods.ProvideSessionProject =>
+                    DesktopProtocolJson.ToElement(MapSession(
+                        await ProvideSessionProjectAsync(
+                            Deserialize<ProvideSessionProjectRequestDto>(request),
+                            cancellationToken).ConfigureAwait(false))!),
+                DesktopApiMethods.ProvideSessionFile =>
+                    DesktopProtocolJson.ToElement(MapSession(
+                        await ProvideSessionFileAsync(
+                            Deserialize<ProvideSessionFileRequestDto>(request),
+                            cancellationToken).ConfigureAwait(false))!),
+                DesktopApiMethods.RespondSessionWindowConsent =>
+                    DesktopProtocolJson.ToElement(MapSession(
+                        await RespondSessionWindowConsentAsync(
+                            Deserialize<SessionWindowConsentRequestDto>(request),
+                            cancellationToken).ConfigureAwait(false))!),
+                DesktopApiMethods.RetrySessionTurn =>
+                    DesktopProtocolJson.ToElement(MapSession(
+                        await RetrySessionTurnAsync(
+                            Deserialize<CancelSessionTurnRequestDto>(request),
+                            cancellationToken).ConfigureAwait(false))!),
+                DesktopApiMethods.ConfirmSessionTurn =>
+                    DesktopProtocolJson.ToElement(MapSession(
+                        await ConfirmSessionTurnAsync(
+                            Deserialize<SessionTurnConfirmationRequestDto>(request),
+                            cancellationToken).ConfigureAwait(false))!),
+                DesktopApiMethods.CancelSessionTurn =>
+                    DesktopProtocolJson.ToElement(MapSession(
+                        await CancelSessionTurnAsync(
+                            Deserialize<CancelSessionTurnRequestDto>(request),
+                            cancellationToken).ConfigureAwait(false))!),
+                DesktopApiMethods.WaitForSessionUpdate =>
+                    DesktopProtocolJson.ToElement(await WaitForSessionUpdateAsync(
+                        Deserialize<WaitForSessionUpdateRequestDto>(request),
                         cancellationToken).ConfigureAwait(false)),
                 DesktopApiMethods.Shutdown => Shutdown(),
                 _ => throw new NotSupportedException("当前 Desktop Host 不支持这个操作。")
@@ -397,6 +450,152 @@ public sealed class DesktopApiDispatcher(
             .ConfigureAwait(false);
         return true;
     }
+
+    private async Task<SessionTurnCommandResultDto> SubmitSessionInputAsync(
+        SessionInputRequestDto request,
+        CancellationToken cancellationToken)
+    {
+        var result = await sessions.SubmitAsync(
+                request.SessionId,
+                request.Text,
+                request.InputModality,
+                request.IdempotencyKey,
+                cancellationToken,
+                request.ExpectedIntentKind,
+                request.ExpectedTarget)
+            .ConfigureAwait(false);
+        return new SessionTurnCommandResultDto(result.SessionId, result.TurnId, result.WasDuplicate);
+    }
+
+    private Task<LocalSessionSnapshot> ProvideSessionProjectAsync(
+        ProvideSessionProjectRequestDto request,
+        CancellationToken cancellationToken) =>
+        sessions.ProvideProjectAsync(
+            request.SessionId,
+            request.TurnId,
+            request.ProjectId,
+            cancellationToken);
+
+    private Task<LocalSessionSnapshot> ProvideSessionFileAsync(
+        ProvideSessionFileRequestDto request,
+        CancellationToken cancellationToken) =>
+        sessions.ProvideFileAsync(
+            request.SessionId,
+            request.TurnId,
+            request.FilePath,
+            cancellationToken);
+
+    private Task<LocalSessionSnapshot> RespondSessionWindowConsentAsync(
+        SessionWindowConsentRequestDto request,
+        CancellationToken cancellationToken) =>
+        sessions.RespondWindowConsentAsync(
+            request.SessionId,
+            request.TurnId,
+            request.Granted,
+            cancellationToken);
+
+    private Task<LocalSessionSnapshot> RetrySessionTurnAsync(
+        CancelSessionTurnRequestDto request,
+        CancellationToken cancellationToken) =>
+        sessions.RetryTurnAsync(
+            request.SessionId,
+            request.TurnId,
+            cancellationToken);
+
+    private Task<LocalSessionSnapshot> ConfirmSessionTurnAsync(
+        SessionTurnConfirmationRequestDto request,
+        CancellationToken cancellationToken) =>
+        sessions.ConfirmTurnAsync(
+            request.SessionId,
+            request.TurnId,
+            request.Confirmed,
+            cancellationToken);
+
+    private Task<LocalSessionSnapshot> CancelSessionTurnAsync(
+        CancelSessionTurnRequestDto request,
+        CancellationToken cancellationToken) =>
+        sessions.CancelTurnAsync(
+            request.SessionId,
+            request.TurnId,
+            cancellationToken);
+
+    private async Task<SessionSnapshotDto?> WaitForSessionUpdateAsync(
+        WaitForSessionUpdateRequestDto request,
+        CancellationToken cancellationToken)
+    {
+        if (request.WaitMilliseconds is < 0 or > 30_000)
+        {
+            throw new ArgumentOutOfRangeException(nameof(request.WaitMilliseconds));
+        }
+
+        return MapSession(await sessions.WaitForChangeAsync(
+                request.KnownChangeVersion,
+                TimeSpan.FromMilliseconds(request.WaitMilliseconds),
+                cancellationToken)
+            .ConfigureAwait(false));
+    }
+
+    private static SessionSnapshotDto? MapSession(LocalSessionSnapshot? snapshot)
+    {
+        if (snapshot is null)
+        {
+            return null;
+        }
+
+        var active = snapshot.ActiveTurns.Select(MapSessionTurn).ToArray();
+        var foreground = snapshot.ActiveTurns
+            .Where(turn => SessionTurnPhases.IsForegroundWork(turn.Phase))
+            .OrderBy(turn => turn.SequenceNumber)
+            .LastOrDefault();
+        var status = foreground?.Phase.ToString()
+                     ?? snapshot.ActiveTurns.LastOrDefault()?.Phase.ToString()
+                     ?? "Ready";
+        return new SessionSnapshotDto(
+            snapshot.ChangeVersion,
+            snapshot.CoordinatorInstanceId,
+            snapshot.CoordinatorStartedAtUtc,
+            snapshot.Session.Id,
+            snapshot.Session.ConversationId,
+            snapshot.Session.Title,
+            status,
+            snapshot.Session.SelectedProjectId,
+            snapshot.SelectedProjectName,
+            foreground is null ? null : MapSessionTurn(foreground),
+            active,
+            snapshot.Turns.Select(MapSessionTurn).ToArray(),
+            snapshot.Messages.Select(message => new ConversationMessageDto(
+                message.Id,
+                message.SequenceNumber,
+                message.Role.ToString(),
+                message.Content,
+                message.CreatedAtUtc)).ToArray());
+    }
+
+    private static UnifiedSessionTurnDto MapSessionTurn(SessionTurnRecord turn) => new(
+        turn.Id,
+        turn.SequenceNumber,
+        turn.InputText,
+        turn.InputModality,
+        turn.WorkKind.ToString(),
+        turn.Phase.ToString(),
+        turn.MissingContext.ToString(),
+        turn.IntentKind,
+        turn.ConversationTurnId,
+        turn.TaskId,
+        turn.ProjectId,
+        turn.FilePath,
+        turn.WindowHandle,
+        turn.WindowTitle,
+        turn.RequiresConfirmation,
+        turn.CancellationRequested,
+        turn.ResultSummary,
+        turn.FailureMessage,
+        turn.CreatedAtUtc,
+        turn.UpdatedAtUtc,
+        turn.CompletedAtUtc,
+        turn.ExpectedIntentKind,
+        turn.ExpectedTarget,
+        turn.PlanTarget);
 
     private static ConversationSummaryDto MapConversation(ConversationRecord conversation) => new(
         conversation.Id,

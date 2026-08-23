@@ -86,6 +86,59 @@ public interface IDesktopApiClient
         Guid conversationId,
         CancellationToken cancellationToken = default);
 
+    Task<SessionSnapshotDto?> GetCurrentSessionAsync(CancellationToken cancellationToken = default);
+
+    Task<SessionSnapshotDto> StartNewSessionAsync(
+        string? title = null,
+        CancellationToken cancellationToken = default);
+
+    Task<SessionSnapshotDto> SetCurrentSessionAsync(
+        Guid sessionId,
+        CancellationToken cancellationToken = default);
+
+    Task<SessionTurnCommandResultDto> SubmitSessionInputAsync(
+        SessionInputRequestDto request,
+        CancellationToken cancellationToken = default);
+
+    Task<SessionSnapshotDto> ProvideSessionProjectAsync(
+        Guid sessionId,
+        Guid turnId,
+        Guid projectId,
+        CancellationToken cancellationToken = default);
+
+    Task<SessionSnapshotDto> ProvideSessionFileAsync(
+        Guid sessionId,
+        Guid turnId,
+        string filePath,
+        CancellationToken cancellationToken = default);
+
+    Task<SessionSnapshotDto> RespondSessionWindowConsentAsync(
+        Guid sessionId,
+        Guid turnId,
+        bool granted,
+        CancellationToken cancellationToken = default);
+
+    Task<SessionSnapshotDto> RetrySessionTurnAsync(
+        Guid sessionId,
+        Guid turnId,
+        CancellationToken cancellationToken = default);
+
+    Task<SessionSnapshotDto> ConfirmSessionTurnAsync(
+        Guid sessionId,
+        Guid turnId,
+        bool confirmed,
+        CancellationToken cancellationToken = default);
+
+    Task<SessionSnapshotDto> CancelSessionTurnAsync(
+        Guid sessionId,
+        Guid turnId,
+        CancellationToken cancellationToken = default);
+
+    Task<SessionSnapshotDto?> WaitForSessionUpdateAsync(
+        long knownChangeVersion,
+        int waitMilliseconds = 20_000,
+        CancellationToken cancellationToken = default);
+
     Task ShutdownHostAsync(CancellationToken cancellationToken = default);
 }
 
@@ -282,6 +335,104 @@ public sealed class DesktopApiClient(
         CallAsync<CancelConversationTurnRequestDto, bool>(
             DesktopApiMethods.CancelConversationTurn,
             new CancelConversationTurnRequestDto(conversationId),
+            cancellationToken);
+
+    public Task<SessionSnapshotDto?> GetCurrentSessionAsync(
+        CancellationToken cancellationToken = default) =>
+        CallAsync<EmptyRequest, SessionSnapshotDto?>(
+            DesktopApiMethods.GetCurrentSession,
+            new EmptyRequest(),
+            cancellationToken);
+
+    public Task<SessionSnapshotDto> StartNewSessionAsync(
+        string? title = null,
+        CancellationToken cancellationToken = default) =>
+        CallAsync<StartNewSessionRequestDto, SessionSnapshotDto>(
+            DesktopApiMethods.StartNewSession,
+            new StartNewSessionRequestDto(title),
+            cancellationToken);
+
+    public Task<SessionSnapshotDto> SetCurrentSessionAsync(
+        Guid sessionId,
+        CancellationToken cancellationToken = default) =>
+        CallAsync<SessionIdRequestDto, SessionSnapshotDto>(
+            DesktopApiMethods.SetCurrentSession,
+            new SessionIdRequestDto(sessionId),
+            cancellationToken);
+
+    public Task<SessionTurnCommandResultDto> SubmitSessionInputAsync(
+        SessionInputRequestDto request,
+        CancellationToken cancellationToken = default) =>
+        CallAsync<SessionInputRequestDto, SessionTurnCommandResultDto>(
+            DesktopApiMethods.SubmitSessionInput,
+            request,
+            cancellationToken);
+
+    public Task<SessionSnapshotDto> ProvideSessionProjectAsync(
+        Guid sessionId,
+        Guid turnId,
+        Guid projectId,
+        CancellationToken cancellationToken = default) =>
+        CallAsync<ProvideSessionProjectRequestDto, SessionSnapshotDto>(
+            DesktopApiMethods.ProvideSessionProject,
+            new ProvideSessionProjectRequestDto(sessionId, turnId, projectId),
+            cancellationToken);
+
+    public Task<SessionSnapshotDto> ProvideSessionFileAsync(
+        Guid sessionId,
+        Guid turnId,
+        string filePath,
+        CancellationToken cancellationToken = default) =>
+        CallAsync<ProvideSessionFileRequestDto, SessionSnapshotDto>(
+            DesktopApiMethods.ProvideSessionFile,
+            new ProvideSessionFileRequestDto(sessionId, turnId, filePath),
+            cancellationToken);
+
+    public Task<SessionSnapshotDto> RespondSessionWindowConsentAsync(
+        Guid sessionId,
+        Guid turnId,
+        bool granted,
+        CancellationToken cancellationToken = default) =>
+        CallAsync<SessionWindowConsentRequestDto, SessionSnapshotDto>(
+            DesktopApiMethods.RespondSessionWindowConsent,
+            new SessionWindowConsentRequestDto(sessionId, turnId, granted),
+            cancellationToken);
+
+    public Task<SessionSnapshotDto> RetrySessionTurnAsync(
+        Guid sessionId,
+        Guid turnId,
+        CancellationToken cancellationToken = default) =>
+        CallAsync<CancelSessionTurnRequestDto, SessionSnapshotDto>(
+            DesktopApiMethods.RetrySessionTurn,
+            new CancelSessionTurnRequestDto(sessionId, turnId),
+            cancellationToken);
+
+    public Task<SessionSnapshotDto> ConfirmSessionTurnAsync(
+        Guid sessionId,
+        Guid turnId,
+        bool confirmed,
+        CancellationToken cancellationToken = default) =>
+        CallAsync<SessionTurnConfirmationRequestDto, SessionSnapshotDto>(
+            DesktopApiMethods.ConfirmSessionTurn,
+            new SessionTurnConfirmationRequestDto(sessionId, turnId, confirmed),
+            cancellationToken);
+
+    public Task<SessionSnapshotDto> CancelSessionTurnAsync(
+        Guid sessionId,
+        Guid turnId,
+        CancellationToken cancellationToken = default) =>
+        CallAsync<CancelSessionTurnRequestDto, SessionSnapshotDto>(
+            DesktopApiMethods.CancelSessionTurn,
+            new CancelSessionTurnRequestDto(sessionId, turnId),
+            cancellationToken);
+
+    public Task<SessionSnapshotDto?> WaitForSessionUpdateAsync(
+        long knownChangeVersion,
+        int waitMilliseconds = 20_000,
+        CancellationToken cancellationToken = default) =>
+        CallAsync<WaitForSessionUpdateRequestDto, SessionSnapshotDto?>(
+            DesktopApiMethods.WaitForSessionUpdate,
+            new WaitForSessionUpdateRequestDto(knownChangeVersion, waitMilliseconds),
             cancellationToken);
 
     public Task ShutdownHostAsync(CancellationToken cancellationToken = default) =>

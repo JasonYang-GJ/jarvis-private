@@ -31,14 +31,11 @@ public partial class MainWindow : Window
     private IReadOnlyList<ProjectDto> _projects = [];
     private IReadOnlyList<DesktopApplicationDto> _desktopApplications = [];
     private IReadOnlyList<TaskSummaryDto> _tasks = [];
-    private IReadOnlyList<ConversationSummaryDto> _conversations = [];
     private SystemStatusDto? _systemStatus;
     private Guid? _selectedTaskId;
     private Guid? _selectedConversationId;
-    private Guid? _assistantConversationId;
-    private AssistantIntentPlanDto? _pendingAssistantPlan;
-    private CancellationTokenSource? _windowObservationCancellation;
-    private string? _activeWindowObservationId;
+    private SessionSnapshotDto? _currentSession;
+    private Task? _sessionUpdateLoop;
     private bool _isRefreshing;
     private bool _isHostOnline;
     private bool _forceClose;
@@ -76,7 +73,7 @@ public partial class MainWindow : Window
         _notifications = new DesktopNotificationCoordinator(_tray, _settingsStore);
         _refreshTimer = new DispatcherTimer(DispatcherPriority.Background)
         {
-            Interval = TimeSpan.FromSeconds(2)
+            Interval = TimeSpan.FromSeconds(5)
         };
         _refreshTimer.Tick += RefreshTimer_Tick;
         Loaded += MainWindow_Loaded;
@@ -89,6 +86,7 @@ public partial class MainWindow : Window
         ProductVersionText.Text = $"版本 {Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "0.2.0"}";
         RenderVoiceStatus();
         await RefreshAllAsync(showErrors: true);
+        _sessionUpdateLoop = RunSessionUpdateLoopAsync();
         await StartContinuousVoiceAsync();
         _refreshTimer.Start();
     }
@@ -96,8 +94,6 @@ public partial class MainWindow : Window
     private async void MainWindow_Closed(object? sender, EventArgs e)
     {
         _refreshTimer.Stop();
-        _windowObservationCancellation?.Cancel();
-        _windowObservationCancellation?.Dispose();
         _activeVoiceCommandCancellation?.Cancel();
         _activeVoiceCommandCancellation?.Dispose();
         _speechCancellation?.Cancel();
@@ -107,6 +103,16 @@ public partial class MainWindow : Window
         _voice.UtteranceRecognized -= Voice_UtteranceRecognized;
         _voice.StateChanged -= Voice_StateChanged;
         await _voice.DisposeAsync();
+        if (_sessionUpdateLoop is not null)
+        {
+            try
+            {
+                await _sessionUpdateLoop;
+            }
+            catch (OperationCanceledException)
+            {
+            }
+        }
         _lifetime.Dispose();
     }
 
@@ -148,18 +154,17 @@ public partial class MainWindow : Window
             var projectsTask = _api.ListProjectsAsync(_lifetime.Token);
             var tasksTask = _api.ListTasksAsync(cancellationToken: _lifetime.Token);
             var desktopApplicationsTask = _api.ListDesktopApplicationsAsync(_lifetime.Token);
-            var conversationsTask = _api.ListConversationsAsync(_lifetime.Token);
+            var sessionTask = _api.GetCurrentSessionAsync(_lifetime.Token);
             await Task.WhenAll(
                 dashboardTask,
                 projectsTask,
                 tasksTask,
                 desktopApplicationsTask,
-                conversationsTask);
+                sessionTask);
             var dashboard = await dashboardTask;
             _projects = await projectsTask;
             _tasks = await tasksTask;
             _desktopApplications = await desktopApplicationsTask;
-            _conversations = await conversationsTask;
             _systemStatus = dashboard.System;
             SetHostOnline(true);
             RenderDashboard(dashboard);
@@ -167,7 +172,7 @@ public partial class MainWindow : Window
             RenderTaskSelectors();
             RenderDesktopActions();
             RenderHistory();
-            RenderConversations();
+            RenderSession(await sessionTask);
             RenderSettings();
             _settings = await _notifications.ProcessAsync(_tasks, _settings, _lifetime.Token);
             if (_selectedTaskId is { } taskId)
@@ -185,17 +190,7 @@ public partial class MainWindow : Window
                 }
             }
 
-            if (_selectedConversationId is { } conversationId)
-            {
-                await LoadConversationAsync(conversationId, navigate: false);
-            }
-
-            if (_assistantConversationId is { } assistantConversationId)
-            {
-                await RefreshAssistantConversationAsync(assistantConversationId);
-            }
-
-            StatusBarText.Text = $"已连接本机服务 · 最后刷新 {DateTime.Now:HH:mm:ss}";
+            StatusBarText.Text = "已连接本机会话中枢。";
         }
         catch (OperationCanceledException) when (_lifetime.IsCancellationRequested)
         {
@@ -294,50 +289,129 @@ public partial class MainWindow : Window
         HistoryListView.ItemsSource = filtered.Select(HistoryRow.From).ToArray();
     }
 
-    private void RenderConversations()
+    private void RenderSession(SessionSnapshotDto? snapshot)
     {
-        var rows = _conversations.Select(ConversationRow.From).ToArray();
-        ConversationListBox.ItemsSource = rows;
-        ConversationListBox.SelectedItem = rows.FirstOrDefault(row => row.Id == _selectedConversationId);
-        if (_selectedConversationId is null && rows.Length > 0)
-        {
-            _selectedConversationId = rows[0].Id;
-            ConversationListBox.SelectedItem = rows[0];
-        }
-
-        var online = _isHostOnline && _systemStatus?.Codex.IsCompatible == true;
-        ConversationInputTextBox.IsEnabled = online && _selectedConversationId is not null;
-        SendConversationButton.IsEnabled = ConversationInputTextBox.IsEnabled;
-    }
-
-    private async Task LoadConversationAsync(Guid conversationId, bool navigate)
-    {
-        var details = await _api.GetConversationAsync(conversationId, _lifetime.Token);
-        if (details is null)
+        if (!SessionUiPresenter.ShouldApply(_currentSession, snapshot))
         {
             return;
         }
 
-        _selectedConversationId = conversationId;
-        ConversationTitleText.Text = details.Summary.Title;
-        ConversationStateText.Text = ConversationStatusLabel(details.Summary.Status, details.Summary.FailureMessage);
-        var messages = details.Messages.Select(ConversationMessageRow.From).ToArray();
+        _currentSession = snapshot;
+        _selectedConversationId = snapshot?.ConversationId;
+        var presentation = SessionUiPresenter.Present(snapshot);
+        SessionTitleText.Text = presentation.Title;
+        SessionStatusText.Text = presentation.StatusText;
+        SessionProjectText.Text = presentation.ProjectText;
+        SessionStatusText.Foreground = BrushFrom(presentation.StatusTone switch
+        {
+            "Busy" => "#2E6DD8",
+            "Waiting" => "#A56210",
+            "Success" => "#1F8A6A",
+            "Error" => "#C94C4C",
+            _ => "#52656D"
+        });
+        StopSessionButton.Visibility = presentation.ShowStop
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        AssistantPlanBorder.Visibility = presentation.ShowContextCard
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        AssistantPlanSummaryText.Text = presentation.OriginalRequest;
+        AssistantPlanDetailText.Text = presentation.DetailText;
+        SessionProjectPickerPanel.Visibility = presentation.ShowProjectPicker
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        SessionFilePickerPanel.Visibility = presentation.ShowFilePicker
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        PreserveProjectSelection(
+            SessionProjectComboBox,
+            _projects.Where(project => project.AuthorizationState == "Authorized").ToArray());
+        ConfirmAssistantPlanButton.Content = presentation.PrimaryActionText;
+        ConfirmAssistantPlanButton.Visibility = presentation.ShowContextCard
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        CancelSessionContextButton.Content = presentation.CancelActionText;
+        var observing = snapshot?.ForegroundTurn?.Phase == "ObservingWindow";
+        WindowObservationBorder.Visibility = observing ? Visibility.Visible : Visibility.Collapsed;
+        if (observing)
+        {
+            WindowObservationTargetText.Text = string.IsNullOrWhiteSpace(snapshot?.ForegroundTurn?.WindowTitle)
+                ? "只读取本次确认的单个窗口；图像不保存、不上传。"
+                : $"目标：{snapshot.ForegroundTurn.WindowTitle}。图像不保存、不上传。";
+        }
+
+        var lastTurn = snapshot?.Turns.OrderBy(item => item.SequenceNumber).LastOrDefault();
+        AssistantResultBorder.Visibility = presentation.ShowResult && lastTurn is not null
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        if (lastTurn is not null && presentation.ShowResult)
+        {
+            AssistantResultStatusText.Text = presentation.StatusText;
+            AssistantResultText.Text = lastTurn.ResultSummary
+                                       ?? lastTurn.FailureMessage
+                                       ?? presentation.StatusText;
+            AssistantResultBorder.Background = BrushFrom(lastTurn.Phase == "Failed" ? "#FCECED" : "#F7FAFB");
+        }
+
+        var messages = snapshot?.Messages.Select(ConversationMessageRow.From).ToArray()
+                       ?? Array.Empty<ConversationMessageRow>();
+        SessionMessagesList.ItemsSource = messages;
+        SessionMessagesBorder.Visibility = messages.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
         ConversationMessagesList.ItemsSource = messages;
         ConversationMessagesList.Visibility = messages.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
         ConversationEmptyPanel.Visibility = messages.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
-        var responding = details.Summary.Status == "Responding";
-        StopConversationButton.Visibility = responding ? Visibility.Visible : Visibility.Collapsed;
-        SendConversationButton.IsEnabled = !responding && _isHostOnline && _systemStatus?.Codex.IsCompatible == true;
-        ConversationInputTextBox.IsEnabled = SendConversationButton.IsEnabled;
+        ConversationTitleText.Text = presentation.Title;
+        ConversationStateText.Text = presentation.StatusText;
+        ConversationInputTextBox.IsEnabled = _isHostOnline && snapshot is not null;
+        SendConversationButton.IsEnabled = ConversationInputTextBox.IsEnabled;
+        StopConversationButton.Visibility = presentation.ShowStop ? Visibility.Visible : Visibility.Collapsed;
+        ConversationListBox.ItemsSource = snapshot is null
+            ? Array.Empty<ConversationRow>()
+            : new[]
+            {
+                new ConversationRow(
+                    snapshot.ConversationId,
+                    snapshot.Title,
+                    presentation.StatusText)
+            };
         if (messages.Length > 0)
         {
+            SessionMessagesList.ScrollIntoView(messages[^1]);
             ConversationMessagesList.ScrollIntoView(messages[^1]);
         }
+    }
 
-        if (navigate)
+    private async Task RunSessionUpdateLoopAsync()
+    {
+        while (!_lifetime.IsCancellationRequested)
         {
-            ShowPage(AppPage.Conversations);
+            try
+            {
+                var knownVersion = _currentSession?.ChangeVersion ?? -1;
+                var snapshot = await _api.WaitForSessionUpdateAsync(
+                    knownVersion,
+                    20_000,
+                    _lifetime.Token);
+                SetHostOnline(true);
+                RenderSession(snapshot);
+            }
+            catch (OperationCanceledException) when (_lifetime.IsCancellationRequested)
+            {
+                return;
+            }
+            catch
+            {
+                SetHostOnline(false);
+                await Task.Delay(TimeSpan.FromSeconds(2), _lifetime.Token);
+            }
         }
+    }
+
+    private async Task RefreshSessionAsync()
+    {
+        var snapshot = await _api.GetCurrentSessionAsync(_lifetime.Token);
+        RenderSession(snapshot);
     }
 
     private void RenderSettings()
@@ -464,13 +538,72 @@ public partial class MainWindow : Window
 
         await RunCommandAsync(async () =>
         {
-            var result = await _api.CreateTaskAsync(
-                new CreateTaskRequestDto(project.Id, instruction, title),
+            var session = await _api.StartNewSessionAsync(
+                string.IsNullOrWhiteSpace(title) ? "编程任务" : title.Trim(),
                 _lifetime.Token);
-            _selectedTaskId = result.TaskId;
-            await LoadTaskDetailsAsync(result.TaskId, navigate: true);
+            var submitted = await _api.SubmitSessionInputAsync(
+                new SessionInputRequestDto(
+                    instruction.Trim(),
+                    "ProgrammingTask",
+                    $"desktop-programming-{Guid.NewGuid():N}",
+                    session.SessionId),
+                _lifetime.Token);
+            _ = await WaitForSessionTurnPhaseAsync(
+                submitted.TurnId,
+                "WaitingForProject");
+            var selected = await _api.ProvideSessionProjectAsync(
+                session.SessionId,
+                submitted.TurnId,
+                project.Id,
+                _lifetime.Token);
+            var selectedTurn = selected.Turns.Single(turn => turn.Id == submitted.TurnId);
+            if (selectedTurn.Phase != "WaitingForConfirmation")
+            {
+                throw new InvalidOperationException("编程任务没有进入确认状态，请稍后重试。 ");
+            }
+
+            var started = await _api.ConfirmSessionTurnAsync(
+                session.SessionId,
+                submitted.TurnId,
+                confirmed: true,
+                _lifetime.Token);
+            RenderSession(started);
+            var taskId = started.Turns.Single(turn => turn.Id == submitted.TurnId).TaskId
+                         ?? throw new InvalidOperationException("编程任务没有成功建立。 ");
+            _selectedTaskId = taskId;
+            await LoadTaskDetailsAsync(taskId, navigate: true);
             await RefreshAllAsync(showErrors: false);
         });
+    }
+
+    private async Task<SessionSnapshotDto> WaitForSessionTurnPhaseAsync(
+        Guid turnId,
+        params string[] expectedPhases)
+    {
+        var deadline = DateTimeOffset.UtcNow.AddSeconds(10);
+        SessionSnapshotDto? snapshot = null;
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            snapshot ??= await _api.GetCurrentSessionAsync(_lifetime.Token);
+            var turn = snapshot?.Turns.SingleOrDefault(item => item.Id == turnId);
+            if (turn is not null && expectedPhases.Contains(turn.Phase, StringComparer.Ordinal))
+            {
+                return snapshot!;
+            }
+
+            if (turn?.Phase is "Failed" or "Cancelled" or "Interrupted")
+            {
+                throw new InvalidOperationException(
+                    turn.FailureMessage ?? "编程任务没有进入可继续状态。 ");
+            }
+
+            snapshot = await _api.WaitForSessionUpdateAsync(
+                snapshot?.ChangeVersion ?? -1,
+                2_000,
+                _lifetime.Token);
+        }
+
+        throw new TimeoutException("等待统一会话建立编程任务超时。 ");
     }
 
     private async Task RunCommandAsync(
@@ -504,197 +637,144 @@ public partial class MainWindow : Window
     {
         await RunCommandAsync(async () =>
         {
-            var plan = await _api.PlanAssistantCommandAsync(
-                new PlanAssistantCommandRequestDto(
+            var submitted = await _api.SubmitSessionInputAsync(
+                new SessionInputRequestDto(
                     text,
-                    InputModality: "Voice"),
+                    "Voice",
+                    $"desktop-voice-{Guid.NewGuid():N}",
+                    _currentSession?.SessionId),
                 cancellationToken);
             cancellationToken.ThrowIfCancellationRequested();
-            _pendingAssistantPlan = plan;
-            var ready = string.Equals(plan.Readiness, "Ready", StringComparison.Ordinal);
-            var directVoiceAction = ready
-                                    && IsDirectVoiceAction(plan.IntentKind);
-            if (ready && (!plan.RequiresConfirmation || directVoiceAction))
-            {
-                AssistantPlanBorder.Visibility = Visibility.Collapsed;
-                AssistantResultBorder.Visibility = Visibility.Visible;
-                AssistantResultStatusText.Text = directVoiceAction
-                    ? "正在执行语音指令"
-                    : "正在回答";
-                AssistantResultText.Text = plan.UserSummary;
-                StatusBarText.Text = plan.UserSummary;
-                await ExecutePendingAssistantPlanAsync(
-                    confirmed: false,
-                    authorizationSource: directVoiceAction
-                        ? "ExplicitVoice"
-                        : "VisibleConfirmation",
-                    cancellationToken);
-                return;
-            }
-
-            RenderAssistantPlan(plan);
+            StatusBarText.Text = submitted.WasDuplicate
+                ? "这条请求已经收到，正在继续处理。"
+                : "已交给当前话题处理。";
+            await RefreshSessionAsync();
         }, cancellationToken);
     }
 
-    private static bool IsDirectVoiceAction(string intentKind) =>
-        intentKind is "OpenApplication" or "OpenWebsite" or "SearchForeground";
-
-    private void RenderAssistantPlan(AssistantIntentPlanDto plan)
+    private async void ConfirmAssistantPlanButton_Click(object sender, RoutedEventArgs e)
     {
-        AssistantPlanBorder.Visibility = Visibility.Visible;
-        AssistantPlanSummaryText.Text = plan.UserSummary;
-        var foreground = plan.ForegroundApplication is null
-            ? string.Empty
-            : $"\n目标窗口：{plan.ForegroundApplication.WindowTitle}";
-        AssistantPlanDetailText.Text = plan.Readiness switch
+        var session = _currentSession;
+        var turn = session?.ForegroundTurn;
+        if (session is null || turn is null)
         {
-            "NeedsContext" => $"还需要：{plan.MissingContext}{foreground}",
-            "Unsupported" => "当前版本不能安全执行这条请求。",
-            _ => $"{plan.ConfirmationText ?? "这条请求不会操作电脑。"}{foreground}"
-        };
-        ConfirmAssistantPlanButton.Visibility =
-            string.Equals(plan.Readiness, "Ready", StringComparison.Ordinal)
-                ? Visibility.Visible
-                : Visibility.Collapsed;
-        ConfirmAssistantPlanButton.Content = plan.RequiresConfirmation ? "确认这一次" : "开始回答";
-    }
-
-    private async void ConfirmAssistantPlanButton_Click(object sender, RoutedEventArgs e) =>
-        await RunCommandAsync(() => ExecutePendingAssistantPlanAsync(
-            confirmed: true,
-            authorizationSource: "VisibleConfirmation"));
-
-    private async Task ExecutePendingAssistantPlanAsync(
-        bool confirmed,
-        string authorizationSource,
-        CancellationToken commandCancellationToken = default)
-    {
-        var plan = _pendingAssistantPlan
-            ?? throw new InvalidOperationException("这条操作计划已经失效，请重新说一次。 ");
-        var isWindowObservation = string.Equals(
-            plan.IntentKind,
-            "DescribeForeground",
-            StringComparison.Ordinal);
-        CancellationToken executionToken = commandCancellationToken.CanBeCanceled
-            ? commandCancellationToken
-            : _lifetime.Token;
-        if (isWindowObservation)
-        {
-            _windowObservationCancellation?.Dispose();
-            _windowObservationCancellation = CancellationTokenSource.CreateLinkedTokenSource(
-                _lifetime.Token,
-                executionToken);
-            executionToken = _windowObservationCancellation.Token;
-            WindowObservationTargetText.Text = plan.ForegroundApplication is null
-                ? "只读取本次确认的单个窗口；图像不保存、不上传。"
-                : $"目标：{plan.ForegroundApplication.WindowTitle}。图像不保存、不上传。";
-            WindowObservationBorder.Visibility = Visibility.Visible;
-        }
-
-        var operationId = $"assistant-ui-{Guid.NewGuid():N}";
-        if (isWindowObservation)
-        {
-            _activeWindowObservationId = operationId;
-        }
-
-        AssistantCommandResultDto result;
-        try
-        {
-            result = await _api.ExecuteAssistantCommandAsync(
-                new ExecuteAssistantCommandRequestDto(
-                    plan.PlanId,
-                    confirmed,
-                    operationId,
-                    authorizationSource),
-                executionToken);
-            executionToken.ThrowIfCancellationRequested();
-        }
-        catch (OperationCanceledException) when (
-            _windowObservationCancellation?.IsCancellationRequested == true
-            && !_lifetime.IsCancellationRequested)
-        {
-            _pendingAssistantPlan = null;
-            AssistantPlanBorder.Visibility = Visibility.Collapsed;
-            AssistantResultBorder.Visibility = Visibility.Visible;
-            AssistantResultStatusText.Text = "已停止查看";
-            AssistantResultText.Text = "本次窗口读取已停止，捕获到的临时画面已从内存清理。";
-            StatusBarText.Text = "已停止查看窗口。";
             return;
         }
-        finally
+
+        await RunCommandAsync(async () =>
         {
-            if (isWindowObservation)
+            SessionSnapshotDto snapshot = turn.Phase switch
             {
-                WindowObservationBorder.Visibility = Visibility.Collapsed;
-                _windowObservationCancellation?.Dispose();
-                _windowObservationCancellation = null;
-                _activeWindowObservationId = null;
-            }
-        }
-        _pendingAssistantPlan = null;
-        AssistantPlanBorder.Visibility = Visibility.Collapsed;
-        AssistantResultBorder.Visibility = Visibility.Visible;
-        AssistantResultStatusText.Text = result.VerificationStatus switch
+                "WaitingForProject" when SessionProjectComboBox.SelectedItem is ProjectDto project =>
+                    await _api.ProvideSessionProjectAsync(session.SessionId, turn.Id, project.Id, _lifetime.Token),
+                "WaitingForFile" => await ChooseAndProvideSessionFileAsync(session, turn),
+                "WaitingForWindow" => await _api.RetrySessionTurnAsync(
+                    session.SessionId,
+                    turn.Id,
+                    _lifetime.Token),
+                "WaitingForWindowConsent" => await _api.RespondSessionWindowConsentAsync(
+                    session.SessionId,
+                    turn.Id,
+                    granted: true,
+                    _lifetime.Token),
+                "WaitingForConfirmation" => await _api.ConfirmSessionTurnAsync(
+                    session.SessionId,
+                    turn.Id,
+                    confirmed: true,
+                    _lifetime.Token),
+                _ => throw new InvalidOperationException("这条请求当前不需要补充或确认。 ")
+            };
+            RenderSession(snapshot);
+        });
+    }
+
+    private async Task<SessionSnapshotDto> ChooseAndProvideSessionFileAsync(
+        SessionSnapshotDto session,
+        UnifiedSessionTurnDto turn)
+    {
+        var dialog = new OpenFileDialog
         {
-            "ExecutionVerified" => "本次操作已核实执行",
-            "ObservationCompleted" => "已完成本次窗口识别",
-            "LaunchRequested" => "Windows 已接受启动请求",
-            "Pending" => "任务执行中",
-            _ => "元枢正在处理"
+            Title = "选择这一次要处理的文件",
+            Multiselect = false,
+            CheckFileExists = true
         };
-        AssistantResultText.Text = result.Evidence is null
-            ? result.UserSummary
-            : string.Join("\n", new[]
-            {
-                result.UserSummary,
-                result.Evidence.VerifiedFacts.Count == 0
-                    ? string.Empty
-                    : "已核实：" + string.Join("；", result.Evidence.VerifiedFacts),
-                result.Evidence.UnverifiedFacts.Count == 0
-                    ? string.Empty
-                    : "尚未核实：" + string.Join("；", result.Evidence.UnverifiedFacts)
-            }.Where(line => !string.IsNullOrWhiteSpace(line)));
-        AssistantResultBorder.Background = BrushFrom(
-            result.Status == "Failed" ? "#FCECED" : "#F7FAFB");
-        if (result.TaskId is { } taskId)
+        if (dialog.ShowDialog(this) != true)
         {
-            _selectedTaskId = taskId;
+            return session;
         }
 
-        if (result.ConversationId is { } conversationId)
-        {
-            _assistantConversationId = conversationId;
-        }
-
-        StatusBarText.Text = result.UserSummary;
-        await RefreshAllAsync(showErrors: false);
+        return await _api.ProvideSessionFileAsync(
+            session.SessionId,
+            turn.Id,
+            dialog.FileName,
+            _lifetime.Token);
     }
 
     private async void StopWindowObservationButton_Click(object sender, RoutedEventArgs e)
     {
-        _windowObservationCancellation?.Cancel();
-        WindowObservationTargetText.Text = "正在停止并清理临时画面…";
-        var operationId = _activeWindowObservationId;
-        if (string.IsNullOrWhiteSpace(operationId))
+        await CancelCurrentSessionTurnAsync();
+    }
+
+    private async void CancelAssistantPlanButton_Click(object sender, RoutedEventArgs e)
+    {
+        var session = _currentSession;
+        var turn = session?.ForegroundTurn;
+        if (session is null || turn is null)
         {
             return;
         }
 
-        try
+        await RunCommandAsync(async () =>
         {
-            await _api.CancelWindowObservationAsync(operationId, _lifetime.Token);
-        }
-        catch (Exception exception) when (exception is not OperationCanceledException)
-        {
-            ShowError("停止请求没有成功送达本机中枢，请稍后再试。", exception);
-        }
+            var snapshot = turn.Phase == "WaitingForWindowConsent"
+                ? await _api.RespondSessionWindowConsentAsync(
+                    session.SessionId,
+                    turn.Id,
+                    granted: false,
+                    _lifetime.Token)
+                : await _api.CancelSessionTurnAsync(
+                    session.SessionId,
+                    turn.Id,
+                    _lifetime.Token);
+            RenderSession(snapshot);
+            StatusBarText.Text = "已取消，不会继续执行。";
+        });
     }
 
-    private void CancelAssistantPlanButton_Click(object sender, RoutedEventArgs e)
+    private async void StopSessionButton_Click(object sender, RoutedEventArgs e) =>
+        await CancelCurrentSessionTurnAsync();
+
+    private async Task CancelCurrentSessionTurnAsync()
     {
-        _pendingAssistantPlan = null;
-        AssistantPlanBorder.Visibility = Visibility.Collapsed;
-        StatusBarText.Text = "已取消，不会执行任何电脑操作。";
+        var session = _currentSession;
+        var turn = session?.ForegroundTurn;
+        if (session is null || turn is null)
+        {
+            return;
+        }
+
+        await RunCommandAsync(async () =>
+        {
+            StatusBarText.Text = "正在停止当前请求…";
+            var snapshot = await _api.CancelSessionTurnAsync(
+                session.SessionId,
+                turn.Id,
+                _lifetime.Token);
+            RenderSession(snapshot);
+        });
+    }
+
+    private async void NewTopicButton_Click(object sender, RoutedEventArgs e)
+    {
+        await RunCommandAsync(async () =>
+        {
+            var snapshot = await _api.StartNewSessionAsync(
+                "新话题",
+                _lifetime.Token);
+            RenderSession(snapshot);
+            VoiceTranscriptText.Text = "等待你说话…";
+            StatusBarText.Text = "已经开始一个新话题。";
+        });
     }
 
     private async Task StartContinuousVoiceAsync()
@@ -760,7 +840,6 @@ public partial class MainWindow : Window
         AssistantPlanBorder.Visibility = Visibility.Collapsed;
         AssistantResultBorder.Visibility = Visibility.Collapsed;
         ErrorBanner.Visibility = Visibility.Collapsed;
-        _pendingAssistantPlan = null;
         _queuedVoiceUtterance = utterance with { Text = text };
         _speechCancellation?.Cancel();
         _activeVoiceCommandCancellation?.Cancel();
@@ -866,29 +945,6 @@ public partial class MainWindow : Window
             ContinuousVoiceState.Faulted,
             report.RecognitionModelAvailable ? "没有检测到麦克风" : "需要安装本地语音模型");
         VoicePrivacyText.Text = report.Message;
-    }
-
-    private async Task RefreshAssistantConversationAsync(Guid conversationId)
-    {
-        var details = await _api.GetConversationAsync(conversationId, _lifetime.Token);
-        if (details is null)
-        {
-            return;
-        }
-
-        var assistantMessage = details.Messages.LastOrDefault(message =>
-            string.Equals(message.Role, "Assistant", StringComparison.OrdinalIgnoreCase));
-        AssistantResultBorder.Visibility = Visibility.Visible;
-        if (assistantMessage is not null)
-        {
-            AssistantResultStatusText.Text = "元枢回答";
-            AssistantResultText.Text = assistantMessage.Content;
-        }
-        else
-        {
-            AssistantResultStatusText.Text = "正在思考";
-            AssistantResultText.Text = details.Summary.FailureMessage ?? "正在准备回答…";
-        }
     }
 
     private async void ReadAssistantResultButton_Click(object sender, RoutedEventArgs e)
@@ -1076,37 +1132,31 @@ public partial class MainWindow : Window
             return;
         }
 
-        await ExecuteDesktopActionAsync(new ExecuteDesktopActionRequestDto(
-            "OpenApplication",
-            application.Id,
-            true,
-            $"desktop-ui-app-{Guid.NewGuid():N}"));
+        await ExecuteDesktopActionAsync(
+            $"启动“{application.DisplayName}”",
+            expectedIntentKind: "OpenApplication",
+            expectedTarget: application.Id);
     }
 
     private async void NewConversationButton_Click(object sender, RoutedEventArgs e)
     {
         await RunCommandAsync(async () =>
         {
-            var conversation = await _api.CreateConversationAsync(cancellationToken: _lifetime.Token);
-            _selectedConversationId = conversation.Id;
+            var session = await _api.StartNewSessionAsync("新话题", _lifetime.Token);
             ConversationInputTextBox.Clear();
-            await RefreshAllAsync(showErrors: false);
-            await LoadConversationAsync(conversation.Id, navigate: true);
+            RenderSession(session);
             ConversationInputTextBox.Focus();
         });
     }
 
-    private async void ConversationListBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    private void ConversationListBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (ConversationListBox.SelectedItem is ConversationRow row && row.Id != _selectedConversationId)
-        {
-            await RunCommandAsync(() => LoadConversationAsync(row.Id, navigate: false));
-        }
     }
 
     private async void SendConversationButton_Click(object sender, RoutedEventArgs e)
     {
-        if (_selectedConversationId is not { } conversationId)
+        var session = _currentSession;
+        if (session is null)
         {
             ShowError("请先新建一个对话。", null);
             return;
@@ -1121,30 +1171,21 @@ public partial class MainWindow : Window
 
         await RunCommandAsync(async () =>
         {
-            await _api.SendConversationMessageAsync(
-                conversationId,
-                message,
-                $"desktop-chat-{Guid.NewGuid():N}",
+            await _api.SubmitSessionInputAsync(
+                new SessionInputRequestDto(
+                    message,
+                    "Text",
+                    $"desktop-chat-{Guid.NewGuid():N}",
+                    session.SessionId),
                 _lifetime.Token);
             ConversationInputTextBox.Clear();
-            await LoadConversationAsync(conversationId, navigate: false);
+            await RefreshSessionAsync();
         });
     }
 
     private async void StopConversationButton_Click(object sender, RoutedEventArgs e)
     {
-        if (_selectedConversationId is not { } conversationId)
-        {
-            return;
-        }
-
-        await RunCommandAsync(async () =>
-        {
-            await _api.CancelConversationTurnAsync(conversationId, _lifetime.Token);
-            StatusBarText.Text = "正在停止回答。";
-            await Task.Delay(150, _lifetime.Token);
-            await LoadConversationAsync(conversationId, navigate: false);
-        });
+        await CancelCurrentSessionTurnAsync();
     }
 
     private void ConversationOpenTaskButton_Click(object sender, RoutedEventArgs e) =>
@@ -1162,6 +1203,14 @@ public partial class MainWindow : Window
             return;
         }
 
+        if (!Uri.TryCreate(website, UriKind.Absolute, out var websiteUri)
+            || !string.Equals(websiteUri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)
+            || !string.IsNullOrWhiteSpace(websiteUri.UserInfo))
+        {
+            ShowError("请输入完整、有效的 https 网站地址。", null);
+            return;
+        }
+
         if (MessageBox.Show(
                 $"只授权本次操作：用默认浏览器打开下面的网站。\n\n{website}\n\n请确认地址正确。",
                 "确认打开网站",
@@ -1171,23 +1220,61 @@ public partial class MainWindow : Window
             return;
         }
 
-        await ExecuteDesktopActionAsync(new ExecuteDesktopActionRequestDto(
-            "OpenWebsite",
-            website,
-            true,
-            $"desktop-ui-website-{Guid.NewGuid():N}"));
+        await ExecuteDesktopActionAsync(
+            $"打开{website}",
+            expectedIntentKind: "OpenWebsite",
+            expectedTarget: websiteUri.AbsoluteUri);
     }
 
-    private async Task ExecuteDesktopActionAsync(ExecuteDesktopActionRequestDto request)
+    private async Task ExecuteDesktopActionAsync(
+        string commandText,
+        string expectedIntentKind,
+        string expectedTarget)
     {
         await RunCommandAsync(async () =>
         {
-            var result = await _api.ExecuteDesktopActionAsync(request, _lifetime.Token);
-            DesktopActionResultText.Text = result.Message;
-            DesktopActionResultBorder.Background = BrushFrom(result.Succeeded ? "#EAF6F0" : "#FCECED");
-            DesktopActionResultBorder.BorderBrush = BrushFrom(result.Succeeded ? "#79B79C" : "#E3A1A5");
+            var submitted = await _api.SubmitSessionInputAsync(
+                new SessionInputRequestDto(
+                    commandText,
+                    "Text",
+                    $"desktop-ui-action-{Guid.NewGuid():N}",
+                    _currentSession?.SessionId,
+                    expectedIntentKind,
+                    expectedTarget),
+                _lifetime.Token);
+            var waiting = await WaitForSessionTurnPhaseAsync(
+                submitted.TurnId,
+                "WaitingForConfirmation");
+            var plannedTurn = waiting.Turns.Single(item => item.Id == submitted.TurnId);
+            if (!SessionUiPresenter.MatchesConfirmedTarget(
+                    plannedTurn,
+                    expectedIntentKind,
+                    expectedTarget))
+            {
+                await _api.CancelSessionTurnAsync(
+                    waiting.SessionId,
+                    submitted.TurnId,
+                    _lifetime.Token);
+                throw new InvalidOperationException(
+                    "安全检查发现实际计划与刚才确认的目标不一致，因此没有执行这次操作。 ");
+            }
+
+            var completed = await _api.ConfirmSessionTurnAsync(
+                waiting.SessionId,
+                submitted.TurnId,
+                confirmed: true,
+                _lifetime.Token);
+            RenderSession(completed);
+            var turn = completed.Turns.Single(item => item.Id == submitted.TurnId);
+            var succeeded = turn.Phase == "Completed";
+            var message = turn.ResultSummary
+                          ?? turn.FailureMessage
+                          ?? (succeeded ? "操作已完成。" : "这次操作没有成功。");
+            DesktopActionResultText.Text = message;
+            DesktopActionResultBorder.Background = BrushFrom(succeeded ? "#EAF6F0" : "#FCECED");
+            DesktopActionResultBorder.BorderBrush = BrushFrom(succeeded ? "#79B79C" : "#E3A1A5");
             DesktopActionResultBorder.Visibility = Visibility.Visible;
-            StatusBarText.Text = result.Message;
+            StatusBarText.Text = message;
         });
     }
 
@@ -1363,6 +1450,11 @@ public partial class MainWindow : Window
 
     private void SetHostOnline(bool online)
     {
+        if (online && !_isHostOnline)
+        {
+            _currentSession = null;
+        }
+
         _isHostOnline = online;
         HostStatusText.Text = online ? "本机中枢在线" : "本机中枢离线";
         HostStatusPill.Background = BrushFrom(online ? "#EAF6F0" : "#FCECED");

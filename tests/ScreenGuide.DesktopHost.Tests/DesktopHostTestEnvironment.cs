@@ -260,7 +260,7 @@ internal sealed class DesktopHostTestEnvironment : IAsyncDisposable
             Path.GetFileName(Path.ChangeExtension(typeof(FakeCodexMarker).Assembly.Location, ".exe")));
     }
 
-    public ValueTask DisposeAsync()
+    public async ValueTask DisposeAsync()
     {
         if (Directory.Exists(RootDirectory))
         {
@@ -273,10 +273,24 @@ internal sealed class DesktopHostTestEnvironment : IAsyncDisposable
                 }
             }
 
-            Directory.Delete(RootDirectory, recursive: true);
+            var deadline = DateTimeOffset.UtcNow.AddSeconds(5);
+            while (true)
+            {
+                try
+                {
+                    Directory.Delete(RootDirectory, recursive: true);
+                    break;
+                }
+                catch (Exception exception) when (
+                    exception is IOException or UnauthorizedAccessException
+                    && DateTimeOffset.UtcNow < deadline)
+                {
+                    // Windows can keep SQLite or pipe-related handles alive for a very short
+                    // time after Host shutdown, especially when the full suite runs in parallel.
+                    await Task.Delay(50);
+                }
+            }
         }
-
-        return ValueTask.CompletedTask;
     }
 }
 

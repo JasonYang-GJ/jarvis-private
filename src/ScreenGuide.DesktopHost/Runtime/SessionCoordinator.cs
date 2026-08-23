@@ -1,0 +1,1854 @@
+using System.Collections.Concurrent;
+using ScreenGuide.AI.Core;
+using ScreenGuide.Core.Conversations;
+using ScreenGuide.Core.Sessions;
+using ScreenGuide.Core.Tasking;
+using ScreenGuide.DesktopProtocol;
+using AgentTaskStatus = ScreenGuide.Core.Tasking.TaskStatus;
+
+namespace ScreenGuide.DesktopHost.Runtime;
+
+public sealed record LocalSessionSnapshot(
+    long ChangeVersion,
+    string CoordinatorInstanceId,
+    DateTimeOffset CoordinatorStartedAtUtc,
+    SessionRecord Session,
+    string? SelectedProjectName,
+    IReadOnlyList<SessionTurnRecord> Turns,
+    IReadOnlyList<SessionTurnRecord> ActiveTurns,
+    IReadOnlyList<ConversationMessageRecord> Messages);
+
+public sealed record SessionSubmitResult(Guid SessionId, Guid TurnId, bool WasDuplicate);
+
+/// <summary>
+/// Desktop Host 中唯一的当前会话与前台 Turn 协调入口。
+/// 它只协调状态和取消，不拥有任何项目、文件、窗口或电脑动作授权。
+/// </summary>
+public sealed class SessionCoordinator(
+    ISessionStore sessionStore,
+    ConversationService conversations,
+    AssistantCommandService assistantCommands,
+    LocalTaskEntryService tasks,
+    DesktopHostState hostState,
+    TimeProvider timeProvider)
+{
+    private const int MaximumInputLength = 20_000;
+    private readonly string _coordinatorInstanceId = Guid.NewGuid().ToString("N");
+    private readonly DateTimeOffset _coordinatorStartedAtUtc = DateTimeOffset.UtcNow;
+    private readonly SemaphoreSlim _currentSessionGate = new(1, 1);
+    private readonly ConcurrentDictionary<Guid, SemaphoreSlim> _sessionGates = new();
+    private readonly ConcurrentDictionary<Guid, SemaphoreSlim> _turnGates = new();
+    private readonly ConcurrentDictionary<Guid, ActiveSessionWork> _activeWork = new();
+    private readonly ConcurrentDictionary<Guid, ActiveTaskMonitor> _taskMonitors = new();
+    private readonly object _changeGate = new();
+    private TaskCompletionSource<long> _nextChange = NewChangeSource();
+    private long _changeVersion = 1;
+
+    public async Task<LocalSessionSnapshot?> GetCurrentAsync(
+        CancellationToken cancellationToken = default)
+    {
+        var current = await sessionStore.GetCurrentSessionAsync(cancellationToken).ConfigureAwait(false);
+        return current is null ? null : await BuildSnapshotAsync(current, cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task<LocalSessionSnapshot> StartNewAsync(
+        string? title,
+        CancellationToken cancellationToken = default)
+    {
+        RequireStartedHost();
+        await _currentSessionGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var session = await StartNewCoreAsync(title, cancellationToken).ConfigureAwait(false);
+            return await BuildSnapshotAsync(session, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _currentSessionGate.Release();
+        }
+    }
+
+    private async Task<SessionRecord> StartNewCoreAsync(
+        string? title,
+        CancellationToken cancellationToken)
+    {
+        var host = RequireStartedHost();
+        var previous = await sessionStore.GetCurrentSessionAsync(cancellationToken).ConfigureAwait(false);
+        if (previous is not null)
+        {
+            await CancelForegroundWorkAsync(
+                    previous,
+                    "已开始新话题，上一条前台请求已停止。",
+                    excludedTurnId: null,
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        var conversation = await conversations.CreateAsync(title, cancellationToken).ConfigureAwait(false);
+        var now = timeProvider.GetUtcNow();
+        var session = new SessionRecord
+        {
+            Id = Guid.NewGuid(),
+            ConversationId = conversation.Id,
+            CreatedByDeviceId = host.LocalDevice!.Id,
+            Title = conversation.Title,
+            IsCurrent = true,
+            CreatedAtUtc = now,
+            UpdatedAtUtc = now,
+            LastActiveAtUtc = now
+        };
+        await sessionStore.CreateSessionAsync(session, cancellationToken).ConfigureAwait(false);
+        PublishChange();
+        return session;
+    }
+
+    public async Task<LocalSessionSnapshot> SetCurrentAsync(
+        Guid sessionId,
+        CancellationToken cancellationToken = default)
+    {
+        RequireStartedHost();
+        await _currentSessionGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var session = await SetCurrentCoreAsync(sessionId, cancellationToken).ConfigureAwait(false);
+            return await BuildSnapshotAsync(session, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _currentSessionGate.Release();
+        }
+    }
+
+    private async Task<SessionRecord> SetCurrentCoreAsync(
+        Guid sessionId,
+        CancellationToken cancellationToken)
+    {
+        var previous = await sessionStore.GetCurrentSessionAsync(cancellationToken).ConfigureAwait(false);
+        if (previous is not null && previous.Id != sessionId)
+        {
+            await CancelForegroundWorkAsync(
+                    previous,
+                    "已切换话题，上一条前台请求已停止。",
+                    excludedTurnId: null,
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        var session = await sessionStore.SetCurrentSessionAsync(
+                sessionId,
+                timeProvider.GetUtcNow(),
+                cancellationToken)
+            .ConfigureAwait(false);
+        PublishChange();
+        return session;
+    }
+
+    public async Task<SessionSubmitResult> SubmitAsync(
+        Guid? requestedSessionId,
+        string text,
+        string inputModality,
+        string? idempotencyKey,
+        CancellationToken cancellationToken = default,
+        string? expectedIntentKind = null,
+        string? expectedTarget = null)
+    {
+        RequireStartedHost();
+        var normalized = NormalizeInput(text);
+        var expectation = NormalizeActionExpectation(expectedIntentKind, expectedTarget);
+        await _currentSessionGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var selected = requestedSessionId is { } sessionId
+                ? await sessionStore.GetSessionAsync(sessionId, cancellationToken).ConfigureAwait(false)
+                : await sessionStore.GetCurrentSessionAsync(cancellationToken).ConfigureAwait(false);
+            SessionRecord session;
+            if (selected is null)
+            {
+                session = await StartNewCoreAsync(BuildTitle(normalized), cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            else if (!selected.IsCurrent)
+            {
+                session = await SetCurrentCoreAsync(selected.Id, cancellationToken).ConfigureAwait(false);
+            }
+            else
+            {
+                session = selected;
+            }
+
+            // Selecting the current Session and registering its foreground Turn form one
+            // linearized operation. Releasing this gate earlier lets New Topic switch away
+            // before the Turn becomes visible, which can create two foreground Sessions.
+            var gate = _sessionGates.GetOrAdd(session.Id, static _ => new SemaphoreSlim(1, 1));
+            await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                var registration = await sessionStore.StartTurnAsync(
+                        session.Id,
+                        normalized,
+                        NormalizeModality(inputModality),
+                        string.IsNullOrWhiteSpace(idempotencyKey)
+                            ? Guid.NewGuid().ToString("N")
+                            : idempotencyKey.Trim(),
+                        timeProvider.GetUtcNow(),
+                        cancellationToken)
+                    .ConfigureAwait(false);
+                var registeredTurn = registration.Turn;
+                if (!registration.Accepted)
+                {
+                    if (!MatchesExpectedAction(
+                            registeredTurn,
+                            expectation.IntentKind,
+                            expectation.Target))
+                    {
+                        throw new InvalidOperationException(
+                            "同一个请求编号不能改成另一个电脑操作目标。 ");
+                    }
+
+                    return new SessionSubmitResult(session.Id, registration.Turn.Id, true);
+                }
+
+                if (expectation.IntentKind is not null)
+                {
+                    registeredTurn = await sessionStore.UpdateTurnAsync(
+                            registeredTurn with
+                            {
+                                ExpectedIntentKind = expectation.IntentKind,
+                                ExpectedTarget = expectation.Target
+                            },
+                            registeredTurn.Version,
+                            timeProvider.GetUtcNow(),
+                            cancellationToken)
+                        .ConfigureAwait(false);
+                }
+
+                await CancelForegroundWorkAsync(
+                        session,
+                        "新输入已取代上一条请求。",
+                        registration.Turn.Id,
+                        cancellationToken)
+                    .ConfigureAwait(false);
+
+                var active = new ActiveSessionWork(registeredTurn.Id);
+                if (!_activeWork.TryAdd(registeredTurn.Id, active))
+                {
+                    throw new InvalidOperationException("同一个会话请求已经在处理中。");
+                }
+
+                active.SetCompletion(Task.Run(
+                    () => RunInitialTurnAsync(session, registeredTurn, active.Cancellation.Token),
+                    CancellationToken.None));
+                PublishChange();
+                return new SessionSubmitResult(session.Id, registeredTurn.Id, false);
+            }
+            finally
+            {
+                gate.Release();
+            }
+        }
+        finally
+        {
+            _currentSessionGate.Release();
+        }
+    }
+
+    public async Task<LocalSessionSnapshot> ProvideProjectAsync(
+        Guid sessionId,
+        Guid turnId,
+        Guid projectId,
+        CancellationToken cancellationToken = default)
+    {
+        RequireStartedHost();
+        var project = (await tasks.GetAuthorizedProjectsAsync(cancellationToken).ConfigureAwait(false))
+            .SingleOrDefault(item => item.Id == projectId)
+            ?? throw new UnauthorizedAccessException("所选项目没有授权或已经失效。 ");
+        var gate = _turnGates.GetOrAdd(turnId, static _ => new SemaphoreSlim(1, 1));
+        await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var (session, turn) = await RequireWaitingTurnAsync(
+                    sessionId,
+                    turnId,
+                    SessionTurnPhase.WaitingForProject,
+                    cancellationToken)
+                .ConfigureAwait(false);
+            session = await sessionStore.SetSelectedProjectAsync(
+                    session.Id,
+                    project.Id,
+                    timeProvider.GetUtcNow(),
+                    cancellationToken)
+                .ConfigureAwait(false);
+            turn = await TransitionAsync(
+                    turn.Id,
+                    current => current with
+                    {
+                        ProjectId = project.Id,
+                        Phase = SessionTurnPhase.Understanding,
+                        MissingContext = SessionMissingContext.None,
+                        FailureCode = null,
+                        FailureMessage = null
+                    },
+                    cancellationToken)
+                .ConfigureAwait(false);
+            await PlanAndRouteAsync(
+                    session,
+                    turn,
+                    observationConsent: false,
+                    executeReadyPlan: false,
+                    cancellationToken)
+                .ConfigureAwait(false);
+            return await BuildSnapshotAsync(session, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
+    public async Task<LocalSessionSnapshot> ProvideFileAsync(
+        Guid sessionId,
+        Guid turnId,
+        string filePath,
+        CancellationToken cancellationToken = default)
+    {
+        RequireStartedHost();
+        if (string.IsNullOrWhiteSpace(filePath))
+        {
+            throw new ArgumentException("请选择这一次要处理的文件。", nameof(filePath));
+        }
+
+        var fullPath = Path.GetFullPath(filePath.Trim());
+        if (!File.Exists(fullPath))
+        {
+            throw new FileNotFoundException("刚才选择的文件已经不存在。", fullPath);
+        }
+
+        var gate = _turnGates.GetOrAdd(turnId, static _ => new SemaphoreSlim(1, 1));
+        await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var (session, turn) = await RequireWaitingTurnAsync(
+                    sessionId,
+                    turnId,
+                    SessionTurnPhase.WaitingForFile,
+                    cancellationToken)
+                .ConfigureAwait(false);
+            turn = await TransitionAsync(
+                    turn.Id,
+                    current => current with
+                    {
+                        FilePath = fullPath,
+                        Phase = SessionTurnPhase.Understanding,
+                        MissingContext = SessionMissingContext.None,
+                        FailureCode = null,
+                        FailureMessage = null
+                    },
+                    cancellationToken)
+                .ConfigureAwait(false);
+            await PlanAndRouteAsync(
+                    session,
+                    turn,
+                    observationConsent: false,
+                    executeReadyPlan: false,
+                    cancellationToken)
+                .ConfigureAwait(false);
+            return await BuildSnapshotAsync(session, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
+    public async Task<LocalSessionSnapshot> RespondWindowConsentAsync(
+        Guid sessionId,
+        Guid turnId,
+        bool granted,
+        CancellationToken cancellationToken = default)
+    {
+        RequireStartedHost();
+        var gate = _turnGates.GetOrAdd(turnId, static _ => new SemaphoreSlim(1, 1));
+        await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        SessionRecord session;
+        ActiveSessionWork? active = null;
+        try
+        {
+            var required = await RequireWaitingTurnAsync(
+                    sessionId,
+                    turnId,
+                    SessionTurnPhase.WaitingForWindowConsent,
+                    cancellationToken)
+                .ConfigureAwait(false);
+            session = required.Session;
+            if (!granted)
+            {
+                await TransitionAsync(
+                        required.Turn.Id,
+                        current => current with
+                        {
+                            Phase = SessionTurnPhase.Cancelled,
+                            MissingContext = SessionMissingContext.None,
+                            CancellationRequested = true,
+                            ResultSummary = "你没有同意本次窗口查看，任务已安全结束。",
+                            FailureCode = "window_consent_rejected",
+                            FailureMessage = "未获得本次窗口查看授权。",
+                            CompletedAtUtc = timeProvider.GetUtcNow()
+                        },
+                        cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            else
+            {
+                if (!MatchesPlannedExpectation(required.Turn))
+                {
+                    throw new UnauthorizedAccessException(
+                        "实际操作目标与刚才确认的目标不一致，已拒绝执行。 ");
+                }
+
+                active = StartAuthorizedContinuation(
+                    required.Session,
+                    required.Turn,
+                    observationConsent: true);
+            }
+        }
+        finally
+        {
+            gate.Release();
+        }
+
+        if (active is not null)
+        {
+            await active.Completion.WaitAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        return await BuildSnapshotAsync(session, cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task<LocalSessionSnapshot> RetryTurnAsync(
+        Guid sessionId,
+        Guid turnId,
+        CancellationToken cancellationToken = default)
+    {
+        RequireStartedHost();
+        var gate = _turnGates.GetOrAdd(turnId, static _ => new SemaphoreSlim(1, 1));
+        await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var (session, turn) = await RequireWaitingTurnAsync(
+                    sessionId,
+                    turnId,
+                    SessionTurnPhase.WaitingForWindow,
+                    cancellationToken)
+                .ConfigureAwait(false);
+            turn = await TransitionAsync(
+                    turn.Id,
+                    current => current with
+                    {
+                        Phase = SessionTurnPhase.Understanding,
+                        MissingContext = SessionMissingContext.None,
+                        FailureCode = null,
+                        FailureMessage = null
+                    },
+                    cancellationToken)
+                .ConfigureAwait(false);
+            await PlanAndRouteAsync(
+                    session,
+                    turn,
+                    observationConsent: false,
+                    executeReadyPlan: false,
+                    cancellationToken)
+                .ConfigureAwait(false);
+            return await BuildSnapshotAsync(session, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
+    public async Task<LocalSessionSnapshot> ConfirmTurnAsync(
+        Guid sessionId,
+        Guid turnId,
+        bool confirmed,
+        CancellationToken cancellationToken = default)
+    {
+        RequireStartedHost();
+        var gate = _turnGates.GetOrAdd(turnId, static _ => new SemaphoreSlim(1, 1));
+        await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        SessionRecord session;
+        ActiveSessionWork? active = null;
+        try
+        {
+            var required = await RequireWaitingTurnAsync(
+                    sessionId,
+                    turnId,
+                    SessionTurnPhase.WaitingForConfirmation,
+                    cancellationToken)
+                .ConfigureAwait(false);
+            session = required.Session;
+            if (!confirmed)
+            {
+                await TransitionAsync(
+                        required.Turn.Id,
+                        current => current with
+                        {
+                            Phase = SessionTurnPhase.Cancelled,
+                            MissingContext = SessionMissingContext.None,
+                            CancellationRequested = true,
+                            ResultSummary = "你取消了这次操作，没有执行任何动作。",
+                            FailureCode = "confirmation_rejected",
+                            FailureMessage = "用户未确认本次操作。",
+                            CompletedAtUtc = timeProvider.GetUtcNow()
+                        },
+                        cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            else
+            {
+                if (!MatchesPlannedExpectation(required.Turn))
+                {
+                    throw new UnauthorizedAccessException(
+                        "实际操作目标与刚才确认的目标不一致，已拒绝执行。 ");
+                }
+
+                active = StartAuthorizedContinuation(
+                    required.Session,
+                    required.Turn,
+                    observationConsent: false);
+            }
+        }
+        finally
+        {
+            gate.Release();
+        }
+
+        if (active is not null)
+        {
+            await active.Completion.WaitAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        return await BuildSnapshotAsync(session, cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task<LocalSessionSnapshot> CancelTurnAsync(
+        Guid sessionId,
+        Guid turnId,
+        CancellationToken cancellationToken = default)
+    {
+        RequireStartedHost();
+        var gate = _turnGates.GetOrAdd(turnId, static _ => new SemaphoreSlim(1, 1));
+        await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        SessionRecord session;
+        SessionTurnRecord turn;
+        ActiveSessionWork? active = null;
+        SessionTurnPhase phaseAtCancellation = default;
+        Guid? taskIdAtCancellation = null;
+        string? operationIdAtCancellation = null;
+        try
+        {
+            session = await RequireSessionAsync(sessionId, cancellationToken).ConfigureAwait(false);
+            turn = await RequireTurnAsync(session, turnId, cancellationToken).ConfigureAwait(false);
+            phaseAtCancellation = turn.Phase;
+            taskIdAtCancellation = turn.TaskId;
+            operationIdAtCancellation = turn.OperationId;
+            if (SessionTurnPhases.IsTerminal(turn.Phase))
+            {
+                return await BuildSnapshotAsync(session, cancellationToken).ConfigureAwait(false);
+            }
+
+            if (_activeWork.TryGetValue(turn.Id, out active))
+            {
+                if (turn.Phase != SessionTurnPhase.Responding)
+                {
+                    CancelActiveWork(active);
+                }
+            }
+            else
+            {
+                turn = await TransitionAsync(
+                        turn.Id,
+                        current => current with
+                        {
+                            Phase = SessionTurnPhase.Cancelled,
+                            MissingContext = SessionMissingContext.None,
+                            CancellationRequested = true,
+                            ResultSummary = "这次请求已取消。",
+                            FailureCode = "user_cancelled",
+                            FailureMessage = "用户取消了当前请求。",
+                            CompletedAtUtc = timeProvider.GetUtcNow()
+                        },
+                        cancellationToken)
+                    .ConfigureAwait(false);
+            }
+        }
+        finally
+        {
+            gate.Release();
+        }
+
+        if (active is not null)
+        {
+            if (phaseAtCancellation == SessionTurnPhase.Responding)
+            {
+                try
+                {
+                    await conversations.CancelAsync(session.ConversationId, cancellationToken)
+                        .ConfigureAwait(false);
+                }
+                catch (InvalidOperationException)
+                {
+                    // The provider may have completed immediately before cancellation won the turn gate.
+                    CancelActiveWork(active);
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(operationIdAtCancellation))
+            {
+                assistantCommands.CancelWindowObservation(operationIdAtCancellation);
+            }
+
+            await active.Completion.WaitAsync(TimeSpan.FromSeconds(12), cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        if (taskIdAtCancellation is { } taskId
+            && phaseAtCancellation is SessionTurnPhase.ProgrammingTask or SessionTurnPhase.WaitingForUser)
+        {
+            await tasks.CancelTaskAsync(
+                    taskId,
+                    $"session-cancel-{turn.Id:N}",
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        var latest = await sessionStore.GetTurnAsync(turn.Id, cancellationToken).ConfigureAwait(false);
+        if (latest is not null && !SessionTurnPhases.IsTerminal(latest.Phase))
+        {
+            await TryEndTurnAsync(
+                    latest.Id,
+                    SessionTurnPhase.Cancelled,
+                    "user_cancelled",
+                    "用户取消了当前请求。")
+                .ConfigureAwait(false);
+        }
+
+        return await BuildSnapshotAsync(session, cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task<LocalSessionSnapshot?> WaitForChangeAsync(
+        long knownChangeVersion,
+        TimeSpan maximumWait,
+        CancellationToken cancellationToken = default)
+    {
+        if (maximumWait < TimeSpan.Zero || maximumWait > TimeSpan.FromSeconds(30))
+        {
+            throw new ArgumentOutOfRangeException(nameof(maximumWait));
+        }
+
+        Task<long>? wait = null;
+        if (knownChangeVersion < 0)
+        {
+            var versionBeforeLookup = ChangeVersion;
+            var current = await GetCurrentAsync(cancellationToken).ConfigureAwait(false);
+            if (current is not null)
+            {
+                return current;
+            }
+
+            lock (_changeGate)
+            {
+                if (versionBeforeLookup == _changeVersion)
+                {
+                    wait = _nextChange.Task;
+                }
+            }
+        }
+
+        lock (_changeGate)
+        {
+            if (wait is null && knownChangeVersion == _changeVersion)
+            {
+                wait = _nextChange.Task;
+            }
+        }
+
+        if (wait is not null)
+        {
+            try
+            {
+                await wait.WaitAsync(maximumWait, cancellationToken).ConfigureAwait(false);
+            }
+            catch (TimeoutException)
+            {
+            }
+        }
+
+        return await GetCurrentAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task<SessionRecoveryResult> RecoverAsync(
+        CancellationToken cancellationToken = default)
+    {
+        var result = await sessionStore.RecoverInterruptedAsync(
+                timeProvider.GetUtcNow(),
+                cancellationToken)
+            .ConfigureAwait(false);
+        foreach (var turnId in result.InterruptedTurnIds)
+        {
+            await ReconcileRecoveredTurnAsync(turnId, cancellationToken).ConfigureAwait(false);
+        }
+
+        if (result.InterruptedTurnIds.Count > 0)
+        {
+            PublishChange();
+        }
+
+        return result;
+    }
+
+    private async Task ReconcileRecoveredTurnAsync(
+        Guid turnId,
+        CancellationToken cancellationToken)
+    {
+        var turn = await sessionStore.GetTurnAsync(turnId, cancellationToken).ConfigureAwait(false);
+        if (turn is null)
+        {
+            return;
+        }
+
+        SessionTurnPhase? authoritativePhase = null;
+        string? summary = turn.ResultSummary;
+        string? failureCode = turn.FailureCode;
+        string? failureMessage = turn.FailureMessage;
+        DateTimeOffset? completedAt = turn.CompletedAtUtc;
+        if (turn.ConversationTurnId is { } conversationTurnId)
+        {
+            var session = await sessionStore.GetSessionAsync(turn.SessionId, cancellationToken)
+                .ConfigureAwait(false);
+            var details = session is null
+                ? null
+                : await conversations.GetDetailsAsync(session.ConversationId, cancellationToken)
+                    .ConfigureAwait(false);
+            var conversationTurn = details?.Turns.SingleOrDefault(item => item.Id == conversationTurnId);
+            if (conversationTurn is not null)
+            {
+                authoritativePhase = conversationTurn.Status switch
+                {
+                    ConversationTurnStatus.Succeeded => SessionTurnPhase.Completed,
+                    ConversationTurnStatus.Cancelled => SessionTurnPhase.Cancelled,
+                    ConversationTurnStatus.Failed => SessionTurnPhase.Failed,
+                    _ => SessionTurnPhase.Interrupted
+                };
+                summary = conversationTurn.AssistantMessageId is { } assistantId
+                    ? details!.Messages.SingleOrDefault(message => message.Id == assistantId)?.Content
+                    : summary;
+                failureCode = conversationTurn.FailureCode;
+                failureMessage = conversationTurn.FailureMessage;
+                completedAt = conversationTurn.CompletedAtUtc ?? completedAt;
+            }
+        }
+        else if (turn.TaskId is { } taskId)
+        {
+            var details = await tasks.GetTaskDetailsAsync(taskId, cancellationToken).ConfigureAwait(false);
+            if (details is not null)
+            {
+                authoritativePhase = details.Task.Status switch
+                {
+                    AgentTaskStatus.Succeeded => SessionTurnPhase.Completed,
+                    AgentTaskStatus.Cancelled => SessionTurnPhase.Cancelled,
+                    AgentTaskStatus.Failed => SessionTurnPhase.Failed,
+                    _ => SessionTurnPhase.Interrupted
+                };
+                summary = details.Evidence?.UserSummary ?? summary;
+                failureCode = details.Task.FailureCode ?? failureCode;
+                failureMessage = details.Task.FailureMessage ?? failureMessage;
+                completedAt = details.Task.CompletedAtUtc ?? completedAt;
+            }
+        }
+
+        if (authoritativePhase is null || authoritativePhase == turn.Phase)
+        {
+            return;
+        }
+
+        await sessionStore.UpdateTurnAsync(
+                turn with
+                {
+                    Phase = authoritativePhase.Value,
+                    MissingContext = SessionMissingContext.None,
+                    ResultSummary = summary,
+                    FailureCode = failureCode,
+                    FailureMessage = failureMessage,
+                    CompletedAtUtc = completedAt ?? timeProvider.GetUtcNow()
+                },
+                turn.Version,
+                timeProvider.GetUtcNow(),
+                cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    public async Task StopAsync(CancellationToken cancellationToken = default)
+    {
+        var active = _activeWork.Values.ToArray();
+        foreach (var work in active)
+        {
+            work.Cancellation.Cancel();
+        }
+
+        var current = await sessionStore.GetCurrentSessionAsync(cancellationToken).ConfigureAwait(false);
+        if (current is not null)
+        {
+            var turns = await sessionStore.GetActiveTurnsAsync(current.Id, cancellationToken)
+                .ConfigureAwait(false);
+            if (turns.Any(turn => turn.Phase == SessionTurnPhase.Responding))
+            {
+                try
+                {
+                    await conversations.CancelAsync(current.ConversationId, cancellationToken)
+                        .ConfigureAwait(false);
+                }
+                catch (InvalidOperationException)
+                {
+                }
+            }
+        }
+
+        if (active.Length > 0)
+        {
+            await Task.WhenAll(active.Select(item => item.Completion))
+                .WaitAsync(TimeSpan.FromSeconds(15), cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        var monitors = _taskMonitors.Values.ToArray();
+        foreach (var monitor in monitors)
+        {
+            monitor.Cancellation.Cancel();
+        }
+
+        if (monitors.Length > 0)
+        {
+            await Task.WhenAll(monitors.Select(item => item.Completion))
+                .WaitAsync(TimeSpan.FromSeconds(5), cancellationToken)
+                .ConfigureAwait(false);
+        }
+    }
+
+    private async Task RunInitialTurnAsync(
+        SessionRecord session,
+        SessionTurnRecord turn,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await PlanAndRouteAsync(
+                    session,
+                    turn,
+                    observationConsent: false,
+                    executeReadyPlan: false,
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            await TryEndTurnAsync(
+                    turn.Id,
+                    SessionTurnPhase.Cancelled,
+                    "cancelled",
+                    "上一条请求已停止。")
+                .ConfigureAwait(false);
+        }
+        catch (Exception exception)
+        {
+            await TryEndTurnAsync(
+                    turn.Id,
+                    SessionTurnPhase.Failed,
+                    "session_request_failed",
+                    FriendlyException(exception))
+                .ConfigureAwait(false);
+        }
+        finally
+        {
+            RemoveActiveWork(turn.Id);
+            PublishChange();
+        }
+    }
+
+    private ActiveSessionWork StartAuthorizedContinuation(
+        SessionRecord session,
+        SessionTurnRecord turn,
+        bool observationConsent)
+    {
+        var active = new ActiveSessionWork(turn.Id);
+        if (!_activeWork.TryAdd(turn.Id, active))
+        {
+            throw new InvalidOperationException("同一个会话请求已经在处理中。 ");
+        }
+
+        active.SetCompletion(Task.Run(async () =>
+        {
+            try
+            {
+                var prepared = await TransitionAsync(
+                        turn.Id,
+                        current => current with
+                        {
+                            Phase = SessionTurnPhase.Understanding,
+                            MissingContext = SessionMissingContext.None,
+                            ConfirmationGranted = true,
+                            FailureCode = null,
+                            FailureMessage = null
+                        },
+                        CancellationToken.None)
+                    .ConfigureAwait(false);
+                if (SessionTurnPhases.IsTerminal(prepared.Phase))
+                {
+                    return;
+                }
+
+                await PlanAndRouteAsync(
+                        session,
+                        prepared,
+                        observationConsent,
+                        executeReadyPlan: true,
+                        active.Cancellation.Token)
+                    .ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (active.Cancellation.IsCancellationRequested)
+            {
+                await TryEndTurnAsync(
+                        turn.Id,
+                        SessionTurnPhase.Cancelled,
+                        "cancelled",
+                        "这次请求已停止。")
+                    .ConfigureAwait(false);
+            }
+            catch (Exception exception)
+            {
+                await TryEndTurnAsync(
+                        turn.Id,
+                        SessionTurnPhase.Failed,
+                        "session_execution_failed",
+                        FriendlyException(exception))
+                    .ConfigureAwait(false);
+            }
+            finally
+            {
+                RemoveActiveWork(turn.Id);
+                PublishChange();
+            }
+        }, CancellationToken.None));
+        PublishChange();
+        return active;
+    }
+
+    private async Task PlanAndRouteAsync(
+        SessionRecord session,
+        SessionTurnRecord turn,
+        bool observationConsent,
+        bool executeReadyPlan,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var latest = await sessionStore.GetTurnAsync(turn.Id, CancellationToken.None).ConfigureAwait(false);
+        if (latest is null || SessionTurnPhases.IsTerminal(latest.Phase))
+        {
+            return;
+        }
+
+        turn = latest;
+        var plan = await assistantCommands.PlanAsync(
+                new PlanAssistantCommandRequestDto(
+                    turn.InputText,
+                    turn.FilePath,
+                    turn.ProjectId ?? session.SelectedProjectId,
+                    observationConsent,
+                    turn.InputModality),
+                cancellationToken)
+            .ConfigureAwait(false);
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!MatchesExpectedAction(turn, plan.IntentKind, plan.CanonicalTarget))
+        {
+            await TransitionAsync(
+                    turn.Id,
+                    current => current with
+                    {
+                        WorkKind = WorkKindFor(ParseIntentKind(plan.IntentKind)),
+                        IntentKind = plan.IntentKind,
+                        PlanId = null,
+                        PlanTarget = plan.CanonicalTarget,
+                        Phase = SessionTurnPhase.Failed,
+                        MissingContext = SessionMissingContext.None,
+                        ResultSummary = "安全检查发现实际计划与刚才确认的目标不一致，因此没有执行。",
+                        FailureCode = "confirmed_target_mismatch",
+                        FailureMessage = "结构化操作目标不一致。",
+                        CompletedAtUtc = timeProvider.GetUtcNow()
+                    },
+                    CancellationToken.None)
+                .ConfigureAwait(false);
+            return;
+        }
+
+        turn = await TransitionAsync(
+                turn.Id,
+                current => current with
+                {
+                    IntentKind = plan.IntentKind,
+                    PlanTarget = plan.CanonicalTarget
+                },
+                CancellationToken.None)
+            .ConfigureAwait(false);
+        if (SessionTurnPhases.IsTerminal(turn.Phase))
+        {
+            return;
+        }
+
+        var kind = ParseIntentKind(plan.IntentKind);
+        var workKind = WorkKindFor(kind);
+
+        if (executeReadyPlan
+            && kind is UniversalIntentKind.DescribeForeground or UniversalIntentKind.SearchForeground
+            && turn.WindowHandle is { } authorizedWindow
+            && (plan.ForegroundApplication is not { } currentWindow
+                || currentWindow.WindowHandle != authorizedWindow
+                || !string.Equals(
+                    currentWindow.ProcessName,
+                    turn.WindowProcessName,
+                    StringComparison.OrdinalIgnoreCase)
+                || !string.Equals(
+                    currentWindow.WindowTitle,
+                    turn.WindowTitle,
+                    StringComparison.Ordinal)))
+        {
+            var changedPhase = kind == UniversalIntentKind.DescribeForeground
+                ? SessionTurnPhase.WaitingForWindowConsent
+                : SessionTurnPhase.WaitingForConfirmation;
+            var changedMissing = kind == UniversalIntentKind.DescribeForeground
+                ? SessionMissingContext.WindowConsent
+                : SessionMissingContext.Confirmation;
+            await TransitionAsync(
+                    turn.Id,
+                    current => current with
+                    {
+                        WorkKind = workKind,
+                        IntentKind = plan.IntentKind,
+                        PlanId = null,
+                        Phase = plan.ForegroundApplication is null
+                            ? SessionTurnPhase.WaitingForWindow
+                            : changedPhase,
+                        MissingContext = plan.ForegroundApplication is null
+                            ? SessionMissingContext.Window
+                            : changedMissing,
+                        WindowHandle = plan.ForegroundApplication?.WindowHandle,
+                        WindowTitle = plan.ForegroundApplication?.WindowTitle,
+                        WindowProcessName = plan.ForegroundApplication?.ProcessName,
+                        ConfirmationGranted = false,
+                        RequiresConfirmation = true,
+                        ResultSummary = plan.ForegroundApplication is null
+                            ? "目标窗口已经不可用，请切换到要操作的窗口后继续。"
+                            : "前台窗口已经变化，请确认新的目标窗口后再继续。",
+                        FailureCode = "window_target_changed",
+                        FailureMessage = "授权后目标窗口发生变化。"
+                    },
+                    CancellationToken.None)
+                .ConfigureAwait(false);
+            return;
+        }
+
+        if (string.Equals(plan.Readiness, IntentPlanReadiness.NeedsContext.ToString(), StringComparison.Ordinal))
+        {
+            var (phase, missing) = MissingContextState(kind, plan);
+            if (kind == UniversalIntentKind.CodingTask
+                && (turn.ProjectId ?? session.SelectedProjectId) is not null)
+            {
+                session = await sessionStore.SetSelectedProjectAsync(
+                        session.Id,
+                        projectId: null,
+                        timeProvider.GetUtcNow(),
+                        CancellationToken.None)
+                    .ConfigureAwait(false);
+            }
+
+            await TransitionAsync(
+                    turn.Id,
+                    current => current with
+                    {
+                        WorkKind = workKind,
+                        IntentKind = plan.IntentKind,
+                        PlanId = null,
+                        Phase = phase,
+                        MissingContext = missing,
+                        ProjectId = kind == UniversalIntentKind.CodingTask
+                            ? null
+                            : current.ProjectId,
+                        WindowHandle = plan.ForegroundApplication?.WindowHandle,
+                        WindowTitle = plan.ForegroundApplication?.WindowTitle,
+                        WindowProcessName = plan.ForegroundApplication?.ProcessName,
+                        RequiresConfirmation = phase == SessionTurnPhase.WaitingForWindowConsent,
+                        ResultSummary = plan.UserSummary,
+                        FailureCode = null,
+                        FailureMessage = null
+                    },
+                    CancellationToken.None)
+                .ConfigureAwait(false);
+            return;
+        }
+
+        if (!string.Equals(plan.Readiness, IntentPlanReadiness.Ready.ToString(), StringComparison.Ordinal)
+            || kind == UniversalIntentKind.Unsupported)
+        {
+            await TransitionAsync(
+                    turn.Id,
+                    current => current with
+                    {
+                        WorkKind = workKind,
+                        IntentKind = plan.IntentKind,
+                        Phase = SessionTurnPhase.Failed,
+                        MissingContext = SessionMissingContext.None,
+                        ResultSummary = plan.UserSummary,
+                        FailureCode = "intent_unsupported",
+                        FailureMessage = plan.UserSummary,
+                        CompletedAtUtc = timeProvider.GetUtcNow()
+                    },
+                    CancellationToken.None)
+                .ConfigureAwait(false);
+            return;
+        }
+
+        if (kind == UniversalIntentKind.Conversation)
+        {
+            await RunConversationTurnAsync(session, turn, cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
+        var directVoiceAction = IsDirectVoiceAction(kind, turn.InputModality);
+        if (plan.RequiresConfirmation && !executeReadyPlan && !directVoiceAction)
+        {
+            await TransitionAsync(
+                    turn.Id,
+                    current => current with
+                    {
+                        WorkKind = workKind,
+                        IntentKind = plan.IntentKind,
+                        PlanId = plan.PlanId,
+                        Phase = SessionTurnPhase.WaitingForConfirmation,
+                        MissingContext = SessionMissingContext.Confirmation,
+                        ProjectId = turn.ProjectId ?? session.SelectedProjectId,
+                        FilePath = turn.FilePath,
+                        WindowHandle = plan.ForegroundApplication?.WindowHandle,
+                        WindowTitle = plan.ForegroundApplication?.WindowTitle,
+                        WindowProcessName = plan.ForegroundApplication?.ProcessName,
+                        RequiresConfirmation = true,
+                        ResultSummary = plan.ConfirmationText ?? plan.UserSummary,
+                        FailureCode = null,
+                        FailureMessage = null
+                    },
+                    CancellationToken.None)
+                .ConfigureAwait(false);
+            return;
+        }
+
+        await ExecutePlanAsync(session, turn, plan, directVoiceAction, cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    private async Task ExecutePlanAsync(
+        SessionRecord session,
+        SessionTurnRecord turn,
+        AssistantIntentPlanDto plan,
+        bool directVoiceAction,
+        CancellationToken cancellationToken)
+    {
+        var kind = ParseIntentKind(plan.IntentKind);
+        var workKind = WorkKindFor(kind);
+        var operationId = $"session-action-{turn.Id:N}";
+        var runningPhase = kind == UniversalIntentKind.DescribeForeground
+            ? SessionTurnPhase.ObservingWindow
+            : SessionTurnPhase.Executing;
+        var running = await TransitionAsync(
+                turn.Id,
+                current => current with
+                {
+                    WorkKind = workKind,
+                    IntentKind = plan.IntentKind,
+                    PlanId = plan.PlanId,
+                    Phase = runningPhase,
+                    MissingContext = SessionMissingContext.None,
+                    OperationId = operationId,
+                    ProjectId = current.ProjectId ?? session.SelectedProjectId,
+                    WindowHandle = plan.ForegroundApplication?.WindowHandle ?? current.WindowHandle,
+                    WindowTitle = plan.ForegroundApplication?.WindowTitle ?? current.WindowTitle,
+                    WindowProcessName = plan.ForegroundApplication?.ProcessName ?? current.WindowProcessName,
+                    RequiresConfirmation = plan.RequiresConfirmation,
+                    FailureCode = null,
+                    FailureMessage = null
+                },
+                CancellationToken.None)
+            .ConfigureAwait(false);
+        cancellationToken.ThrowIfCancellationRequested();
+        if (SessionTurnPhases.IsTerminal(running.Phase) || running.Phase != runningPhase)
+        {
+            return;
+        }
+
+        var result = await assistantCommands.ExecuteAsync(
+                new ExecuteAssistantCommandRequestDto(
+                    plan.PlanId,
+                    Confirmed: !directVoiceAction,
+                    operationId,
+                    directVoiceAction ? "ExplicitVoice" : "VisibleConfirmation"),
+                cancellationToken)
+            .ConfigureAwait(false);
+
+        if (result.TaskId is { } taskId)
+        {
+            await TransitionAsync(
+                    running.Id,
+                    current => current with
+                    {
+                        TaskId = taskId,
+                        Phase = SessionTurnPhase.ProgrammingTask,
+                        ResultSummary = result.UserSummary,
+                        CompletedAtUtc = null
+                    },
+                    CancellationToken.None)
+                .ConfigureAwait(false);
+            StartTaskMonitor(turn.Id, taskId);
+            return;
+        }
+
+        var succeeded = string.Equals(result.Status, "Completed", StringComparison.OrdinalIgnoreCase);
+        await TransitionAsync(
+                running.Id,
+                current => current with
+                {
+                    Phase = succeeded ? SessionTurnPhase.Completed : SessionTurnPhase.Failed,
+                    ResultSummary = result.UserSummary,
+                    FailureCode = succeeded ? null : "action_failed",
+                    FailureMessage = succeeded ? null : result.UserSummary,
+                    CompletedAtUtc = timeProvider.GetUtcNow()
+                },
+                CancellationToken.None)
+            .ConfigureAwait(false);
+    }
+
+    private async Task RunConversationTurnAsync(
+        SessionRecord session,
+        SessionTurnRecord sessionTurn,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var responding = await TransitionAsync(
+                    sessionTurn.Id,
+                    turn => turn with
+                    {
+                        WorkKind = SessionWorkKind.Conversation,
+                        IntentKind = "Conversation",
+                        Phase = SessionTurnPhase.Responding,
+                        MissingContext = SessionMissingContext.None
+                    },
+                    CancellationToken.None)
+                .ConfigureAwait(false);
+            var sent = await conversations.SendAsync(
+                    session.ConversationId,
+                    responding.InputText,
+                    $"session-conversation-{responding.Id:N}",
+                    cancellationToken)
+                .ConfigureAwait(false);
+            await TransitionAsync(
+                    responding.Id,
+                    turn => turn with { ConversationTurnId = sent.TurnId },
+                    CancellationToken.None)
+                .ConfigureAwait(false);
+            await conversations.WaitForTurnAsync(sent.TurnId, CancellationToken.None).ConfigureAwait(false);
+            var details = await conversations.GetDetailsAsync(session.ConversationId, CancellationToken.None)
+                .ConfigureAwait(false) ?? throw new InvalidOperationException("会话已经不存在。");
+            var conversationTurn = details.Turns.Single(turn => turn.Id == sent.TurnId);
+            var assistant = conversationTurn.AssistantMessageId is { } assistantId
+                ? details.Messages.SingleOrDefault(message => message.Id == assistantId)
+                : null;
+            var phase = conversationTurn.Status switch
+            {
+                ConversationTurnStatus.Succeeded => SessionTurnPhase.Completed,
+                ConversationTurnStatus.Cancelled => SessionTurnPhase.Cancelled,
+                ConversationTurnStatus.Interrupted => SessionTurnPhase.Interrupted,
+                _ => SessionTurnPhase.Failed
+            };
+            await TransitionAsync(
+                    responding.Id,
+                    turn => turn with
+                    {
+                        Phase = phase,
+                        CancellationRequested = phase == SessionTurnPhase.Cancelled,
+                        ResultSummary = assistant?.Content,
+                        FailureCode = conversationTurn.FailureCode,
+                        FailureMessage = conversationTurn.FailureMessage,
+                        CompletedAtUtc = timeProvider.GetUtcNow()
+                    },
+                    CancellationToken.None)
+                .ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            await TryEndTurnAsync(
+                    sessionTurn.Id,
+                    SessionTurnPhase.Cancelled,
+                    "cancelled",
+                    "上一条回答已停止。")
+                .ConfigureAwait(false);
+        }
+        catch (Exception exception)
+        {
+            await TryEndTurnAsync(
+                    sessionTurn.Id,
+                    SessionTurnPhase.Failed,
+                    "session_conversation_failed",
+                    FriendlyException(exception))
+                .ConfigureAwait(false);
+        }
+    }
+
+    private async Task CancelForegroundWorkAsync(
+        SessionRecord session,
+        string reason,
+        Guid? excludedTurnId,
+        CancellationToken cancellationToken)
+    {
+        var turns = await sessionStore.GetActiveTurnsAsync(session.Id, cancellationToken)
+            .ConfigureAwait(false);
+        foreach (var turn in turns.Where(item =>
+                     item.Id != excludedTurnId && SessionTurnPhases.IsForegroundWork(item.Phase)))
+        {
+            var gate = _turnGates.GetOrAdd(turn.Id, static _ => new SemaphoreSlim(1, 1));
+            await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            ActiveSessionWork? active = null;
+            SessionTurnRecord? latest = null;
+            SessionTurnPhase phaseAtCancellation = default;
+            string? operationIdAtCancellation = null;
+            try
+            {
+                latest = await sessionStore.GetTurnAsync(turn.Id, cancellationToken).ConfigureAwait(false);
+                if (latest is null
+                    || SessionTurnPhases.IsTerminal(latest.Phase)
+                    || !SessionTurnPhases.IsForegroundWork(latest.Phase))
+                {
+                    continue;
+                }
+
+                phaseAtCancellation = latest.Phase;
+                operationIdAtCancellation = latest.OperationId;
+                if (_activeWork.TryGetValue(latest.Id, out active))
+                {
+                    if (latest.Phase != SessionTurnPhase.Responding)
+                    {
+                        // Confirm/consent and replacement share this Turn gate. Whichever
+                        // wins first either never starts, or receives cancellation here.
+                        CancelActiveWork(active);
+                    }
+                }
+                else
+                {
+                    latest = await TransitionAsync(
+                            latest.Id,
+                            current => current with
+                            {
+                                Phase = SessionTurnPhase.Cancelled,
+                                MissingContext = SessionMissingContext.None,
+                                CancellationRequested = true,
+                                FailureCode = "replaced_by_new_input",
+                                FailureMessage = reason,
+                                CompletedAtUtc = timeProvider.GetUtcNow()
+                            },
+                            cancellationToken)
+                        .ConfigureAwait(false);
+                }
+            }
+            finally
+            {
+                gate.Release();
+            }
+
+            if (active is not null)
+            {
+                if (phaseAtCancellation == SessionTurnPhase.Responding)
+                {
+                    try
+                    {
+                        await conversations.CancelAsync(session.ConversationId, cancellationToken)
+                            .ConfigureAwait(false);
+                    }
+                    catch (InvalidOperationException)
+                    {
+                        CancelActiveWork(active);
+                    }
+                }
+
+                if (!string.IsNullOrWhiteSpace(operationIdAtCancellation))
+                {
+                    assistantCommands.CancelWindowObservation(operationIdAtCancellation);
+                }
+
+                await active.Completion.WaitAsync(TimeSpan.FromSeconds(12), cancellationToken)
+                    .ConfigureAwait(false);
+            }
+
+            latest = await sessionStore.GetTurnAsync(turn.Id, cancellationToken).ConfigureAwait(false);
+            if (latest is not null && !SessionTurnPhases.IsTerminal(latest.Phase))
+            {
+                await TryEndTurnAsync(
+                        latest.Id,
+                        SessionTurnPhase.Cancelled,
+                        "replaced_by_new_input",
+                        reason)
+                    .ConfigureAwait(false);
+            }
+        }
+    }
+
+    private void StartTaskMonitor(Guid turnId, Guid taskId)
+    {
+        var monitor = new ActiveTaskMonitor(turnId, taskId);
+        if (!_taskMonitors.TryAdd(turnId, monitor))
+        {
+            monitor.Cancellation.Dispose();
+            return;
+        }
+
+        monitor.SetCompletion(Task.Run(
+            () => MonitorTaskAsync(monitor),
+            CancellationToken.None));
+    }
+
+    private async Task MonitorTaskAsync(ActiveTaskMonitor monitor)
+    {
+        try
+        {
+            while (!monitor.Cancellation.IsCancellationRequested)
+            {
+                var details = await tasks.GetTaskDetailsAsync(
+                        monitor.TaskId,
+                        monitor.Cancellation.Token)
+                    .ConfigureAwait(false);
+                if (details is null)
+                {
+                    await TryEndTurnAsync(
+                            monitor.TurnId,
+                            SessionTurnPhase.Failed,
+                            "task_missing",
+                            "编程任务记录已经不存在。")
+                        .ConfigureAwait(false);
+                    return;
+                }
+
+                var phase = details.Task.Status switch
+                {
+                    AgentTaskStatus.Pending or AgentTaskStatus.Running or
+                        AgentTaskStatus.CancellationRequested => SessionTurnPhase.ProgrammingTask,
+                    AgentTaskStatus.WaitingForUser => SessionTurnPhase.WaitingForUser,
+                    AgentTaskStatus.Succeeded => SessionTurnPhase.Completed,
+                    AgentTaskStatus.Cancelled => SessionTurnPhase.Cancelled,
+                    AgentTaskStatus.Interrupted => SessionTurnPhase.Interrupted,
+                    _ => SessionTurnPhase.Failed
+                };
+                var current = await sessionStore.GetTurnAsync(
+                        monitor.TurnId,
+                        monitor.Cancellation.Token)
+                    .ConfigureAwait(false);
+                if (current is null || SessionTurnPhases.IsTerminal(current.Phase))
+                {
+                    return;
+                }
+
+                if (current.Phase != phase
+                    || (phase == SessionTurnPhase.Completed
+                        && !string.Equals(current.ResultSummary, details.Evidence?.UserSummary, StringComparison.Ordinal)))
+                {
+                    await TransitionAsync(
+                            current.Id,
+                            turn => turn with
+                            {
+                                Phase = phase,
+                                MissingContext = phase == SessionTurnPhase.WaitingForUser
+                                    ? SessionMissingContext.UserInput
+                                    : SessionMissingContext.None,
+                                ResultSummary = details.Evidence?.UserSummary ?? turn.ResultSummary,
+                                FailureCode = phase == SessionTurnPhase.Failed
+                                    ? details.Task.FailureCode ?? "task_failed"
+                                    : null,
+                                FailureMessage = phase == SessionTurnPhase.Failed
+                                    ? details.Task.FailureMessage ?? "编程任务没有成功完成。"
+                                    : null,
+                                CompletedAtUtc = SessionTurnPhases.IsTerminal(phase)
+                                    ? details.Task.CompletedAtUtc ?? timeProvider.GetUtcNow()
+                                    : null
+                            },
+                            CancellationToken.None)
+                        .ConfigureAwait(false);
+                }
+
+                if (SessionTurnPhases.IsTerminal(phase))
+                {
+                    return;
+                }
+
+                await Task.Delay(TimeSpan.FromMilliseconds(250), monitor.Cancellation.Token)
+                    .ConfigureAwait(false);
+            }
+        }
+        catch (OperationCanceledException) when (monitor.Cancellation.IsCancellationRequested)
+        {
+        }
+        catch (Exception)
+        {
+            await TryEndTurnAsync(
+                    monitor.TurnId,
+                    SessionTurnPhase.Interrupted,
+                    "task_monitor_failed",
+                    "编程任务状态暂时无法继续同步，请在任务页查看实际状态。")
+                .ConfigureAwait(false);
+        }
+        finally
+        {
+            _taskMonitors.TryRemove(monitor.TurnId, out _);
+            monitor.Cancellation.Dispose();
+            PublishChange();
+        }
+    }
+
+    private async Task<SessionRecord> RequireSessionAsync(
+        Guid sessionId,
+        CancellationToken cancellationToken) =>
+        await sessionStore.GetSessionAsync(sessionId, cancellationToken).ConfigureAwait(false)
+        ?? throw new InvalidOperationException("会话已经不存在。 ");
+
+    private async Task<SessionTurnRecord> RequireTurnAsync(
+        SessionRecord session,
+        Guid turnId,
+        CancellationToken cancellationToken)
+    {
+        var turn = await sessionStore.GetTurnAsync(turnId, cancellationToken).ConfigureAwait(false)
+            ?? throw new InvalidOperationException("会话请求已经不存在。 ");
+        if (turn.SessionId != session.Id)
+        {
+            throw new UnauthorizedAccessException("不能为另一个会话补充信息或授权。 ");
+        }
+
+        return turn;
+    }
+
+    private async Task<(SessionRecord Session, SessionTurnRecord Turn)> RequireWaitingTurnAsync(
+        Guid sessionId,
+        Guid turnId,
+        SessionTurnPhase requiredPhase,
+        CancellationToken cancellationToken)
+    {
+        var session = await RequireSessionAsync(sessionId, cancellationToken).ConfigureAwait(false);
+        var turn = await RequireTurnAsync(session, turnId, cancellationToken).ConfigureAwait(false);
+        if (turn.Phase != requiredPhase)
+        {
+            throw new InvalidOperationException("这条请求当前不接受这项补充或确认。 ");
+        }
+
+        return (session, turn);
+    }
+
+    private static UniversalIntentKind ParseIntentKind(string value) =>
+        Enum.TryParse<UniversalIntentKind>(value, ignoreCase: false, out var kind)
+            ? kind
+            : UniversalIntentKind.Unsupported;
+
+    private static SessionWorkKind WorkKindFor(UniversalIntentKind kind) => kind switch
+    {
+        UniversalIntentKind.Conversation => SessionWorkKind.Conversation,
+        UniversalIntentKind.CodingTask => SessionWorkKind.CodingTask,
+        UniversalIntentKind.DescribeForeground => SessionWorkKind.WindowObservation,
+        UniversalIntentKind.Unsupported => SessionWorkKind.Unknown,
+        _ => SessionWorkKind.DesktopAction
+    };
+
+    private static (SessionTurnPhase Phase, SessionMissingContext Missing) MissingContextState(
+        UniversalIntentKind kind,
+        AssistantIntentPlanDto plan) => kind switch
+        {
+            UniversalIntentKind.CodingTask =>
+                (SessionTurnPhase.WaitingForProject, SessionMissingContext.Project),
+            UniversalIntentKind.OpenFile =>
+                (SessionTurnPhase.WaitingForFile, SessionMissingContext.File),
+            UniversalIntentKind.DescribeForeground when plan.ForegroundApplication is not null =>
+                (SessionTurnPhase.WaitingForWindowConsent, SessionMissingContext.WindowConsent),
+            UniversalIntentKind.DescribeForeground or UniversalIntentKind.SearchForeground =>
+                (SessionTurnPhase.WaitingForWindow, SessionMissingContext.Window),
+            _ => (SessionTurnPhase.Failed, SessionMissingContext.None)
+        };
+
+    private static bool IsDirectVoiceAction(UniversalIntentKind kind, string inputModality) =>
+        string.Equals(inputModality, "Voice", StringComparison.OrdinalIgnoreCase)
+        && kind is UniversalIntentKind.OpenApplication
+            or UniversalIntentKind.OpenWebsite
+            or UniversalIntentKind.SearchForeground;
+
+    private void RemoveActiveWork(Guid turnId)
+    {
+        if (_activeWork.TryRemove(turnId, out var removed))
+        {
+            removed.Cancellation.Dispose();
+        }
+    }
+
+    private static void CancelActiveWork(ActiveSessionWork active)
+    {
+        try
+        {
+            active.Cancellation.Cancel();
+        }
+        catch (ObjectDisposedException)
+        {
+            // The work reached a terminal state between lookup and cancellation.
+        }
+    }
+
+    private async Task<SessionTurnRecord> TransitionAsync(
+        Guid turnId,
+        Func<SessionTurnRecord, SessionTurnRecord> transition,
+        CancellationToken cancellationToken)
+    {
+        var current = await sessionStore.GetTurnAsync(turnId, cancellationToken).ConfigureAwait(false)
+            ?? throw new InvalidOperationException("会话请求不存在。");
+        if (SessionTurnPhases.IsTerminal(current.Phase))
+        {
+            return current;
+        }
+
+        var updated = await sessionStore.UpdateTurnAsync(
+                transition(current),
+                current.Version,
+                timeProvider.GetUtcNow(),
+                cancellationToken)
+            .ConfigureAwait(false);
+        PublishChange();
+        return updated;
+    }
+
+    private async Task TryEndTurnAsync(
+        Guid turnId,
+        SessionTurnPhase phase,
+        string failureCode,
+        string failureMessage)
+    {
+        try
+        {
+            await TransitionAsync(
+                    turnId,
+                    turn => turn with
+                    {
+                        Phase = phase,
+                        CancellationRequested = phase == SessionTurnPhase.Cancelled,
+                        FailureCode = failureCode,
+                        FailureMessage = failureMessage,
+                        CompletedAtUtc = timeProvider.GetUtcNow()
+                    },
+                    CancellationToken.None)
+                .ConfigureAwait(false);
+        }
+        catch
+        {
+        }
+    }
+
+    private async Task<LocalSessionSnapshot> BuildSnapshotAsync(
+        SessionRecord session,
+        CancellationToken cancellationToken)
+    {
+        for (var attempt = 0; attempt < 4; attempt++)
+        {
+            var before = ChangeVersion;
+            var latestSessionTask = sessionStore.GetSessionAsync(session.Id, cancellationToken);
+            var turnsTask = sessionStore.GetTurnsAsync(session.Id, cancellationToken);
+            var activeTask = sessionStore.GetActiveTurnsAsync(session.Id, cancellationToken);
+            var detailsTask = conversations.GetDetailsAsync(session.ConversationId, cancellationToken);
+            var projectsTask = tasks.GetAuthorizedProjectsAsync(cancellationToken);
+            await Task.WhenAll(
+                    latestSessionTask,
+                    turnsTask,
+                    activeTask,
+                    detailsTask,
+                    projectsTask)
+                .ConfigureAwait(false);
+            var after = ChangeVersion;
+            if (before != after && attempt < 3)
+            {
+                continue;
+            }
+
+            var latestSession = await latestSessionTask.ConfigureAwait(false) ?? session;
+            var details = await detailsTask.ConfigureAwait(false);
+            var selectedName = latestSession.SelectedProjectId is { } selectedProjectId
+                ? (await projectsTask.ConfigureAwait(false))
+                    .SingleOrDefault(project => project.Id == selectedProjectId)?.Name
+                : null;
+            return new LocalSessionSnapshot(
+                after,
+                _coordinatorInstanceId,
+                _coordinatorStartedAtUtc,
+                latestSession,
+                selectedName,
+                await turnsTask.ConfigureAwait(false),
+                await activeTask.ConfigureAwait(false),
+                details?.Messages ?? []);
+        }
+
+        throw new InvalidOperationException("会话状态更新过于频繁，请稍后重试。 ");
+    }
+
+    private DesktopHostSnapshot RequireStartedHost()
+    {
+        var snapshot = hostState.Snapshot;
+        return snapshot.IsStarted && snapshot.LocalDevice is not null
+            ? snapshot
+            : throw new InvalidOperationException("Desktop Host 尚未完成启动。");
+    }
+
+    private long ChangeVersion
+    {
+        get
+        {
+            lock (_changeGate)
+            {
+                return _changeVersion;
+            }
+        }
+    }
+
+    private void PublishChange()
+    {
+        TaskCompletionSource<long> completed;
+        long version;
+        lock (_changeGate)
+        {
+            version = ++_changeVersion;
+            completed = _nextChange;
+            _nextChange = NewChangeSource();
+        }
+
+        completed.TrySetResult(version);
+    }
+
+    private static TaskCompletionSource<long> NewChangeSource() =>
+        new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    private static string NormalizeInput(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            throw new ArgumentException("请输入想让元枢处理的内容。", nameof(text));
+        }
+
+        var value = text.Trim();
+        if (value.Length > MaximumInputLength)
+        {
+            throw new ArgumentException($"单条消息不能超过 {MaximumInputLength} 个字符。", nameof(text));
+        }
+
+        return value;
+    }
+
+    private static string NormalizeModality(string value) =>
+        string.Equals(value, "Voice", StringComparison.OrdinalIgnoreCase)
+            ? "Voice"
+            : string.Equals(value, "ProgrammingTask", StringComparison.OrdinalIgnoreCase)
+                ? "ProgrammingTask"
+                : "Text";
+
+    private static (string? IntentKind, string? Target) NormalizeActionExpectation(
+        string? intentKind,
+        string? target)
+    {
+        if (string.IsNullOrWhiteSpace(intentKind) && string.IsNullOrWhiteSpace(target))
+        {
+            return (null, null);
+        }
+
+        if (string.IsNullOrWhiteSpace(intentKind) || string.IsNullOrWhiteSpace(target))
+        {
+            throw new ArgumentException("电脑操作目标必须同时包含类型和精确目标。 ");
+        }
+
+        var normalizedKind = intentKind.Trim();
+        var normalizedTarget = target.Trim();
+        if (normalizedTarget.Length > 2_048)
+        {
+            throw new ArgumentException("电脑操作目标过长。 ");
+        }
+
+        if (string.Equals(normalizedKind, "OpenWebsite", StringComparison.Ordinal))
+        {
+            if (!Uri.TryCreate(normalizedTarget, UriKind.Absolute, out var uri)
+                || !string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)
+                || !string.IsNullOrWhiteSpace(uri.UserInfo))
+            {
+                throw new ArgumentException("网站目标必须是有效的 https 地址。 ");
+            }
+
+            return ("OpenWebsite", uri.AbsoluteUri);
+        }
+
+        if (!string.Equals(normalizedKind, "OpenApplication", StringComparison.Ordinal))
+        {
+            throw new ArgumentException("当前只允许为应用或网站绑定结构化操作目标。 ");
+        }
+
+        return ("OpenApplication", normalizedTarget);
+    }
+
+    private static bool MatchesExpectedAction(
+        SessionTurnRecord turn,
+        string? actualIntentKind,
+        string? actualTarget) =>
+        turn.ExpectedIntentKind is null && turn.ExpectedTarget is null
+        || string.Equals(turn.ExpectedIntentKind, actualIntentKind, StringComparison.Ordinal)
+        && string.Equals(turn.ExpectedTarget, actualTarget, StringComparison.Ordinal);
+
+    private static bool MatchesPlannedExpectation(SessionTurnRecord turn) =>
+        MatchesExpectedAction(turn, turn.IntentKind, turn.PlanTarget);
+
+    private static string BuildTitle(string text) =>
+        text.Length <= 36 ? text : text[..36] + "…";
+
+    private static string FriendlyException(Exception exception) => exception switch
+    {
+        FileNotFoundException => "没有找到 Codex，请先安装并登录 Codex。",
+        NotSupportedException => "当前 Codex 版本尚未通过兼容验证。",
+        _ => "这次处理没有成功，请稍后重试。"
+    };
+
+    private sealed class ActiveSessionWork(Guid turnId)
+    {
+        private readonly TaskCompletionSource<Task> _completion =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public Guid TurnId { get; } = turnId;
+
+        public CancellationTokenSource Cancellation { get; } = new();
+
+        public Task Completion => _completion.Task.Unwrap();
+
+        public void SetCompletion(Task completion) => _completion.TrySetResult(completion);
+    }
+
+    private sealed class ActiveTaskMonitor(Guid turnId, Guid taskId)
+    {
+        private readonly TaskCompletionSource<Task> _completion =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public Guid TurnId { get; } = turnId;
+
+        public Guid TaskId { get; } = taskId;
+
+        public CancellationTokenSource Cancellation { get; } = new();
+
+        public Task Completion => _completion.Task.Unwrap();
+
+        public void SetCompletion(Task completion) => _completion.TrySetResult(completion);
+    }
+}

@@ -1,4 +1,5 @@
 using ScreenGuide.Core.Tasking;
+using ScreenGuide.Core.Sessions;
 using Microsoft.Data.Sqlite;
 using ScreenGuide.Persistence.Runtime;
 using ScreenGuide.Persistence.Sqlite;
@@ -25,6 +26,92 @@ public sealed class SqliteTaskStoreTests
         Assert.Equal(ResourceAccessMode.Execute, scope.AccessMode);
         Assert.Equal(environment.Project.Id, scope.ResourceId);
         Assert.Equal(environment.Project.RootPath, scope.ScopeValue);
+    }
+
+    [Fact]
+    public async Task MigratesVersion6SessionTurnsToVersion7WithoutLosingExistingData()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"screen-guide-v6-migration-{Guid.NewGuid():N}");
+        var databasePath = Path.Combine(root, "state", "tasking.db");
+        Directory.CreateDirectory(Path.GetDirectoryName(databasePath)!);
+        var deviceId = Guid.NewGuid();
+        var conversationId = Guid.NewGuid();
+        var turnId = Guid.NewGuid();
+        var now = new DateTimeOffset(2026, 8, 24, 2, 3, 4, TimeSpan.Zero);
+
+        try
+        {
+            await using (var connection = new SqliteConnection($"Data Source={databasePath}"))
+            {
+                await connection.OpenAsync();
+                await using var command = connection.CreateCommand();
+                command.CommandText = SqliteSchema.CreateVersion1
+                    + SqliteSchema.CreateVersion2
+                    + SqliteSchema.CreateVersion3
+                    + SqliteSchema.CreateVersion4
+                    + SqliteSchema.CreateVersion5
+                    + SqliteSchema.CreateVersion6
+                    + """
+                      INSERT INTO schema_info(version, applied_at_utc)
+                      VALUES(1, $now), (2, $now), (3, $now), (4, $now), (5, $now), (6, $now);
+                      INSERT INTO devices(id, display_name, device_type, trust_state, created_at_utc)
+                      VALUES($deviceId, 'Migration Host', 'WindowsHost', 'Local', $now);
+                      INSERT INTO conversations(
+                          id, created_by_device_id, title, provider_id, status,
+                          created_at_utc, updated_at_utc, version)
+                      VALUES($conversationId, $deviceId, 'Existing session', 'codex', 'Active', $now, $now, 0);
+                      INSERT INTO sessions(
+                          id, conversation_id, created_by_device_id, title, status, is_current,
+                          created_at_utc, updated_at_utc, last_active_at_utc, version)
+                      VALUES($conversationId, $conversationId, $deviceId, 'Existing session', 'Active', 1,
+                          $now, $now, $now, 0);
+                      INSERT INTO session_turns(
+                          id, session_id, sequence_number, input_text, input_modality, idempotency_key,
+                          work_kind, phase, missing_context, intent_kind,
+                          requires_confirmation, confirmation_granted, cancellation_requested,
+                          created_at_utc, updated_at_utc, version)
+                      VALUES($turnId, $conversationId, 1, '打开记事本', 'Text', 'existing-v6-turn',
+                          'DesktopAction', 'WaitingForConfirmation', 'Confirmation', 'OpenApplication',
+                          1, 0, 0, $now, $now, 3);
+                      """;
+                command.Parameters.AddWithValue("$now", now.ToString("O"));
+                command.Parameters.AddWithValue("$deviceId", deviceId.ToString("D"));
+                command.Parameters.AddWithValue("$conversationId", conversationId.ToString("D"));
+                command.Parameters.AddWithValue("$turnId", turnId.ToString("D"));
+                await command.ExecuteNonQueryAsync();
+            }
+
+            await using (var store = new SqliteTaskStore(databasePath))
+            {
+                await store.InitializeAsync();
+                Assert.Equal(7, await store.GetSchemaVersionAsync());
+            }
+
+            await using (var sessions = new SqliteSessionStore(databasePath))
+            {
+                await sessions.InitializeAsync();
+                var stored = await sessions.GetTurnAsync(turnId);
+
+                Assert.Equal("打开记事本", stored?.InputText);
+                Assert.Equal("OpenApplication", stored?.IntentKind);
+                Assert.Equal(3, stored?.Version);
+                Assert.Null(stored?.ExpectedIntentKind);
+                Assert.Null(stored?.ExpectedTarget);
+                Assert.Null(stored?.PlanTarget);
+            }
+
+            Assert.Single(Directory.GetFiles(
+                Path.GetDirectoryName(databasePath)!,
+                "tasking.pre-v7-from-v6-*.backup.db"));
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
     }
 
     [Fact]

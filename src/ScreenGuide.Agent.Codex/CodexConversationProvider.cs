@@ -41,6 +41,10 @@ public sealed class CodexConversationProvider : IConversationProvider
             throw new InvalidOperationException("这个对话仍有一条消息正在生成回答。");
         }
 
+        using var cancellationRegistration = cancellationToken.Register(
+            static state => RequestCancellation((ActiveConversation)state!),
+            active);
+
         Process? process = null;
         WindowsProcessJob? job = null;
         try
@@ -153,7 +157,7 @@ public sealed class CodexConversationProvider : IConversationProvider
 
             await process.WaitForExitAsync(CancellationToken.None).ConfigureAwait(false);
             var stderr = Sanitize(await stderrTask.ConfigureAwait(false));
-            if (active.CancellationRequested && !active.AuthoritativeTerminalReceived)
+            if (active.CancellationRequested || cancellationToken.IsCancellationRequested)
             {
                 return Result(active, ConversationProviderOutcome.Cancelled, null, "cancelled", "回答已停止。");
             }
@@ -194,7 +198,17 @@ public sealed class CodexConversationProvider : IConversationProvider
 
             return Result(active, ConversationProviderOutcome.Succeeded, reply, null, null);
         }
-        catch (Exception exception) when (exception is not OperationCanceledException)
+        catch (OperationCanceledException) when (
+            cancellationToken.IsCancellationRequested || active.CancellationRequested)
+        {
+            return Result(
+                active,
+                ConversationProviderOutcome.Cancelled,
+                null,
+                "cancelled",
+                "回答已停止。");
+        }
+        catch (Exception exception)
         {
             return Result(
                 active,
@@ -237,11 +251,7 @@ public sealed class CodexConversationProvider : IConversationProvider
             return Task.CompletedTask;
         }
 
-        lock (active.Gate)
-        {
-            active.CancellationRequested = true;
-            active.Job?.Terminate();
-        }
+        RequestCancellation(active);
 
         return Task.CompletedTask;
     }
@@ -437,6 +447,22 @@ public sealed class CodexConversationProvider : IConversationProvider
             active.ProcessId,
             failureCode,
             failureMessage);
+
+    private static void RequestCancellation(ActiveConversation active)
+    {
+        lock (active.Gate)
+        {
+            active.CancellationRequested = true;
+            try
+            {
+                active.Job?.Terminate();
+            }
+            catch
+            {
+                // Job disposal is still the final process-tree cleanup boundary.
+            }
+        }
+    }
 
     private static string Sanitize(string? value)
     {

@@ -1,6 +1,6 @@
 param(
     [string]$InstallerPath,
-    [string]$ExpectedFileVersion = '0.2.1.0'
+    [string]$ExpectedFileVersion = '0.3.0.0'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -10,7 +10,7 @@ $tempRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath())
 $testRoot = [IO.Path]::GetFullPath((Join-Path $tempRoot "ScreenGuideInstallAcceptance-$token"))
 $installRoot = Join-Path $testRoot 'Program'
 $dataRoot = Join-Path $testRoot 'UserData'
-$defaultSetup = Join-Path $PSScriptRoot '..\artifacts\release\元枢-V0.2.1-安装包.exe'
+$defaultSetup = Join-Path $PSScriptRoot '..\artifacts\release\元枢-V0.3.0-安装包.exe'
 $setup = [IO.Path]::GetFullPath($(if ($InstallerPath) { $InstallerPath } else { $defaultSetup }))
 $existingProductRoot = Join-Path $env:LOCALAPPDATA 'Programs\YuanshuDesktop'
 $existingUninstallKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\{E2B9C242-2965-48BC-B2C6-CF83A2B11953}_is1'

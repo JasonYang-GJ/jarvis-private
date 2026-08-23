@@ -31,7 +31,8 @@ public sealed record IntentPlanningContext(
     Guid? SelectedProjectId = null,
     string? SelectedProjectName = null,
     ForegroundApplicationContext? ForegroundApplication = null,
-    bool ForegroundObservationConsent = false);
+    bool ForegroundObservationConsent = false,
+    UniversalIntentKind? ExplicitUserIntent = null);
 
 public sealed record IntentPlan(
     Guid Id,
@@ -79,7 +80,8 @@ public sealed partial class DeterministicIntentPlanner(TimeProvider timeProvider
             return Unsupported(text ?? string.Empty, "请说出或输入你希望电脑完成的事情。");
         }
 
-        if (IsCodingRequest(normalized))
+        if (context.ExplicitUserIntent == UniversalIntentKind.CodingTask
+            || IsCodingRequest(normalized))
         {
             return context.SelectedProjectId is null
                 ? NeedsContext(normalized, UniversalIntentKind.CodingTask,
@@ -90,8 +92,17 @@ public sealed partial class DeterministicIntentPlanner(TimeProvider timeProvider
                     $"确认后，编程助手只会在“{context.SelectedProjectName ?? "所选项目"}”的授权范围内执行。 ");
         }
 
-        if (context.SelectedFilePath is not null && IsOpenFileRequest(normalized))
+        if (IsExplicitFileRequest(normalized))
         {
+            if (context.SelectedFilePath is null)
+            {
+                return NeedsContext(
+                    normalized,
+                    UniversalIntentKind.OpenFile,
+                    "请先选择这一次要处理的文件。",
+                    "文件");
+            }
+
             var fileName = Path.GetFileName(context.SelectedFilePath);
             return Ready(normalized, UniversalIntentKind.OpenFile,
                 $"用默认应用打开“{fileName}”", context.SelectedFilePath,
@@ -205,6 +216,10 @@ public sealed partial class DeterministicIntentPlanner(TimeProvider timeProvider
     private static bool IsOpenFileRequest(string text) =>
         text.Contains("打开", StringComparison.OrdinalIgnoreCase)
         || text.Contains("查看", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsExplicitFileRequest(string text) =>
+        text.Contains("文件", StringComparison.OrdinalIgnoreCase)
+        && IsOpenFileRequest(text);
 
     private static bool IsDescribeForegroundRequest(string text) =>
         (text.Contains("这个窗口", StringComparison.Ordinal)

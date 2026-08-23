@@ -78,6 +78,36 @@ public sealed class CodexConversationProviderTests
         Assert.False(File.Exists(marker));
     }
 
+    [Fact]
+    public async Task SendCancellationTokenTerminatesConversationProcessTree()
+    {
+        await using var environment = ConversationProviderEnvironment.Create();
+        await using var provider = environment.CreateProvider();
+        var marker = Path.Combine(environment.RootDirectory, "token-child-must-not-survive.txt");
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var cancellation = new CancellationTokenSource();
+        var running = provider.SendAsync(
+            new ConversationProviderRequest(
+                Guid.NewGuid(),
+                Guid.NewGuid(),
+                $"TEST_LONG_RUNNING\nMARKER={marker}",
+                null),
+            (threadId, processId) =>
+            {
+                started.TrySetResult();
+                return Task.CompletedTask;
+            },
+            cancellation.Token);
+        await started.Task.WaitAsync(TimeSpan.FromSeconds(3));
+
+        cancellation.Cancel();
+        var result = await running.WaitAsync(TimeSpan.FromSeconds(5));
+        await Task.Delay(TimeSpan.FromSeconds(5));
+
+        Assert.Equal(ConversationProviderOutcome.Cancelled, result.Outcome);
+        Assert.False(File.Exists(marker));
+    }
+
     private sealed class ConversationProviderEnvironment : IAsyncDisposable
     {
         private ConversationProviderEnvironment(string rootDirectory)

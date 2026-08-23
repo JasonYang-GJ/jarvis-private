@@ -12,7 +12,7 @@ logs/
 captures/
 recordings/
 screenshots/
-sessions/
+/sessions/
 evidence-baselines/
 evidence-snapshots/
 *.evidence-snapshot.json

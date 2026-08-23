@@ -23,7 +23,8 @@ public sealed class ConversationService(
     TimeProvider timeProvider)
 {
     private const int MaximumMessageLength = 20_000;
-    private readonly ConcurrentDictionary<Guid, Task> _runningTurns = new();
+    private readonly ConcurrentDictionary<Guid, ActiveConversationTurn> _runningTurns = new();
+    private readonly ConcurrentDictionary<Guid, ActiveConversationTurn> _activeConversations = new();
 
     public Task<IReadOnlyList<ConversationRecord>> GetConversationsAsync(
         CancellationToken cancellationToken = default) =>
@@ -90,12 +91,28 @@ public sealed class ConversationService(
             return new ConversationSendResult(conversationId, registration.Turn.Id, true);
         }
 
-        var run = RunTurnAsync(conversationId, registration.Turn.Id, normalized);
-        _runningTurns[registration.Turn.Id] = run;
+        var active = new ActiveConversationTurn(
+            conversationId,
+            registration.Turn.Id,
+            cancellationToken);
+        if (!_activeConversations.TryAdd(conversationId, active))
+        {
+            throw new InvalidOperationException("这个会话仍有一条消息正在处理。");
+        }
+
+        var run = RunTurnAsync(
+            conversationId,
+            registration.Turn.Id,
+            normalized,
+            active.Cancellation.Token);
+        active.SetRun(run);
+        _runningTurns[registration.Turn.Id] = active;
         _ = run.ContinueWith(
             completedTask =>
             {
-                _runningTurns.TryRemove(registration.Turn.Id, out var removedTask);
+                _runningTurns.TryRemove(registration.Turn.Id, out _);
+                _activeConversations.TryRemove(conversationId, out _);
+                active.Dispose();
             },
             CancellationToken.None,
             TaskContinuationOptions.ExecuteSynchronously,
@@ -105,7 +122,7 @@ public sealed class ConversationService(
                 conversationId,
                 AuditOutcome.Success,
                 JsonSerializer.Serialize(new { turnId = registration.Turn.Id }),
-                cancellationToken)
+                CancellationToken.None)
             .ConfigureAwait(false);
         return new ConversationSendResult(conversationId, registration.Turn.Id, false);
     }
@@ -115,12 +132,40 @@ public sealed class ConversationService(
         RequireStartedHost();
         var conversation = await conversationStore.GetConversationAsync(conversationId, cancellationToken)
             .ConfigureAwait(false) ?? throw new InvalidOperationException("对话不存在。");
-        if (conversation.Status != ConversationStatus.Responding)
+        if (!_activeConversations.TryGetValue(conversationId, out var active))
         {
-            throw new InvalidOperationException("当前没有正在生成的回答。");
+            throw new InvalidOperationException(
+                conversation.Status == ConversationStatus.Responding
+                    ? "当前回答已经结束。"
+                    : "当前没有正在生成的回答。");
         }
 
+        Exception? persistenceFailure = null;
+        try
+        {
+            await conversationStore.FailTurnAsync(
+                    conversationId,
+                    active.TurnId,
+                    ConversationTurnStatus.Cancelled,
+                    "cancelled",
+                    "回答已停止。",
+                    timeProvider.GetUtcNow(),
+                    CancellationToken.None)
+                .ConfigureAwait(false);
+        }
+        catch (Exception exception)
+        {
+            persistenceFailure = exception;
+        }
+
+        active.Cancellation.Cancel();
         await provider.CancelAsync(conversationId, cancellationToken).ConfigureAwait(false);
+        await active.Run.WaitAsync(TimeSpan.FromSeconds(12), cancellationToken).ConfigureAwait(false);
+        if (persistenceFailure is not null)
+        {
+            throw new InvalidOperationException("无法安全保存回答的取消状态。", persistenceFailure);
+        }
+
         await AppendAuditAsync("ConversationCancelRequested", conversationId, AuditOutcome.Success, null, cancellationToken)
             .ConfigureAwait(false);
     }
@@ -129,20 +174,20 @@ public sealed class ConversationService(
     {
         if (_runningTurns.TryGetValue(turnId, out var running))
         {
-            await running.WaitAsync(cancellationToken).ConfigureAwait(false);
+            await running.Run.WaitAsync(cancellationToken).ConfigureAwait(false);
         }
     }
 
     public async Task StopAsync(CancellationToken cancellationToken = default)
     {
-        var conversations = await conversationStore.GetConversationsAsync(cancellationToken)
-            .ConfigureAwait(false);
-        foreach (var conversation in conversations.Where(item => item.Status == ConversationStatus.Responding))
+        var active = _activeConversations.Values.ToArray();
+        foreach (var turn in active)
         {
-            await provider.CancelAsync(conversation.Id, cancellationToken).ConfigureAwait(false);
+            turn.Cancellation.Cancel();
+            await provider.CancelAsync(turn.ConversationId, cancellationToken).ConfigureAwait(false);
         }
 
-        var running = _runningTurns.Values.ToArray();
+        var running = active.Select(item => item.Run).ToArray();
         if (running.Length > 0)
         {
             await Task.WhenAll(running).WaitAsync(TimeSpan.FromSeconds(12), cancellationToken)
@@ -150,7 +195,11 @@ public sealed class ConversationService(
         }
     }
 
-    private async Task RunTurnAsync(Guid conversationId, Guid turnId, string message)
+    private async Task RunTurnAsync(
+        Guid conversationId,
+        Guid turnId,
+        string message,
+        CancellationToken cancellationToken)
     {
         try
         {
@@ -169,8 +218,19 @@ public sealed class ConversationService(
                         processId,
                         timeProvider.GetUtcNow(),
                         CancellationToken.None),
-                    CancellationToken.None)
+                    cancellationToken)
                 .ConfigureAwait(false);
+            if (cancellationToken.IsCancellationRequested)
+            {
+                result = result with
+                {
+                    Outcome = ConversationProviderOutcome.Cancelled,
+                    Reply = null,
+                    FailureCode = "cancelled",
+                    FailureMessage = "回答已停止。"
+                };
+            }
+
             var completedAt = timeProvider.GetUtcNow();
             if (result.Outcome == ConversationProviderOutcome.Succeeded
                 && !string.IsNullOrWhiteSpace(result.Reply))
@@ -215,6 +275,29 @@ public sealed class ConversationService(
                     JsonSerializer.Serialize(new { turnId, status = status.ToString(), result.FailureCode }),
                     CancellationToken.None)
                 .ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            try
+            {
+                await conversationStore.FailTurnAsync(
+                        conversationId,
+                        turnId,
+                        ConversationTurnStatus.Cancelled,
+                        "cancelled",
+                        "回答已停止。",
+                        timeProvider.GetUtcNow(),
+                        CancellationToken.None)
+                    .ConfigureAwait(false);
+            }
+            catch
+            {
+            }
+        }
+        catch (InvalidOperationException) when (cancellationToken.IsCancellationRequested)
+        {
+            // Cancellation may have atomically ended the turn while a successful
+            // provider result was waiting to commit. The cancelled terminal state wins.
         }
         catch (Exception exception)
         {
@@ -309,4 +392,26 @@ public sealed class ConversationService(
         NotSupportedException => "当前 Codex 版本尚未通过兼容验证。",
         _ => "这次回答没有成功，请稍后再试。"
     };
+
+    private sealed class ActiveConversationTurn(
+        Guid conversationId,
+        Guid turnId,
+        CancellationToken lifetimeToken) : IDisposable
+    {
+        private readonly TaskCompletionSource<Task> _run =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public Guid ConversationId { get; } = conversationId;
+
+        public Guid TurnId { get; } = turnId;
+
+        public CancellationTokenSource Cancellation { get; } =
+            CancellationTokenSource.CreateLinkedTokenSource(lifetimeToken);
+
+        public Task Run => _run.Task.Unwrap();
+
+        public void SetRun(Task run) => _run.TrySetResult(run);
+
+        public void Dispose() => Cancellation.Dispose();
+    }
 }

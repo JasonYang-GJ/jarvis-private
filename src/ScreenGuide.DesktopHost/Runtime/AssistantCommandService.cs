@@ -44,7 +44,10 @@ public sealed class AssistantCommandService(
                     foreground.WindowHandle,
                     foreground.WindowTitle,
                     foreground.ProcessName),
-            request.ForegroundObservationConsent);
+            request.ForegroundObservationConsent,
+            inputModality == "ProgrammingTask"
+                ? UniversalIntentKind.CodingTask
+                : null);
         var plan = planner.Plan(request.Text, context);
         RemoveExpired();
         if (plan.Readiness == IntentPlanReadiness.Ready)
@@ -301,8 +304,7 @@ public sealed class AssistantCommandService(
         }
 
         return (await tasks.GetAuthorizedProjectsAsync(cancellationToken).ConfigureAwait(false))
-            .SingleOrDefault(project => project.Id == projectId.Value)
-            ?? throw new UnauthorizedAccessException("所选项目没有授权或已经失效。 ");
+            .SingleOrDefault(project => project.Id == projectId.Value);
     }
 
     private async Task<AssistantCommandResultDto> ExecuteWindowUnderstandingAsync(
@@ -385,17 +387,31 @@ public sealed class AssistantCommandService(
     private static string NormalizeInputModality(string? value) =>
         string.Equals(value, "Voice", StringComparison.OrdinalIgnoreCase)
             ? "Voice"
-            : "Text";
+            : string.Equals(value, "ProgrammingTask", StringComparison.OrdinalIgnoreCase)
+                ? "ProgrammingTask"
+                : "Text";
 
     private static bool IsDirectVoiceAction(UniversalIntentKind kind) =>
         kind is UniversalIntentKind.OpenApplication
             or UniversalIntentKind.OpenWebsite
             or UniversalIntentKind.SearchForeground;
 
-    private static AssistantIntentPlanDto Map(
+    private AssistantIntentPlanDto Map(
         IntentPlan plan,
-        ForegroundWindowSnapshot? foreground) =>
-        new(
+        ForegroundWindowSnapshot? foreground)
+    {
+        var canonicalTarget = plan.Kind switch
+        {
+            UniversalIntentKind.OpenApplication =>
+                (applications.FindByDisplayName(plan.Target ?? string.Empty)
+                 ?? applications.FindBrowser(plan.Target ?? string.Empty))?.Id,
+            UniversalIntentKind.OpenWebsite when Uri.TryCreate(
+                plan.Target,
+                UriKind.Absolute,
+                out var website) => website.AbsoluteUri,
+            _ => plan.Target
+        };
+        return new AssistantIntentPlanDto(
             plan.Id,
             plan.Kind.ToString(),
             plan.Readiness.ToString(),
@@ -410,7 +426,9 @@ public sealed class AssistantCommandService(
                     foreground.WindowHandle,
                     foreground.WindowTitle,
                     foreground.ProcessName,
-                    foreground.ObservedAtUtc));
+                    foreground.ObservedAtUtc),
+            canonicalTarget);
+    }
 
     private void RemoveExpired()
     {

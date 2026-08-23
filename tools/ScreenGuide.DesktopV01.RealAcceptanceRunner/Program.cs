@@ -8,6 +8,10 @@ var desktopActionSmoke = args.Any(argument =>
     string.Equals(argument, "--desktop-action-smoke", StringComparison.OrdinalIgnoreCase));
 var conversationSmoke = args.Any(argument =>
     string.Equals(argument, "--conversation-smoke", StringComparison.OrdinalIgnoreCase));
+var stage1Session = args.Any(argument =>
+    string.Equals(argument, "--stage1-session", StringComparison.OrdinalIgnoreCase));
+var trackHost = args.Any(argument =>
+    string.Equals(argument, "--track-host", StringComparison.OrdinalIgnoreCase));
 var repositoryRoot = FindRepositoryRoot();
 var localData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
 var runRoot = Path.Combine(
@@ -37,18 +41,38 @@ await File.WriteAllTextAsync(
         new JsonSerializerOptions { WriteIndented = true }));
 
 var publishRoot = Path.Combine(repositoryRoot, "artifacts", "publish", "win-x64");
-var clientPath = Path.Combine(publishRoot, "ScreenGuide.DesktopClient.exe");
-var hostPath = Path.Combine(publishRoot, "ScreenGuide.DesktopHost.exe");
+var clientPath = GetOption(args, "--client-path=")
+                 ?? Environment.GetEnvironmentVariable("SCREEN_GUIDE_ACCEPTANCE_CLIENT_PATH")
+                 ?? Path.Combine(publishRoot, "ScreenGuide.DesktopClient.exe");
+var hostPath = GetOption(args, "--host-path=")
+               ?? Environment.GetEnvironmentVariable("SCREEN_GUIDE_ACCEPTANCE_HOST_PATH")
+               ?? Path.Combine(publishRoot, "ScreenGuide.DesktopHost.exe");
 if (!File.Exists(clientPath) || !File.Exists(hostPath))
 {
     throw new FileNotFoundException("请先运行 scripts/build-desktop-release.ps1。 ");
 }
 
 var pipeName = $"ScreenGuide.DesktopV01.Real.{Guid.NewGuid():N}";
+Process? trackedHost = null;
+if (trackHost)
+{
+    var hostStartInfo = new ProcessStartInfo
+    {
+        FileName = hostPath,
+        WorkingDirectory = Path.GetDirectoryName(hostPath)!,
+        UseShellExecute = false,
+        CreateNoWindow = true
+    };
+    hostStartInfo.Environment["SCREEN_GUIDE_DATA_DIRECTORY"] = dataRoot;
+    hostStartInfo.Environment["SCREEN_GUIDE_PIPE_NAME"] = pipeName;
+    trackedHost = Process.Start(hostStartInfo)
+        ?? throw new InvalidOperationException("用于诊断的 Desktop Host 未启动。 ");
+}
+
 var startInfo = new ProcessStartInfo
 {
     FileName = clientPath,
-    WorkingDirectory = publishRoot,
+    WorkingDirectory = Path.GetDirectoryName(clientPath)!,
     UseShellExecute = false
 };
 startInfo.ArgumentList.Add("--show");
@@ -57,7 +81,7 @@ startInfo.Environment["SCREEN_GUIDE_PIPE_NAME"] = pipeName;
 startInfo.Environment["SCREEN_GUIDE_DESKTOP_HOST_PATH"] = hostPath;
 using var client = Process.Start(startInfo)
     ?? throw new InvalidOperationException("最终 Release DesktopClient 未启动。 ");
-var api = new DesktopApiClient(pipeName, TimeSpan.FromSeconds(3));
+var api = new DesktopApiClient(pipeName, TimeSpan.FromSeconds(10));
 var results = new List<object>();
 try
 {
@@ -76,7 +100,11 @@ try
             $"Codex 兼容门禁未通过：{status.Codex.Version ?? "not-found"}。 ");
     }
 
-    if (conversationSmoke)
+    if (stage1Session)
+    {
+        await RunStage1SessionAcceptanceAsync(api, projectRoot, results);
+    }
+    else if (conversationSmoke)
     {
         var validationWord = $"蓝鹭-{Guid.NewGuid():N}";
         var conversation = await api.CreateConversationAsync("真实连续对话验收");
@@ -160,12 +188,12 @@ try
         }
     }
 
-    var project = desktopActionSmoke || conversationSmoke
+    var project = desktopActionSmoke || conversationSmoke || stage1Session
         ? null
         : await api.AddProjectAsync(new AddProjectRequestDto(
             projectRoot,
             "Desktop V0.1 real acceptance"));
-    var regularTaskCount = desktopActionSmoke || conversationSmoke ? 0 : smokeOnly ? 1 : 18;
+    var regularTaskCount = desktopActionSmoke || conversationSmoke || stage1Session ? 0 : smokeOnly ? 1 : 18;
     for (var number = 1; number <= regularTaskCount; number++)
     {
         var fileName = $"result-{number:D2}.txt";
@@ -196,7 +224,7 @@ try
         }
     }
 
-    if (!smokeOnly && !desktopActionSmoke && !conversationSmoke)
+    if (!smokeOnly && !desktopActionSmoke && !conversationSmoke && !stage1Session)
     {
     var waitingCommand = await api.CreateTaskAsync(new CreateTaskRequestDto(
         project!.Id,
@@ -289,9 +317,382 @@ finally
     {
         await api.ShutdownHostAsync();
     }
+
+    if (trackedHost is not null)
+    {
+        try
+        {
+            await trackedHost.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10));
+        }
+        catch (TimeoutException)
+        {
+            trackedHost.Kill(entireProcessTree: true);
+            await trackedHost.WaitForExitAsync();
+        }
+
+        Console.WriteLine($"[tracked-host] exitCode={trackedHost.ExitCode}");
+        trackedHost.Dispose();
+    }
 }
 
 return 0;
+
+static async Task RunStage1SessionAcceptanceAsync(
+    IDesktopApiClient api,
+    string projectRoot,
+    List<object> results)
+{
+    var validationWord = $"蓝鹭-{Guid.NewGuid():N}";
+    var session = await api.StartNewSessionAsync("阶段一真实十轮连续对话");
+    var prompts = new[]
+    {
+        $"请记住校验词“{validationWord}”。我们正在设计一款 AI 助手，第一步先统一会话状态。只回答“已记录”。",
+        "为这款助手给出两个编号方案：方案一叫青桥，方案二叫赤塔。每个方案只写一步。",
+        "第二个详细一点。开头必须写“赤塔展开”。",
+        "刚才那个方案最大的风险是什么？回答中必须写出方案名。",
+        "继续，补充一个降低这个风险的办法。",
+        "不是这个，我说的是第二个方案的第一步。只回答方案名和第一步。",
+        "你前面说过“先统一会话状态”。请用一个生活化例子解释这句话。",
+        "我最开始让你记住的校验词是什么？只回答校验词。",
+        "把刚才关于赤塔方案的结论压缩成两点，并说明它和统一会话状态的关系。",
+        "继续，用三句话总结我们现在正在讨论什么、已经决定什么、下一步是什么。"
+    };
+    var replies = new List<string>();
+    for (var index = 0; index < prompts.Length; index++)
+    {
+        var submitted = await api.SubmitSessionInputAsync(new SessionInputRequestDto(
+            prompts[index],
+            "Text",
+            $"stage1-real-turn-{index + 1:D2}-{Guid.NewGuid():N}",
+            session.SessionId));
+        var snapshot = await WaitForSessionTurnAsync(
+            api,
+            submitted.TurnId,
+            ["Completed"],
+            TimeSpan.FromMinutes(2));
+        var turn = snapshot.Turns.Single(item => item.Id == submitted.TurnId);
+        replies.Add(turn.ResultSummary ?? string.Empty);
+        Console.WriteLine($"[stage1 conversation {index + 1:D2}/10] {turn.Phase}");
+    }
+
+    var tenTurns = await api.GetCurrentSessionAsync()
+        ?? throw new InvalidOperationException("真实十轮会话已经不存在。 ");
+    var continuityPassed = tenTurns.SessionId == session.SessionId
+                           && tenTurns.Turns.Count == 10
+                           && tenTurns.Messages.Count == 20
+                           && tenTurns.Turns.All(turn => turn.Phase == "Completed")
+                           && replies[2].Contains("赤塔", StringComparison.Ordinal)
+                           && replies[3].Contains("赤塔", StringComparison.Ordinal)
+                           && replies[5].Contains("赤塔", StringComparison.Ordinal)
+                           && replies[7].Contains(validationWord, StringComparison.Ordinal)
+                           && replies[8].Contains("赤塔", StringComparison.Ordinal);
+    results.Add(new
+    {
+        Number = 1,
+        Scenario = "real Session Coordinator ten-turn semantic continuity",
+        Status = continuityPassed ? "Succeeded" : "Failed",
+        Verification = "RealProviderTenTurns",
+        ThreadId = (string?)null,
+        CurrentAttempt = 10,
+        Passed = continuityPassed,
+        UserSummary = replies[^1]
+    });
+    if (!continuityPassed)
+    {
+        throw new InvalidOperationException(
+            $"真实十轮语义连续性未通过：{JsonSerializer.Serialize(replies)}");
+    }
+    Console.WriteLine("[stage1 continuity] passed=10/10");
+
+    var interruptedTurns = new List<Guid>();
+    for (var attempt = 1; attempt <= 3; attempt++)
+    {
+        var old = await api.SubmitSessionInputAsync(new SessionInputRequestDto(
+            $"请写一篇至少八千字的长回答，逐段解释会话协调的 {attempt} 个方面，不要提前总结。",
+            "Text",
+            $"stage1-real-interrupt-old-{attempt}-{Guid.NewGuid():N}",
+            session.SessionId));
+        await WaitForSessionTurnAsync(
+            api,
+            old.TurnId,
+            ["Responding"],
+            TimeSpan.FromSeconds(20));
+        var replacement = await api.SubmitSessionInputAsync(new SessionInputRequestDto(
+            $"停，先别说这个。第 {attempt} 次新指令，只回答“新指令{attempt}已接收”。",
+            "Text",
+            $"stage1-real-interrupt-new-{attempt}-{Guid.NewGuid():N}",
+            session.SessionId));
+        var replacementDone = await WaitForSessionTurnAsync(
+            api,
+            replacement.TurnId,
+            ["Completed"],
+            TimeSpan.FromMinutes(2));
+        var oldTurn = replacementDone.Turns.Single(turn => turn.Id == old.TurnId);
+        if (oldTurn.Phase != "Cancelled"
+            || replacementDone.Messages.Any(message =>
+                message.Role == "Assistant"
+                && message.Content.Contains("八千字", StringComparison.Ordinal)))
+        {
+            throw new InvalidOperationException($"第 {attempt} 次真实插话未能停止旧回答。 ");
+        }
+
+        interruptedTurns.Add(old.TurnId);
+        Console.WriteLine($"[stage1 interrupt {attempt}/3] old=Cancelled, replacement=Completed");
+    }
+
+    await Task.Delay(TimeSpan.FromSeconds(10));
+    var afterDelay = await api.GetCurrentSessionAsync()
+        ?? throw new InvalidOperationException("打断验收后的会话不存在。 ");
+    var interruptionPassed = interruptedTurns.All(turnId =>
+                                 afterDelay.Turns.Single(turn => turn.Id == turnId).Phase == "Cancelled")
+                             && afterDelay.Messages.Count(message => message.Role == "Assistant") == 13;
+    results.Add(new
+    {
+        Number = 2,
+        Scenario = "three real provider interruptions with no late reply",
+        Status = interruptionPassed ? "Succeeded" : "Failed",
+        Verification = "ProviderCancellationAndLateResultGuard",
+        ThreadId = (string?)null,
+        CurrentAttempt = 3,
+        Passed = interruptionPassed,
+        UserSummary = "连续三次插话后等待 10 秒，旧回答均未重新出现。"
+    });
+    if (!interruptionPassed)
+    {
+        throw new InvalidOperationException("真实 Provider 连续三次打断验收未通过。 ");
+    }
+    Console.WriteLine("[stage1 interrupts] passed=3/3, lateReply=false");
+
+    var project = await api.AddProjectAsync(new AddProjectRequestDto(projectRoot, "阶段一真实项目补充"));
+    var projectRequest = await api.SubmitSessionInputAsync(new SessionInputRequestDto(
+        "帮我修改这个项目：新增 stage1-project.txt，内容只写 stage1-project-ok，并运行 dotnet test Acceptance.csproj --nologo --no-restore。",
+        "Text",
+        $"stage1-real-project-{Guid.NewGuid():N}",
+        session.SessionId));
+    await WaitForSessionTurnAsync(api, projectRequest.TurnId, ["WaitingForProject"], TimeSpan.FromSeconds(10));
+    var withProject = await api.ProvideSessionProjectAsync(session.SessionId, projectRequest.TurnId, project.Id);
+    if (withProject.Turns.Single(turn => turn.Id == projectRequest.TurnId).Phase != "WaitingForConfirmation")
+    {
+        throw new InvalidOperationException("真实项目补充后没有续接原任务。 ");
+    }
+
+    await api.ConfirmSessionTurnAsync(session.SessionId, projectRequest.TurnId, confirmed: true);
+    var projectDone = await WaitForSessionTurnAsync(
+        api,
+        projectRequest.TurnId,
+        ["Completed"],
+        TimeSpan.FromMinutes(3));
+    var projectPassed = File.Exists(Path.Combine(projectRoot, "stage1-project.txt"))
+                        && projectDone.Turns.Single(turn => turn.Id == projectRequest.TurnId).TaskId is not null;
+    results.Add(new
+    {
+        Number = 3,
+        Scenario = "real missing-project continuation",
+        Status = projectPassed ? "Succeeded" : "Failed",
+        Verification = "SameOriginalTurnAndRealTask",
+        ThreadId = (string?)null,
+        CurrentAttempt = 1,
+        Passed = projectPassed,
+        UserSummary = projectDone.Turns.Single(turn => turn.Id == projectRequest.TurnId).ResultSummary ?? string.Empty
+    });
+    if (!projectPassed)
+    {
+        throw new InvalidOperationException("真实项目补充流程未通过。 ");
+    }
+    Console.WriteLine("[stage1 project context] passed");
+
+    var selectedFile = Path.Combine(projectRoot, "stage1-selected-file.txt");
+    await File.WriteAllTextAsync(selectedFile, "stage1 selected file");
+    var fileRequest = await api.SubmitSessionInputAsync(new SessionInputRequestDto(
+        "帮我打开这个文件",
+        "Text",
+        $"stage1-real-file-{Guid.NewGuid():N}",
+        session.SessionId));
+    await WaitForSessionTurnAsync(api, fileRequest.TurnId, ["WaitingForFile"], TimeSpan.FromSeconds(10));
+    var withFile = await api.ProvideSessionFileAsync(session.SessionId, fileRequest.TurnId, selectedFile);
+    if (withFile.Turns.Single(turn => turn.Id == fileRequest.TurnId).Phase != "WaitingForConfirmation")
+    {
+        throw new InvalidOperationException("真实文件补充后没有续接原任务。 ");
+    }
+
+    var fileDone = await api.ConfirmSessionTurnAsync(session.SessionId, fileRequest.TurnId, confirmed: true);
+    var filePassed = fileDone.Turns.Single(turn => turn.Id == fileRequest.TurnId).Phase == "Completed";
+    results.Add(new
+    {
+        Number = 4,
+        Scenario = "real missing-file continuation",
+        Status = filePassed ? "Succeeded" : "Failed",
+        Verification = "VisibleConfirmationBeforeLaunch",
+        ThreadId = (string?)null,
+        CurrentAttempt = 1,
+        Passed = filePassed,
+        UserSummary = fileDone.Turns.Single(turn => turn.Id == fileRequest.TurnId).ResultSummary ?? string.Empty
+    });
+    if (!filePassed)
+    {
+        throw new InvalidOperationException("真实文件补充流程未通过。 ");
+    }
+    Console.WriteLine("[stage1 file context] passed");
+
+    using var notepad = await StartVisibleNotepadAsync(selectedFile);
+    NativeMethods.SetForegroundWindow(notepad.MainWindowHandle);
+    await Task.Delay(900);
+    var windowReject = await api.SubmitSessionInputAsync(new SessionInputRequestDto(
+        "看看这个窗口是什么",
+        "Text",
+        $"stage1-real-window-reject-{Guid.NewGuid():N}",
+        session.SessionId));
+    await WaitForSessionTurnAsync(
+        api,
+        windowReject.TurnId,
+        ["WaitingForWindowConsent"],
+        TimeSpan.FromSeconds(10));
+    var rejected = await api.RespondSessionWindowConsentAsync(
+        session.SessionId,
+        windowReject.TurnId,
+        granted: false);
+    var rejectedPassed = rejected.Turns.Single(turn => turn.Id == windowReject.TurnId).Phase == "Cancelled";
+
+    NativeMethods.SetForegroundWindow(notepad.MainWindowHandle);
+    await Task.Delay(900);
+    var windowApprove = await api.SubmitSessionInputAsync(new SessionInputRequestDto(
+        "看看这个窗口是什么",
+        "Text",
+        $"stage1-real-window-approve-{Guid.NewGuid():N}",
+        session.SessionId));
+    await WaitForSessionTurnAsync(
+        api,
+        windowApprove.TurnId,
+        ["WaitingForWindowConsent"],
+        TimeSpan.FromSeconds(10));
+    var approved = await api.RespondSessionWindowConsentAsync(
+        session.SessionId,
+        windowApprove.TurnId,
+        granted: true);
+    var approvedTurn = approved.Turns.Single(turn => turn.Id == windowApprove.TurnId);
+    var windowPassed = rejectedPassed
+                       && approvedTurn.Phase == "Completed"
+                       && !string.IsNullOrWhiteSpace(approvedTurn.ResultSummary);
+    results.Add(new
+    {
+        Number = 5,
+        Scenario = "real single-window consent approve and reject",
+        Status = windowPassed ? "Succeeded" : "Failed",
+        Verification = "SingleWindowLocalCapture",
+        ThreadId = (string?)null,
+        CurrentAttempt = 2,
+        Passed = windowPassed,
+        UserSummary = approvedTurn.ResultSummary ?? string.Empty
+    });
+    if (!windowPassed)
+    {
+        throw new InvalidOperationException("真实窗口授权同意/拒绝流程未通过。 ");
+    }
+
+    notepad.CloseMainWindow();
+}
+
+static string? GetOption(string[] arguments, string prefix) =>
+    arguments.FirstOrDefault(argument => argument.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+        ?[prefix.Length..];
+
+static async Task<SessionSnapshotDto> WaitForSessionTurnAsync(
+    IDesktopApiClient api,
+    Guid turnId,
+    string[] expectedPhases,
+    TimeSpan timeout)
+{
+    var deadline = DateTimeOffset.UtcNow + timeout;
+    SessionSnapshotDto? snapshot = null;
+    Exception? lastTransientFailure = null;
+    while (DateTimeOffset.UtcNow < deadline)
+    {
+        try
+        {
+            snapshot ??= await api.GetCurrentSessionAsync();
+            var turn = snapshot?.Turns.SingleOrDefault(item => item.Id == turnId);
+            if (turn?.Phase is "Failed" or "Cancelled" or "Interrupted"
+                && !expectedPhases.Contains(turn.Phase))
+            {
+                throw new InvalidOperationException(
+                    $"统一会话进入非预期终态：session={snapshot!.SessionId}, "
+                    + $"turn={turn.Id}, phase={turn.Phase}, version={snapshot.ChangeVersion}, "
+                    + $"detail={turn.FailureMessage ?? turn.ResultSummary ?? "无"}。 ");
+            }
+
+            if (turn is not null && expectedPhases.Contains(turn.Phase))
+            {
+                return snapshot!;
+            }
+
+            var remaining = deadline - DateTimeOffset.UtcNow;
+            var waitMilliseconds = (int)Math.Clamp(remaining.TotalMilliseconds, 1, 5_000);
+            using var callTimeout = new CancellationTokenSource(
+                TimeSpan.FromMilliseconds(waitMilliseconds + 5_000));
+            snapshot = await api.WaitForSessionUpdateAsync(
+                snapshot?.ChangeVersion ?? -1,
+                waitMilliseconds,
+                callTimeout.Token);
+        }
+        catch (Exception exception) when (exception is TimeoutException or IOException or OperationCanceledException)
+        {
+            lastTransientFailure = exception;
+            snapshot = null;
+            await Task.Delay(250);
+        }
+    }
+
+    throw new TimeoutException("统一会话真实验收等待超时。 ", lastTransientFailure);
+}
+
+static async Task<Process> StartVisibleNotepadAsync(string filePath)
+{
+    var startedAt = DateTimeOffset.Now.AddSeconds(-2);
+    var launched = Process.Start(new ProcessStartInfo
+    {
+        FileName = "notepad.exe",
+        UseShellExecute = false,
+        ArgumentList = { filePath }
+    }) ?? throw new InvalidOperationException("真实验收记事本窗口未启动。 ");
+    Process? visible = null;
+    await WaitAsync(() =>
+    {
+        launched.Refresh();
+        if (!launched.HasExited && launched.MainWindowHandle != IntPtr.Zero)
+        {
+            visible = launched;
+            return Task.FromResult(true);
+        }
+
+        var fileName = Path.GetFileName(filePath);
+        visible = Process.GetProcessesByName("notepad")
+            .Where(process =>
+            {
+                try
+                {
+                    process.Refresh();
+                    return !process.HasExited
+                           && process.StartTime >= startedAt.LocalDateTime
+                           && process.MainWindowHandle != IntPtr.Zero
+                           && process.MainWindowTitle.Contains(fileName, StringComparison.OrdinalIgnoreCase);
+                }
+                catch (InvalidOperationException)
+                {
+                    return false;
+                }
+            })
+            .OrderByDescending(process => process.StartTime)
+            .FirstOrDefault();
+        return Task.FromResult(visible is not null);
+    }, TimeSpan.FromSeconds(15));
+
+    if (!ReferenceEquals(visible, launched))
+    {
+        launched.Dispose();
+    }
+
+    return visible!;
+}
 
 static void TryCloseAcceptanceProcess(int processId)
 {
@@ -391,17 +792,25 @@ static async Task<TaskDetailsDto> WaitForStatusAsync(
 static async Task WaitAsync(Func<Task<bool>> condition, TimeSpan timeout)
 {
     var deadline = DateTimeOffset.UtcNow + timeout;
+    Exception? lastTransientFailure = null;
     while (DateTimeOffset.UtcNow < deadline)
     {
-        if (await condition())
+        try
         {
-            return;
+            if (await condition())
+            {
+                return;
+            }
+        }
+        catch (Exception exception) when (exception is TimeoutException or IOException)
+        {
+            lastTransientFailure = exception;
         }
 
         await Task.Delay(250);
     }
 
-    throw new TimeoutException("Desktop V0.1 真实验收等待超时。 ");
+    throw new TimeoutException("Desktop V0.1 真实验收等待超时。 ", lastTransientFailure);
 }
 
 static int DeliveredNotificationCount(string dataRoot)
@@ -498,4 +907,11 @@ static string FindRepositoryRoot()
     }
 
     return directory?.FullName ?? throw new DirectoryNotFoundException("Repository root not found.");
+}
+
+internal static class NativeMethods
+{
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    [return: System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.Bool)]
+    internal static extern bool SetForegroundWindow(IntPtr windowHandle);
 }

@@ -1,0 +1,585 @@
+using Microsoft.Extensions.DependencyInjection;
+using ScreenGuide.Core.Conversations;
+using ScreenGuide.DesktopProtocol;
+using ScreenGuide.Skills.Windows;
+using ScreenGuide.Vision.Abstractions;
+
+namespace ScreenGuide.DesktopHost.Tests;
+
+public sealed class SessionCoordinatorConflictTests
+{
+    [Fact]
+    public async Task RunningProgrammingTaskAndOrdinaryChatKeepIndependentState()
+    {
+        await using var environment = DesktopHostTestEnvironment.Create();
+        var provider = new ImmediateConversationProvider();
+        using var host = environment.BuildHost(services =>
+            services.AddSingleton<IConversationProvider>(provider));
+        await host.StartAsync();
+        var (_, project, _) = await environment.SeedProjectsAsync();
+        IDesktopApiClient client = new DesktopApiClient(environment.Options.PipeName);
+        var session = await client.StartNewSessionAsync("编程与聊天并行");
+
+        var coding = await client.SubmitSessionInputAsync(new SessionInputRequestDto(
+            "帮我修改这个项目并运行测试 TEST_DELAYED_SUCCESS",
+            "Text",
+            "coding-and-chat-coding",
+            session.SessionId));
+        await WaitForTurnPhaseAsync(client, coding.TurnId, "WaitingForProject");
+        await client.ProvideSessionProjectAsync(session.SessionId, coding.TurnId, project.Id);
+        var confirmed = await client.ConfirmSessionTurnAsync(
+            session.SessionId,
+            coding.TurnId,
+            confirmed: true);
+        var codingTurn = confirmed.Turns.Single(turn => turn.Id == coding.TurnId);
+        var taskId = Assert.IsType<Guid>(codingTurn.TaskId);
+        await WaitForTaskStatusAsync(client, taskId, "Running");
+
+        var chat = await client.SubmitSessionInputAsync(new SessionInputRequestDto(
+            "编程任务运行时，我还能问一个普通问题吗？",
+            "Text",
+            "coding-and-chat-chat",
+            session.SessionId));
+        var chatCompleted = await WaitForTurnPhaseAsync(client, chat.TurnId, "Completed");
+        var whileBothActive = await client.GetTaskAsync(taskId);
+
+        Assert.Equal("Running", whileBothActive?.Summary.Status);
+        Assert.Equal(
+            "ProgrammingTask",
+            chatCompleted.Turns.Single(turn => turn.Id == coding.TurnId).Phase);
+        Assert.Equal(
+            "Completed",
+            chatCompleted.Turns.Single(turn => turn.Id == chat.TurnId).Phase);
+        Assert.Equal(
+            ["编程任务运行时，我还能问一个普通问题吗？", "普通聊天已回答"],
+            chatCompleted.Messages.Select(message => message.Content).ToArray());
+
+        var codingCompleted = await WaitForTurnPhaseAsync(
+            client,
+            coding.TurnId,
+            "Completed",
+            TimeSpan.FromSeconds(8));
+        var finishedTask = await client.GetTaskAsync(taskId);
+        await host.StopAsync();
+
+        Assert.Equal(
+            "Completed",
+            codingCompleted.Turns.Single(turn => turn.Id == chat.TurnId).Phase);
+        Assert.Equal("Succeeded", finishedTask?.Summary.Status);
+        Assert.Single(provider.Requests);
+    }
+
+    [Fact]
+    public async Task RapidSecondMessageCancelsFirstAndCannotMixLateReplyIntoTheSession()
+    {
+        await using var environment = DesktopHostTestEnvironment.Create();
+        var provider = new BargeInConversationProvider();
+        using var host = environment.BuildHost(services =>
+            services.AddSingleton<IConversationProvider>(provider));
+        await host.StartAsync();
+        IDesktopApiClient client = new DesktopApiClient(environment.Options.PipeName);
+        var session = await client.StartNewSessionAsync("快速插话隔离");
+
+        var first = await client.SubmitSessionInputAsync(new SessionInputRequestDto(
+            "第一条很长的问题",
+            "Text",
+            "rapid-first",
+            session.SessionId));
+        await provider.FirstStarted.Task.WaitAsync(TimeSpan.FromSeconds(3));
+
+        var secondSubmit = client.SubmitSessionInputAsync(new SessionInputRequestDto(
+            "停，改回答第二条",
+            "Text",
+            "rapid-second",
+            session.SessionId));
+        await provider.FirstCancellationObserved.Task.WaitAsync(TimeSpan.FromSeconds(3));
+        var secondWasBlockedUntilCancellationFinished = !secondSubmit.IsCompleted;
+        provider.AllowFirstLateReply.TrySetResult();
+        var second = await secondSubmit;
+        var completed = await WaitForTurnPhaseAsync(client, second.TurnId, "Completed");
+        await host.StopAsync();
+
+        Assert.True(secondWasBlockedUntilCancellationFinished);
+        Assert.Equal(
+            "Cancelled",
+            completed.Turns.Single(turn => turn.Id == first.TurnId).Phase);
+        Assert.Equal(
+            "Completed",
+            completed.Turns.Single(turn => turn.Id == second.TurnId).Phase);
+        Assert.Equal(
+            ["第一条很长的问题", "停，改回答第二条", "第二条的新回答"],
+            completed.Messages.Select(message => message.Content).ToArray());
+        Assert.DoesNotContain(
+            completed.Messages,
+            message => message.Content.Contains("第一条迟到回答", StringComparison.Ordinal));
+        Assert.Equal(2, provider.SendCount);
+        Assert.Equal(1, provider.CancelCount);
+    }
+
+    [Fact]
+    public async Task SubmittingToANonCurrentSessionCancelsThePreviousCurrentSessionFirst()
+    {
+        await using var environment = DesktopHostTestEnvironment.Create();
+        var provider = new BargeInConversationProvider();
+        using var host = environment.BuildHost(services =>
+            services.AddSingleton<IConversationProvider>(provider));
+        await host.StartAsync();
+        IDesktopApiClient client = new DesktopApiClient(environment.Options.PipeName);
+        var olderSession = await client.StartNewSessionAsync("较早话题");
+        var currentSession = await client.StartNewSessionAsync("当前话题");
+        var currentTurn = await client.SubmitSessionInputAsync(new SessionInputRequestDto(
+            "当前话题中的长回答",
+            "Text",
+            "switch-session-current-long",
+            currentSession.SessionId));
+        await provider.FirstStarted.Task.WaitAsync(TimeSpan.FromSeconds(3));
+
+        var switchSubmit = client.SubmitSessionInputAsync(new SessionInputRequestDto(
+            "回到较早话题继续",
+            "Text",
+            "switch-session-older-new",
+            olderSession.SessionId));
+        await provider.FirstCancellationObserved.Task.WaitAsync(TimeSpan.FromSeconds(3));
+        var switchWaitedForCancellation = !switchSubmit.IsCompleted;
+        provider.AllowFirstLateReply.TrySetResult();
+        var switchedTurn = await switchSubmit;
+        var completed = await WaitForTurnPhaseAsync(client, switchedTurn.TurnId, "Completed");
+        var previousSession = await client.SetCurrentSessionAsync(currentSession.SessionId);
+        await host.StopAsync();
+
+        Assert.True(switchWaitedForCancellation);
+        Assert.Equal(olderSession.SessionId, completed.SessionId);
+        Assert.Equal(
+            "Cancelled",
+            previousSession.Turns.Single(turn => turn.Id == currentTurn.TurnId).Phase);
+        Assert.DoesNotContain(
+            previousSession.Messages,
+            message => message.Content.Contains("第一条迟到回答", StringComparison.Ordinal));
+        Assert.Equal(
+            "Completed",
+            completed.Turns.Single(turn => turn.Id == switchedTurn.TurnId).Phase);
+        Assert.Equal(2, provider.SendCount);
+        Assert.Equal(1, provider.CancelCount);
+    }
+
+    [Fact]
+    public async Task CancellingWhileWaitingForWindowConsentNeverCapturesTheWindow()
+    {
+        await using var environment = DesktopHostTestEnvironment.Create();
+        var foreground = new MutableForegroundProvider(new ForegroundWindowSnapshot(
+            9301,
+            "等待授权窗口",
+            "consent-wait-test",
+            DateTimeOffset.UtcNow));
+        var capture = new CountingCaptureService();
+        var vision = new CountingVisionProvider();
+        using var host = environment.BuildHost(services =>
+        {
+            services.AddSingleton<IForegroundWindowContextProvider>(foreground);
+            services.AddSingleton<IWindowCaptureService>(capture);
+            services.AddSingleton<IWindowVisionProvider>(vision);
+        });
+        await host.StartAsync();
+        IDesktopApiClient client = new DesktopApiClient(environment.Options.PipeName);
+        var session = await client.StartNewSessionAsync("等待窗口授权时取消");
+        var submitted = await client.SubmitSessionInputAsync(new SessionInputRequestDto(
+            "看看这个窗口是什么",
+            "Text",
+            "cancel-window-consent",
+            session.SessionId));
+        await WaitForTurnPhaseAsync(client, submitted.TurnId, "WaitingForWindowConsent");
+
+        var cancelled = await client.CancelSessionTurnAsync(session.SessionId, submitted.TurnId);
+        await host.StopAsync();
+
+        Assert.Equal(
+            "Cancelled",
+            cancelled.Turns.Single(turn => turn.Id == submitted.TurnId).Phase);
+        Assert.Equal(0, capture.CallCount);
+        Assert.Equal(0, vision.CallCount);
+    }
+
+    [Fact]
+    public async Task CancellingProgrammingSessionTurnCancelsTheRealTaskAndProcessTree()
+    {
+        await using var environment = DesktopHostTestEnvironment.Create();
+        using var host = environment.BuildHost();
+        await host.StartAsync();
+        var (_, project, _) = await environment.SeedProjectsAsync();
+        IDesktopApiClient client = new DesktopApiClient(environment.Options.PipeName);
+        var session = await client.StartNewSessionAsync("编程任务联动取消");
+        var marker = Path.Combine(environment.RootDirectory, $"cancel-marker-{Guid.NewGuid():N}.txt");
+        var submitted = await client.SubmitSessionInputAsync(new SessionInputRequestDto(
+            $"帮我修改这个项目 TEST_LONG_RUNNING\nMARKER={marker}",
+            "Text",
+            "cancel-real-programming-task",
+            session.SessionId));
+        await WaitForTurnPhaseAsync(client, submitted.TurnId, "WaitingForProject");
+        await client.ProvideSessionProjectAsync(session.SessionId, submitted.TurnId, project.Id);
+        var confirmed = await client.ConfirmSessionTurnAsync(
+            session.SessionId,
+            submitted.TurnId,
+            confirmed: true);
+        var taskId = Assert.IsType<Guid>(
+            confirmed.Turns.Single(turn => turn.Id == submitted.TurnId).TaskId);
+        await WaitForTaskStatusAsync(client, taskId, "Running");
+
+        var cancelledSession = await client.CancelSessionTurnAsync(
+            session.SessionId,
+            submitted.TurnId);
+        var cancelledTask = await WaitForTaskStatusAsync(
+            client,
+            taskId,
+            "Cancelled",
+            TimeSpan.FromSeconds(8));
+        await Task.Delay(TimeSpan.FromSeconds(5));
+        var childProcessWroteAfterCancellation = File.Exists(marker);
+        await host.StopAsync();
+
+        Assert.Equal(
+            "Cancelled",
+            cancelledSession.Turns.Single(turn => turn.Id == submitted.TurnId).Phase);
+        Assert.Equal("Cancelled", cancelledTask.Summary.Status);
+        Assert.False(
+            childProcessWroteAfterCancellation,
+            "取消 Session 后，真实编程子进程仍存活并写入了标记文件。");
+    }
+
+    [Fact]
+    public async Task ExplicitSessionStopRejectsAProviderSuccessThatArrivesAfterCancellation()
+    {
+        await using var environment = DesktopHostTestEnvironment.Create();
+        var provider = new BargeInConversationProvider();
+        using var host = environment.BuildHost(services =>
+            services.AddSingleton<IConversationProvider>(provider));
+        await host.StartAsync();
+        IDesktopApiClient client = new DesktopApiClient(environment.Options.PipeName);
+        var session = await client.StartNewSessionAsync("显式停止迟到回答");
+        var submitted = await client.SubmitSessionInputAsync(new SessionInputRequestDto(
+            "这条回答稍后会迟到",
+            "Text",
+            "explicit-stop-late-reply",
+            session.SessionId));
+        await provider.FirstStarted.Task.WaitAsync(TimeSpan.FromSeconds(3));
+
+        var stop = client.CancelSessionTurnAsync(session.SessionId, submitted.TurnId);
+        await provider.FirstCancellationObserved.Task.WaitAsync(TimeSpan.FromSeconds(3));
+        provider.AllowFirstLateReply.TrySetResult();
+        var cancelled = await stop;
+        await host.StopAsync();
+
+        Assert.Equal(
+            "Cancelled",
+            cancelled.Turns.Single(turn => turn.Id == submitted.TurnId).Phase);
+        Assert.Equal(
+            ["这条回答稍后会迟到"],
+            cancelled.Messages.Select(message => message.Content).ToArray());
+        Assert.DoesNotContain(
+            cancelled.Messages,
+            message => message.Content.Contains("第一条迟到回答", StringComparison.Ordinal));
+        Assert.Equal(1, provider.SendCount);
+        Assert.Equal(1, provider.CancelCount);
+    }
+
+    [Fact]
+    public async Task RetryingMissingWindowKeepsTheOriginalRequestAndMovesToConsent()
+    {
+        await using var environment = DesktopHostTestEnvironment.Create();
+        var foreground = new MutableForegroundProvider(null);
+        var capture = new CountingCaptureService();
+        var vision = new CountingVisionProvider();
+        using var host = environment.BuildHost(services =>
+        {
+            services.AddSingleton<IForegroundWindowContextProvider>(foreground);
+            services.AddSingleton<IWindowCaptureService>(capture);
+            services.AddSingleton<IWindowVisionProvider>(vision);
+        });
+        await host.StartAsync();
+        IDesktopApiClient client = new DesktopApiClient(environment.Options.PipeName);
+        var session = await client.StartNewSessionAsync("补齐缺失窗口");
+        const string originalRequest = "看看这个窗口是什么";
+        var submitted = await client.SubmitSessionInputAsync(new SessionInputRequestDto(
+            originalRequest,
+            "Text",
+            "retry-missing-window",
+            session.SessionId));
+        var waiting = await WaitForTurnPhaseAsync(client, submitted.TurnId, "WaitingForWindow");
+        foreground.Current = new ForegroundWindowSnapshot(
+            9401,
+            "后来切回的窗口",
+            "retry-window-test",
+            DateTimeOffset.UtcNow);
+
+        var retried = await client.RetrySessionTurnAsync(session.SessionId, submitted.TurnId);
+        await host.StopAsync();
+
+        var originalWaitingTurn = waiting.Turns.Single(turn => turn.Id == submitted.TurnId);
+        var retriedTurn = retried.Turns.Single(turn => turn.Id == submitted.TurnId);
+        Assert.Equal("WaitingForWindow", originalWaitingTurn.Phase);
+        Assert.Equal(originalRequest, originalWaitingTurn.InputText);
+        Assert.Equal("WaitingForWindowConsent", retriedTurn.Phase);
+        Assert.Equal("WindowConsent", retriedTurn.MissingContext);
+        Assert.Equal(originalRequest, retriedTurn.InputText);
+        Assert.Equal(9401, retriedTurn.WindowHandle);
+        Assert.Equal("后来切回的窗口", retriedTurn.WindowTitle);
+        Assert.Equal(0, capture.CallCount);
+        Assert.Equal(0, vision.CallCount);
+    }
+
+    [Fact]
+    public async Task SearchConfirmationMustBeRepeatedWhenTheForegroundTargetChanges()
+    {
+        await using var environment = DesktopHostTestEnvironment.Create();
+        var foreground = new MutableForegroundProvider(new ForegroundWindowSnapshot(
+            9501,
+            "搜索窗口 A",
+            "search-target-a",
+            DateTimeOffset.UtcNow));
+        var automation = new RecordingDesktopAutomation();
+        using var host = environment.BuildHost(services =>
+        {
+            services.AddSingleton<IForegroundWindowContextProvider>(foreground);
+            services.AddSingleton<IReliableDesktopAutomation>(automation);
+        });
+        await host.StartAsync();
+        IDesktopApiClient client = new DesktopApiClient(environment.Options.PipeName);
+        var session = await client.StartNewSessionAsync("搜索目标变化");
+        var submitted = await client.SubmitSessionInputAsync(new SessionInputRequestDto(
+            "在当前窗口搜索天气",
+            "Text",
+            "search-target-changed",
+            session.SessionId));
+        var firstConfirmation = await WaitForTurnPhaseAsync(
+            client,
+            submitted.TurnId,
+            "WaitingForConfirmation");
+        foreground.Current = new ForegroundWindowSnapshot(
+            9501,
+            "搜索窗口 B",
+            "search-target-b",
+            DateTimeOffset.UtcNow);
+
+        var mustConfirmAgain = await client.ConfirmSessionTurnAsync(
+            session.SessionId,
+            submitted.TurnId,
+            confirmed: true);
+        await host.StopAsync();
+
+        var beforeChange = firstConfirmation.Turns.Single(turn => turn.Id == submitted.TurnId);
+        var afterChange = mustConfirmAgain.Turns.Single(turn => turn.Id == submitted.TurnId);
+        Assert.Equal(9501, beforeChange.WindowHandle);
+        Assert.Equal("搜索窗口 A", beforeChange.WindowTitle);
+        Assert.Equal("WaitingForConfirmation", afterChange.Phase);
+        Assert.Equal("Confirmation", afterChange.MissingContext);
+        Assert.Equal(9501, afterChange.WindowHandle);
+        Assert.Equal("搜索窗口 B", afterChange.WindowTitle);
+        Assert.True(afterChange.RequiresConfirmation);
+        Assert.Contains("窗口已经变化", afterChange.ResultSummary, StringComparison.Ordinal);
+        Assert.Equal(0, automation.SearchCallCount);
+        Assert.Null(automation.LastQuery);
+    }
+
+    private static async Task<SessionSnapshotDto> WaitForTurnPhaseAsync(
+        IDesktopApiClient client,
+        Guid turnId,
+        string expectedPhase,
+        TimeSpan? timeout = null)
+    {
+        var deadline = DateTimeOffset.UtcNow + (timeout ?? TimeSpan.FromSeconds(5));
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            var snapshot = await client.GetCurrentSessionAsync();
+            if (snapshot?.Turns.SingleOrDefault(turn => turn.Id == turnId)?.Phase == expectedPhase)
+            {
+                return snapshot;
+            }
+
+            await Task.Delay(20);
+        }
+
+        throw new TimeoutException($"统一会话请求没有进入 {expectedPhase}。");
+    }
+
+    private static async Task<TaskDetailsDto> WaitForTaskStatusAsync(
+        IDesktopApiClient client,
+        Guid taskId,
+        string expectedStatus,
+        TimeSpan? timeout = null)
+    {
+        var deadline = DateTimeOffset.UtcNow + (timeout ?? TimeSpan.FromSeconds(5));
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            var details = await client.GetTaskAsync(taskId);
+            if (details?.Summary.Status == expectedStatus)
+            {
+                return details;
+            }
+
+            await Task.Delay(20);
+        }
+
+        throw new TimeoutException($"编程任务没有进入 {expectedStatus}。");
+    }
+
+    private sealed class ImmediateConversationProvider : IConversationProvider
+    {
+        public string ProviderId => "session-conflict-immediate";
+
+        public List<ConversationProviderRequest> Requests { get; } = [];
+
+        public async Task<ConversationProviderResult> SendAsync(
+            ConversationProviderRequest request,
+            Func<string, int, Task>? started = null,
+            CancellationToken cancellationToken = default)
+        {
+            Requests.Add(request);
+            if (started is not null)
+            {
+                await started("thread-session-conflict", 9101);
+            }
+
+            return new ConversationProviderResult(
+                ConversationProviderOutcome.Succeeded,
+                "thread-session-conflict",
+                "普通聊天已回答",
+                "message-session-conflict",
+                9101);
+        }
+
+        public Task CancelAsync(Guid conversationId, CancellationToken cancellationToken = default) =>
+            Task.CompletedTask;
+
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+
+    private sealed class BargeInConversationProvider : IConversationProvider
+    {
+        private int _sendCount;
+        private int _cancelCount;
+
+        public string ProviderId => "session-conflict-barge-in";
+
+        public TaskCompletionSource FirstStarted { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource FirstCancellationObserved { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource AllowFirstLateReply { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public int SendCount => Volatile.Read(ref _sendCount);
+
+        public int CancelCount => Volatile.Read(ref _cancelCount);
+
+        public async Task<ConversationProviderResult> SendAsync(
+            ConversationProviderRequest request,
+            Func<string, int, Task>? started = null,
+            CancellationToken cancellationToken = default)
+        {
+            var call = Interlocked.Increment(ref _sendCount);
+            if (started is not null)
+            {
+                await started("thread-session-barge-in", 9200 + call);
+            }
+
+            if (call == 1)
+            {
+                using var registration = cancellationToken.Register(
+                    () => FirstCancellationObserved.TrySetResult());
+                FirstStarted.TrySetResult();
+                await AllowFirstLateReply.Task;
+                return new ConversationProviderResult(
+                    ConversationProviderOutcome.Succeeded,
+                    "thread-session-barge-in",
+                    "第一条迟到回答",
+                    "message-session-barge-in-old",
+                    9201);
+            }
+
+            return new ConversationProviderResult(
+                ConversationProviderOutcome.Succeeded,
+                "thread-session-barge-in",
+                "第二条的新回答",
+                "message-session-barge-in-new",
+                9202);
+        }
+
+        public Task CancelAsync(Guid conversationId, CancellationToken cancellationToken = default)
+        {
+            Interlocked.Increment(ref _cancelCount);
+            return Task.CompletedTask;
+        }
+
+        public ValueTask DisposeAsync()
+        {
+            AllowFirstLateReply.TrySetResult();
+            return ValueTask.CompletedTask;
+        }
+    }
+
+    private sealed class MutableForegroundProvider(ForegroundWindowSnapshot? current)
+        : IForegroundWindowContextProvider
+    {
+        public ForegroundWindowSnapshot? Current { get; set; } = current;
+
+        public ForegroundWindowSnapshot? GetLastExternalWindow() => Current;
+    }
+
+    private sealed class CountingCaptureService : IWindowCaptureService
+    {
+        private int _callCount;
+
+        public int CallCount => Volatile.Read(ref _callCount);
+
+        public Task<CapturedWindowFrame> CaptureAsync(
+            WindowCaptureTarget target,
+            CancellationToken cancellationToken = default)
+        {
+            Interlocked.Increment(ref _callCount);
+            return Task.FromResult(new CapturedWindowFrame([4, 5, 6], 10, 10, "synthetic"));
+        }
+    }
+
+    private sealed class CountingVisionProvider : IWindowVisionProvider
+    {
+        private int _callCount;
+
+        public string ProviderId => "session-conflict-window";
+
+        public bool SendsImageOffDevice => false;
+
+        public int CallCount => Volatile.Read(ref _callCount);
+
+        public Task<WindowVisionResult> AnalyzeAsync(
+            WindowVisionRequest request,
+            CancellationToken cancellationToken = default)
+        {
+            Interlocked.Increment(ref _callCount);
+            return Task.FromResult(new WindowVisionResult(
+                "合成窗口",
+                "Synthetic",
+                ["合成事实"],
+                ["无真实数据"]));
+        }
+    }
+
+    private sealed class RecordingDesktopAutomation : IReliableDesktopAutomation
+    {
+        private int _searchCallCount;
+
+        public int SearchCallCount => Volatile.Read(ref _searchCallCount);
+
+        public string? LastQuery { get; private set; }
+
+        public DesktopAutomationResult Search(long windowHandle, string query)
+        {
+            Interlocked.Increment(ref _searchCallCount);
+            LastQuery = query;
+            return new DesktopAutomationResult(true, "合成搜索已提交");
+        }
+
+        public DesktopAutomationResult Describe(long windowHandle) =>
+            new(true, "合成结构化窗口信息");
+    }
+}
