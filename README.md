@@ -2,7 +2,9 @@
 
 ScreenGuide Desktop 是运行在 Windows 上的个人 AI 中枢。用户打开元枢后，首页会自动进入可见的本机语音监听状态，不需要按键或输入文字；明确的低风险语音指令本身就是本次一次性授权。读取画面、打开文件和编程任务仍保留单独确认。Codex 只是可选的编程技能，不是产品中心。
 
-当前正式基线为 V0.2.1。产品事实以 [PRODUCT.md](PRODUCT.md) 为准，当前代码结构以 [ARCHITECTURE.md](ARCHITECTURE.md) 为准，版本证据以 [V0.2.1 基线](docs/baselines/V0.2.1_BASELINE.md) 为准。
+当前阶段 1 交付版本为 V0.3.0，V0.2.1 仍是可独立回滚的冻结基线。产品事实以 [PRODUCT.md](PRODUCT.md) 为准，当前代码结构以 [ARCHITECTURE.md](ARCHITECTURE.md) 为准，版本证据以 [V0.3.0 阶段 1 基线](docs/baselines/V0.3.0_STAGE1.md) 和 [V0.2.1 基线](docs/baselines/V0.2.1_BASELINE.md) 为准。
+
+V0.3.0 新增统一会话中枢：首页连续输入默认属于同一会话，用户插话会从界面到 Provider 调用链真正取消旧回答；缺项目、文件或单窗口查看同意时，原始请求会在同一任务中等待补充并自动续接。普通聊天、受控操作、窗口观察和编程任务共用一致的可见状态，但既有权限与安全门禁不变。
 
 当前 V0.2 安全能力：
 
