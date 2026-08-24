@@ -5,10 +5,13 @@
       "screenguide.agent.abstractions": {
         "type": "Project"
       },
+      "screenguide.ai.core": {
+        "type": "Project"
+      },
       "screenguide.core": {
         "type": "Project",
         "dependencies": {
-          "ScreenGuide.Skills.Abstractions": "[0.2.1, )"
+          "ScreenGuide.Skills.Abstractions": "[0.3.0, )"
         }
       },
       "screenguide.skills.abstractions": {

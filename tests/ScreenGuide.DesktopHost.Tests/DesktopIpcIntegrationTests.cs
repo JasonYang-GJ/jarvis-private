@@ -121,6 +121,30 @@ public sealed class DesktopIpcIntegrationTests
     }
 
     [Fact]
+    public async Task IpcTechnicalDetailDoesNotEchoSensitiveInputOrRawFailureMessage()
+    {
+        await using var environment = DesktopHostTestEnvironment.Create();
+        using var host = environment.BuildHost();
+        await host.StartAsync();
+        IDesktopApiClient client = new DesktopApiClient(environment.Options.PipeName);
+        var missing = Path.Combine(
+            environment.RootDirectory,
+            DesktopStabilityTests.CanaryApiKey,
+            "missing-project");
+
+        var exception = await Assert.ThrowsAsync<DesktopApiException>(
+            () => client.AddProjectAsync(new AddProjectRequestDto(missing)));
+        await host.StopAsync();
+
+        Assert.Equal("project_missing", exception.Error.Code);
+        Assert.Equal("DirectoryNotFoundException", exception.Error.TechnicalDetail);
+        Assert.DoesNotContain(
+            DesktopStabilityTests.CanaryApiKey,
+            exception.Error.TechnicalDetail,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task ClearHistoryDeletesTerminalTasksButNotProjects()
     {
         await using var environment = DesktopHostTestEnvironment.Create();

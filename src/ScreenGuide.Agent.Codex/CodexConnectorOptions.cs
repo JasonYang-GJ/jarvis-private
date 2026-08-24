@@ -25,6 +25,8 @@ public sealed class CodexConnectorOptions
 
     public string? Model { get; init; }
 
+    public TimeSpan ChatRequestTimeout { get; init; } = TimeSpan.FromMinutes(2);
+
     public static CodexConnectorOptions FromDataDirectory(string dataDirectory) =>
         new(
             dataDirectory,

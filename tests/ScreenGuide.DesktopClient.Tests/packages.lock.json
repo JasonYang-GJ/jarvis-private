@@ -214,8 +214,8 @@
       "screenguide.desktopclient": {
         "type": "Project",
         "dependencies": {
-          "ScreenGuide.DesktopProtocol": "[0.2.1, )",
-          "ScreenGuide.Voice.Windows": "[0.2.1, )"
+          "ScreenGuide.DesktopProtocol": "[0.3.0, )",
+          "ScreenGuide.Voice.Windows": "[0.3.0, )"
         }
       },
       "screenguide.desktopprotocol": {

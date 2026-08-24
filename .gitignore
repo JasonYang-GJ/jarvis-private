@@ -5,6 +5,11 @@
 secrets/
 *.key
 *.pem
+*.pfx
+*.p12
+credentials*.json
+client_secret*.json
+*.secrets.json
 
 # User-private runtime data
 data/
@@ -26,10 +31,22 @@ evidence-snapshots/
 *.sqlite-journal
 *.jsonl
 *.log
+Crash/
+CrashDumps/
+*.dmp
+*.dump
+*.crash
+tmp/
+temp/
+*.tmp
+*.temp
+*.bak
 
 # Local configuration
 appsettings.Local.json
 appsettings.local.json
+appsettings.Development.json
+launchSettings.json
 user-settings.json
 
 # .NET build output

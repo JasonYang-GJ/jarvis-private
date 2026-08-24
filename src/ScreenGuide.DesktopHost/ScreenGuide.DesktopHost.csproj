@@ -12,6 +12,7 @@
     <ProjectReference Include="..\ScreenGuide.Agent.Abstractions\ScreenGuide.Agent.Abstractions.csproj" />
     <ProjectReference Include="..\ScreenGuide.Agent.Codex\ScreenGuide.Agent.Codex.csproj" />
     <ProjectReference Include="..\ScreenGuide.AI.Core\ScreenGuide.AI.Core.csproj" />
+    <ProjectReference Include="..\ScreenGuide.AI.DeepSeek\ScreenGuide.AI.DeepSeek.csproj" />
     <ProjectReference Include="..\ScreenGuide.Core\ScreenGuide.Core.csproj" />
     <ProjectReference Include="..\ScreenGuide.DesktopProtocol\ScreenGuide.DesktopProtocol.csproj" />
     <ProjectReference Include="..\ScreenGuide.Evidence\ScreenGuide.Evidence.csproj" />
@@ -21,6 +22,17 @@
     <ProjectReference Include="..\ScreenGuide.Vision.Abstractions\ScreenGuide.Vision.Abstractions.csproj" />
     <ProjectReference Include="..\ScreenGuide.Vision.Windows\ScreenGuide.Vision.Windows.csproj" />
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.11" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.WindowsDesktop.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="..\..\prompts\runtime\**\*"
+             Link="prompts\runtime\%(RecursiveDir)%(Filename)%(Extension)"
+             CopyToOutputDirectory="PreserveNewest"
+             CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

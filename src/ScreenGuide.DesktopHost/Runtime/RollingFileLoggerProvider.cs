@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Logging;
+using ScreenGuide.DesktopProtocol;
 
 namespace ScreenGuide.DesktopHost.Runtime;
 
@@ -29,7 +30,7 @@ public sealed class RollingFileLoggerProvider : ILoggerProvider
             var line = $"{DateTimeOffset.UtcNow:O} [{level}] {category}: {message}";
             if (exception is not null)
             {
-                line += $" ({exception.GetType().Name}: {exception.Message})";
+                line += $" ({SensitiveDataSanitizer.ExceptionType(exception)})";
             }
 
             File.AppendAllText(

@@ -1,5 +1,6 @@
 using System.Text.Json;
 using ScreenGuide.DesktopHost.Configuration;
+using ScreenGuide.DesktopProtocol;
 
 namespace ScreenGuide.DesktopHost.Runtime;
 
@@ -32,7 +33,7 @@ public static class HostStartupStatusStore
         var failure = new HostStartupFailure(
             code,
             userMessage,
-            SensitiveDataRedactor.Redact($"{exception.GetType().Name}: {exception.Message}"));
+            SensitiveDataSanitizer.ExceptionType(exception));
         var temporary = path + ".tmp";
         File.WriteAllText(temporary, JsonSerializer.Serialize(failure));
         File.Move(temporary, path, overwrite: true);

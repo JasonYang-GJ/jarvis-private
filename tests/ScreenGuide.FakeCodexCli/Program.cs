@@ -54,6 +54,14 @@ public static class Program
             return 1;
         }
 
+        if (prompt.Contains("TEST_STDERR_PRIVATE_DATA", StringComparison.Ordinal))
+        {
+            await Console.Error.WriteAsync(prompt);
+            await Console.Error.WriteLineAsync($"\nWORKSPACE={Environment.CurrentDirectory}");
+            await Console.Error.FlushAsync();
+            return 1;
+        }
+
         if (prompt.Contains("TEST_NO_TERMINAL", StringComparison.Ordinal))
         {
             Write(new
@@ -62,6 +70,42 @@ public static class Program
                 item = new { id = "missing-terminal", type = "command_execution", status = "in_progress" }
             });
             return 0;
+        }
+
+        if (prompt.Contains("TEST_OVERSIZED_PROTOCOL_LINE_NO_NEWLINE", StringComparison.Ordinal))
+        {
+            var remaining = 300_001;
+            var chunk = new string('x', 4_096);
+            while (remaining > 0)
+            {
+                var count = Math.Min(remaining, chunk.Length);
+                await Console.Out.WriteAsync(chunk.AsMemory(0, count));
+                remaining -= count;
+            }
+
+            await Console.Out.FlushAsync();
+            await Task.Delay(Timeout.InfiniteTimeSpan);
+        }
+
+        if (prompt.Contains("TEST_PROTOCOL_LINE_AT_LIMIT", StringComparison.Ordinal))
+        {
+            await Console.Out.WriteAsync(new string('x', 300_000));
+            await Console.Out.WriteAsync("\r\n");
+            await Console.Out.FlushAsync();
+        }
+
+        if (prompt.Contains("TEST_LARGE_STDERR_STREAM", StringComparison.Ordinal))
+        {
+            var markerPath = ReadValue(prompt, "MARKER=");
+            var chunk = new string('e', 4_096);
+            for (var index = 0; index < 8_192; index++)
+            {
+                await Console.Error.WriteAsync(chunk);
+            }
+
+            await Console.Error.FlushAsync();
+            await File.WriteAllTextAsync(markerPath, "stderr written");
+            await Task.Delay(Timeout.InfiniteTimeSpan);
         }
 
         if (prompt.Contains("TEST_LONG_RUNNING", StringComparison.Ordinal))

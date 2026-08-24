@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "prompts": [
+    {
+      "id": "chat.general",
+      "version": "1",
+      "purpose": "chat",
+      "contentFile": "chat/general.v1.md",
+      "sha256": "0F55CF72A947E18862D6453034062B0E89E29D5D68DB3847F4384C7E198CB7F8",
+      "providerIds": ["*"],
+      "createdAtUtc": "2026-08-24T00:00:00Z",
+      "changeReason": "建立供应商无关的普通聊天安全边界。"
+    },
+    {
+      "id": "intent.semantic",
+      "version": "1",
+      "purpose": "semantic-intent-suggestion",
+      "contentFile": "intent/semantic.v1.md",
+      "sha256": "F7D5E48D71906C427CEBADEE5C0E63FFABA953BBD904E0A10B4A56EC001D6C08",
+      "providerIds": ["*"],
+      "createdAtUtc": "2026-08-24T00:00:00Z",
+      "changeReason": "建立只建议、不授权的供应商无关语义意图分类边界。"
+    }
+  ]
+}

@@ -139,6 +139,24 @@ public interface IDesktopApiClient
         int waitMilliseconds = 20_000,
         CancellationToken cancellationToken = default);
 
+    Task<AiSettingsDto> GetAiSettingsAsync(CancellationToken cancellationToken = default);
+
+    Task<AiSettingsDto> SetChatRouteAsync(
+        SetChatRouteRequestDto request,
+        CancellationToken cancellationToken = default);
+
+    Task<AiProviderCredentialStatusDto> SetProviderCredentialAsync(
+        SetProviderCredentialRequestDto request,
+        CancellationToken cancellationToken = default);
+
+    Task<AiProviderCredentialStatusDto> DeleteProviderCredentialAsync(
+        ProviderIdRequestDto request,
+        CancellationToken cancellationToken = default);
+
+    Task<AiProviderHealthDto> CheckAiProviderHealthAsync(
+        ProviderIdRequestDto request,
+        CancellationToken cancellationToken = default);
+
     Task ShutdownHostAsync(CancellationToken cancellationToken = default);
 }
 
@@ -433,6 +451,45 @@ public sealed class DesktopApiClient(
         CallAsync<WaitForSessionUpdateRequestDto, SessionSnapshotDto?>(
             DesktopApiMethods.WaitForSessionUpdate,
             new WaitForSessionUpdateRequestDto(knownChangeVersion, waitMilliseconds),
+            cancellationToken);
+
+    public Task<AiSettingsDto> GetAiSettingsAsync(
+        CancellationToken cancellationToken = default) =>
+        CallAsync<EmptyRequest, AiSettingsDto>(
+            DesktopApiMethods.GetAiSettings,
+            new EmptyRequest(),
+            cancellationToken);
+
+    public Task<AiSettingsDto> SetChatRouteAsync(
+        SetChatRouteRequestDto request,
+        CancellationToken cancellationToken = default) =>
+        CallAsync<SetChatRouteRequestDto, AiSettingsDto>(
+            DesktopApiMethods.SetChatRoute,
+            request,
+            cancellationToken);
+
+    public Task<AiProviderCredentialStatusDto> SetProviderCredentialAsync(
+        SetProviderCredentialRequestDto request,
+        CancellationToken cancellationToken = default) =>
+        CallAsync<SetProviderCredentialRequestDto, AiProviderCredentialStatusDto>(
+            DesktopApiMethods.SetProviderCredential,
+            request,
+            cancellationToken);
+
+    public Task<AiProviderCredentialStatusDto> DeleteProviderCredentialAsync(
+        ProviderIdRequestDto request,
+        CancellationToken cancellationToken = default) =>
+        CallAsync<ProviderIdRequestDto, AiProviderCredentialStatusDto>(
+            DesktopApiMethods.DeleteProviderCredential,
+            request,
+            cancellationToken);
+
+    public Task<AiProviderHealthDto> CheckAiProviderHealthAsync(
+        ProviderIdRequestDto request,
+        CancellationToken cancellationToken = default) =>
+        CallAsync<ProviderIdRequestDto, AiProviderHealthDto>(
+            DesktopApiMethods.CheckAiProviderHealth,
+            request,
             cancellationToken);
 
     public Task ShutdownHostAsync(CancellationToken cancellationToken = default) =>

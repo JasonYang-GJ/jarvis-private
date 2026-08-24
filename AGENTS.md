@@ -35,9 +35,22 @@ Build a Windows learning assistant that follows the foreground app at question t
 ## Stage 1 scope boundary
 
 - V0.3.0 / V2 Stage 1 implements unified Session coordination, continuous conversation, true cancellation, context completion, unified UI state, and incremental local status updates.
-- Do not add DeepSeek, replace the normal chat model, implement long-term memory, RAG, a vector database, complex multi-agent product features, mobile support, or broader Tool Calling as part of Stage 1 maintenance.
+- Stage 1 remains the frozen `v0.3.0-stage1` baseline. Its protocol v7 and SQLite schema v7 are historical release contracts, not the current Stage 2 candidate contracts.
 - Do not weaken V0.2.1 action, project, file, screen-capture, privacy, or confirmation gates for conversational convenience.
-- Protocol v7 and SQLite schema v7 are current as-built contracts. Session snapshots use coordinator instance identity, start time, and change version to reject stale pre-restart updates. Any later protocol/schema change requires migration, compatibility, rollback, and real-client tests.
+- Session snapshots continue to use coordinator instance identity, start time, and change version to reject stale pre-restart updates.
+
+## Stage 2 scope boundary
+
+- V2 Stage 2 standardizes ordinary-chat providers, routing, prompts, credentials, health/errors, AI invocation audit and untrusted semantic suggestions. It must not implement long-term memory, RAG, a vector database, user-profile extraction, complex multi-agent product features, mobile support, cloud remote control, broader Tool Calling, or unrelated product features.
+- All ordinary-chat providers implement `IChatModelProvider` and register through `ChatProviderRegistry`. Do not add provider-specific branches to `SessionCoordinator`, `ConversationService`, guarded desktop actions, or authorization code.
+- Freeze Provider/Model once per Turn. A settings change applies to the next ordinary-chat Turn only. Never silently fall back or resend content to another provider or destination; require an explicit user route change.
+- Rebuild ordinary-chat continuity from the local Conversation history. Provider threads are metadata, not the source of truth and not long-term memory.
+- Keep ordinary chat and the coding agent separate. Changing the chat Provider must not change `CodexConnector`, project authorization, coding Task state, Git boundaries, or TaskEvidence.
+- Keep runtime prompts in `prompts/runtime/`. Every prompt must have an ID, version, purpose, provider scope, change reason, and verified SHA-256; every AI invocation must record the prompt identity/hash without persisting the key or full prompt/conversation body.
+- Store provider credentials only through `IProviderCredentialStore`. The Windows implementation uses DPAPI CurrentUser and a short-lived lease. Never log, return through IPC, persist in SQLite, place in ordinary settings, or commit the full secret.
+- Treat model semantic output as untrusted. Strictly validate schema/enums/arguments, ignore model-proposed target authority, re-plan from trusted local context, and keep CapabilityPolicy, project/file/window consent and confirmation as the final authority.
+- Protocol v8 and SQLite schema v8 are the current Stage 2 candidate contracts. v8 adds AI settings/credential/health IPC and `ai_invocations`; migrations must create a pre-v8 backup and preserve v7 Session/Conversation data.
+- Do not claim Stage 2 complete until both real ordinary-chat providers, real cancellation, real Release DesktopClient, coding-agent regression, full tests, clean Git, rollback evidence, and version/artifact identity pass. Fake providers and mocked HTTP cannot substitute for real Codex/DeepSeek acceptance.
 
 ## Git rules
 
@@ -45,7 +58,7 @@ Build a Windows learning assistant that follows the foreground app at question t
 - Keep generated files, local configuration, logs, recordings, and captures ignored.
 - Do not add an open-source license until the owner explicitly chooses one.
 - Keep `v0.2.1-baseline` reachable. Never use a destructive reset or cleanup to perform a rollback; use a clean export/worktree and preserve the current database.
-- V0.2.1 cannot open the V0.3.0 schema-v7 database. A program rollback must use the automatic pre-v7 database backup or an isolated data directory.
+- V0.2.1 cannot open the V0.3.0 schema-v7 database, and V0.3.0 cannot open the Stage 2 schema-v8 database. A rollback must preserve the newer database and use the appropriate automatic pre-v7/pre-v8 backup or an isolated data directory.
 - Do not run a same-AppId installer/uninstaller lifecycle over an installed version that must be preserved; use a clean machine or isolated Windows environment so uninstall registration and user data are not overwritten.
 - Freeze a release in two commits when the baseline records its own artifact hash: tag the complete source/document commit first, rebuild and hash from that tag, then record the tag commit and artifact hash in a documentation-only evidence commit.
 
@@ -59,3 +72,4 @@ Build a Windows learning assistant that follows the foreground app at question t
 - Historical V0.1/V0.2 reports remain evidence but must not override the files above.
 - A version is frozen only when its baseline tag exists, locked clean-source build and tests pass, installer acceptance passes, and the working tree is clean.
 - The Stage 1 completion report is `docs/baselines/YUANSHU_V2_STAGE1_COMPLETION_REPORT.md`; the exact V0.3.0 identity belongs in `docs/baselines/V0.3.0_STAGE1.md`.
+- The Stage 2 candidate architecture and pending acceptance boundary are recorded in `docs/V2_STAGE2_AI_MODEL_ROUTING_DESIGN.md`. Do not create a completion report or version baseline until final acceptance evidence exists.

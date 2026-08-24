@@ -2,6 +2,30 @@
 
 本项目从 V0.2.1 起采用可追溯版本记录。更早内容以历史报告和 Git 历史为准。
 
+## 未发布 - V2 阶段 2：可替换 AI 大脑与模型路由（验收中）
+
+> 当前条目记录候选工作树，不代表阶段 2 已通过或已经发布。真实 Codex、真实 DeepSeek、实际 Release DesktopClient、全量回归、最终版本/提交/标签和安装包证据仍待总控验收；上一正式版本仍是 0.3.0。
+
+### 已实现的候选切片
+
+- 新增供应商无关的 Chat Model 请求/响应、能力、健康、错误、流式回调、Usage、Finish Reason、Provider Metadata 和每 Turn 取消契约。
+- 新增 `ChatProviderRegistry` 与 `ModelRouter`；路由按 Turn 冻结，只支持用户明确设置，不做静默 fallback 或自动付费重试。
+- 新增 `RoutedConversationProvider`，从元枢 ConversationStore 重建完整会话历史，使同一 Session 可 A → B → A 切换而不依赖 Provider Thread。
+- 新增 `prompts/runtime` Prompt Registry，当前注册 `chat.general@1` 和 `intent.semantic@1`；校验相对路径、Provider 范围和 SHA-256，并加入固定小型回归评测集。
+- 新增 Codex 普通聊天 Provider，与既有 Codex 编程 Connector/Skill 分离；聊天 Provider 切换不改变编程 Agent、项目权限和 TaskEvidence。
+- 新增 DeepSeek 普通聊天 Provider，固定官方 HTTPS 目的地，支持当前注册模型、SSE/JSON Object、健康检查、大小限制、取消和 401/402/429/5xx/超时/网络/非法响应等安全错误映射。
+- 新增 Windows DPAPI `CurrentUser` 凭据存储、短生命周期 lease、原子替换、删除/损坏恢复和缓冲清零；Key 不写 Git、SQLite 或普通设置。
+- IPC 协议候选升级到 v8，新增 AI 设置、路由、凭据和健康方法；设置页明确普通聊天与 Codex 编程 Agent、Provider/Model、配置状态和数据发送目的地，Key 不回显且删除前确认。
+- 新增 `ai_invocations` 和 SQLite schema v8，记录 Provider/Model/Prompt/目的地/状态/Usage 等追踪信息；旧 schema 升级前生成 pre-v8 备份。
+- 新增只建议、不授权的 AI 语义意图：严格结构解析、置信度/歧义门槛和本机确定性重规划；模型 target、权限或确认主张不能直接执行。
+- 强化日志、Crash、IPC 和 UI 错误的敏感信息清理。
+
+### 开发期验证与待验收
+
+- 上述 Registry/Router、Provider 网络边界、Prompt 哈希/评测、DPAPI、故障/取消、设置 IPC/UI、语义安全和 v7 → v8 迁移已建立定向自动化测试；最终全量数字尚未冻结。
+- 尚待：两个真实 Provider 多轮与真取消、真实 DeepSeek Key/官方网络/账户、实际 Release DesktopClient、聊天切换后的真实 Codex 编程回归、全量 Release 回归以及 Git/版本/安装包冻结。
+- 长期记忆、RAG、向量数据库、用户画像、复杂多 Agent 产品功能、手机端、云端远程控制和大规模 Tool Calling 不属于本条目。
+
 ## 0.3.0 - 2026-08-24（V2 阶段 1：通过）
 
 > 功能、363/363 自动化、最终 Release 真实用户流程和源码/产物身份冻结均已通过；标签后的仅文档证据提交不改变标签所指源码。完整安装生命周期仍待干净机验收，不视为已获对外分发放行。

@@ -92,8 +92,9 @@ public partial class App : System.Windows.Application
         catch (Exception exception)
         {
             DesktopClientFailureRecorder.Record(exception);
+            var error = UserFacingErrorMapper.Map(exception);
             MessageBox.Show(
-                $"本地任务服务启动失败。\n\n{exception.Message}",
+                $"{error.Message}\n\n{error.SuggestedAction}",
                 "元枢本地任务",
                 MessageBoxButton.OK,
                 MessageBoxImage.Error);

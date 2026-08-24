@@ -13,7 +13,10 @@ public static class UserFacingErrorMapper
             var action = startup.Code == "database_unavailable"
                 ? "关闭程序，备份数据目录后查看日志；程序不会自动删除任务历史。"
                 : "查看技术详情与日志目录后重新启动。";
-            return new UserFacingError(startup.UserMessage, action, startup.TechnicalDetail);
+            return new UserFacingError(
+                startup.UserMessage,
+                action,
+                SensitiveDataSanitizer.DiagnosticCode(startup.Code, "host_startup_failed"));
         }
 
         if (exception is DesktopApiException api)
@@ -39,7 +42,7 @@ public static class UserFacingErrorMapper
             return new UserFacingError(
                 api.Error.UserMessage,
                 action,
-                api.Error.TechnicalDetail ?? api.Error.Code);
+                SensitiveDataSanitizer.DiagnosticCode(api.Error.Code, "host_error"));
         }
 
         return exception switch
@@ -47,15 +50,15 @@ public static class UserFacingErrorMapper
             TimeoutException => new UserFacingError(
                 "本机中枢没有响应。",
                 "等待几秒后重试，程序会自动尝试恢复连接。",
-                $"{exception.GetType().Name}: {exception.Message}"),
+                SensitiveDataSanitizer.ExceptionType(exception)),
             IOException => new UserFacingError(
                 "本机中枢当前离线。",
                 "保持窗口打开，服务恢复后会自动重新连接。",
-                $"{exception.GetType().Name}: {exception.Message}"),
+                SensitiveDataSanitizer.ExceptionType(exception)),
             _ => new UserFacingError(
                 "操作没有完成。",
                 "查看技术详情或打开日志目录。",
-                $"{exception.GetType().Name}: {exception.Message}")
+                SensitiveDataSanitizer.ExceptionType(exception))
         };
     }
 }

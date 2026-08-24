@@ -1,12 +1,21 @@
-# 元枢产品事实（V0.3.0 阶段 1）
+# 元枢产品事实（V2 阶段 2 候选实现，验收中）
 
-> 当前产品事实的唯一入口。更新时间：2026-08-24。V0.3.0 已通过功能、自动化、真实桌面验收和源码/产物身份冻结；完整安装生命周期仍待干净机验收。V0.2.1 保留为上一版可回滚基线。
+> 当前产品事实的唯一入口。更新时间：2026-08-24。V0.3.0 阶段 1 仍是最近一次正式冻结基线；当前工作树已加入阶段 2 候选实现，但真实 Codex、真实 DeepSeek、实际 Release DesktopClient、全量回归和版本冻结仍待总控验收。不得把本页的候选能力描述当作已经发布或阶段 2 已通过。
 
 ## 产品定位
 
 元枢是 Windows 本机学习与操作助手。它在用户可见、明确授权的前提下理解当前话题和当前单个窗口，给出中文帮助，并只执行少量经过白名单限制的低风险动作。
 
-## V0.3.0 已实现能力
+## 状态说明
+
+- **已冻结事实**：V0.3.0 阶段 1 的 Session、真取消、上下文补齐、安全门禁和真实桌面证据保持有效。
+- **阶段 2 已实现且有开发期自动化覆盖**：统一 Chat Model、Provider Registry、Model Router、Prompt Registry、DPAPI 凭据、Codex/DeepSeek Provider、设置 UI/IPC、AI 调用审计和只建议不授权的语义意图边界。
+- **阶段 2 尚待真实验收**：两个真实 Provider 的连续对话/切换/取消、真实 DeepSeek Key 与联网、实际 Release DesktopClient、真实 Codex 编程回归、全量测试和 Git/版本/产物冻结。
+- **未来阶段 3**：长期记忆、RAG、向量数据库、跨 Session 检索和用户画像，当前均未实现。
+
+详细代码边界见 [阶段 2 AI 模型路由设计](docs/V2_STAGE2_AI_MODEL_ROUTING_DESIGN.md)。
+
+## V0.3.0 已冻结能力（阶段 2 保留）
 
 ### 统一会话与连续对话
 
@@ -50,12 +59,17 @@
 
 ## 当前 AI 大脑的真实状态
 
-- 普通问答继续通过可替换的 `IConversationProvider` 接口；V0.3.0 仍只注册 `CodexConversationProvider`。
-- 该 Provider 启动本机 Codex CLI；实际底层模型由 Codex 自身配置决定，元枢没有固定模型 ID。
-- 电脑动作仍由本机确定性规划器和权限策略决定，SessionCoordinator 只协调状态，不能授予或绕过权限。
-- 本阶段没有接入 DeepSeek，没有更换普通聊天模型，也没有新增 API Key、Endpoint 或模型路由。
+- 普通问答现在通过 `RoutedConversationProvider → ModelRouter → IChatModelProvider`，SessionCoordinator 和 ConversationService 不需要知道具体供应商。
+- `ChatProviderRegistry` 当前注册两个普通聊天 Provider：Codex 的 `codex-default`，以及 DeepSeek 的 `deepseek-v4-flash`、`deepseek-v4-pro`。这些是代码注册项；真实账户可用性仍以阶段 2 最终联网验收为准。
+- 同一 Conversation 的消息历史由元枢 SQLite 保存，每个 Turn 会重新交给当时明确选择的 Provider。Provider A → B → A 不依赖供应商 Thread，也不创建新 Session。
+- 切换只影响下一轮普通聊天；正在运行的回答保持原路由。系统没有静默 fallback，故障时不会在未告知用户的情况下把内容改发另一个供应商。
+- Prompt 已迁移到 `prompts/runtime/`：当前为 `chat.general@1` 与 `intent.semantic@1`。Registry 校验版本、适用 Provider、相对路径和内容 SHA-256；每次 AI 调用把 Prompt ID/版本/哈希、Provider、Model、目的地、状态和 Usage 写入 `ai_invocations`，不保存 Key 或完整 Prompt/Conversation 副本。
+- DeepSeek Key 使用 Windows DPAPI `CurrentUser` 加密保存在用户本地应用数据目录；路由设置与 Key 分开。UI/IPC 只显示配置状态，不读回或长时间展示完整 Key。
+- 设置页明确区分“普通聊天大脑”和“编程任务”。普通聊天可切换 Provider/Model；编程任务仍由独立的 Codex Connector/Skill 承担，不随普通聊天改变。
+- AI 语义层当前只在确定性规划仍判为普通聊天且文本命中有限候选条件时提供结构化“意图类型建议”。本机严格校验字段、枚举、置信度、歧义和上下文组合；模型 target 不被采用，真实目标、权限和确认都由本机确定性 Planner 与 CapabilityPolicy 重新计算。
+- 电脑动作、安全权限和 Session 终态继续由 V0.3.0 的确定性边界负责；模型、Prompt、网页、屏幕内容和 Provider 都不能授予权限。
 
-## 已确认验收
+## V0.3.0 已确认验收（上一冻结基线）
 
 - 实际 Release DesktopClient + DesktopHost + 真实 Codex 连续对话 10/10，通过；包含“刚才那个”“第二个”“继续”“不是这个，我说的是……”以及对前文的引用，始终保持同一 Session。
 - 真实 Codex 打断 3/3，通过；每次取消后等待 10 秒，无迟到旧回答。
@@ -65,11 +79,28 @@
 - 真实验收运行证据位于 `%LOCALAPPDATA%\ScreenGuide\Experiments\DesktopV01\20260823-184833`；该目录含隔离测试数据和日志，不进入 Git。
 - 自动化全量测试：363/363 通过，失败 0，跳过 0。
 
+## 阶段 2 开发期验证状态
+
+已建立并有定向自动化覆盖的边界：统一契约、Provider/Model 注册、Turn 路由冻结、A → B → A、Prompt 哈希、固定 Prompt 评测集、DPAPI 凭据生命周期、敏感信息清理、Codex/DeepSeek 故障与取消、语义注入拒绝、设置 Service/IPC/UI、schema v7 → v8 迁移和普通聊天/编程 Agent 分离。
+
+这些结果只证明候选实现的开发期边界，不等于阶段 2 最终通过。最终全量测试数字将在总控验收后写入完成报告和新的版本基线。
+
+仍待总控真实验收：
+
+- 真实 Codex 与真实 DeepSeek 分别完成连续多轮、用户纠正和真取消；
+- 使用用户本人 DeepSeek Key 访问官方网络，并确认真实模型、账户/余额、错误和数据去向；
+- 实际 Release DesktopClient 完成 Provider/Model 选择、Key 保存/删除、健康检查、切换和同 Session 对话；
+- 普通聊天切换到 DeepSeek 后，真实 Codex 编程任务、项目权限和 TaskEvidence 不回归；
+- 全量 Release 构建/测试、真实桌面流程、Git 干净状态、最终提交/标签/版本和安装包身份。
+
 ## 尚未完成
 
 - 没有用户长期记忆、RAG、向量数据库、相关性检索、记忆纠错或跨 Session 个性化。SQLite 保存 Session/聊天记录不等于长期记忆。
-- Prompt 没有集中注册、版本号、变更记录和自动评测；普通对话 System Prompt 仍内嵌在 Codex Provider 代码中。
-- 没有 DeepSeek Provider，也没有第二个可实际切换的通用模型 Provider。
+- 阶段 2 尚未完成两个真实 Provider、真实 Release DesktopClient 和真实 Codex 编程回归的最终验收，因此不能把 DeepSeek 或模型切换描述为正式发布能力。
+- Prompt 已有版本、哈希和固定小型评测集，但真实模型质量评测、成本/Token 对比和长期回归趋势仍未形成发布证据。
+- Provider 路由当前只支持用户明确默认选择，不做自动成本/速度路由或自动降级；这是阶段 2 的有意范围，不是缺陷。
+- 每轮会把当前 Conversation 历史交给所选 Provider，并有字符上限；尚未做 Token 精确预算、摘要或上下文裁剪。
+- Codex 普通聊天只能显示 `codex-default`，实际底层模型由本机 Codex 配置决定，当前无法提供准确模型 ID 或 Usage。
 - 本机单窗口理解主要依赖 OCR 和可访问控件，不能可靠理解纯图片、视频、图标语义和复杂空间关系。
 - 语音模型不在安装包内；商业分发前仍需完成许可证、下载和更新方案。
 - 安装包未做数字签名；Windows 可能显示未知发布者警告。
@@ -85,9 +116,11 @@
 
 ## 版本与安装状态
 
+- 阶段 2 当前只是未发布候选工作树；尚未指定最终版本号、提交、标签或安装包哈希，也尚未通过阶段 2 完成判定。
 - 当前阶段 1 源码与功能基线：V0.3.0，标签 `v0.3.0-stage1`，源码提交 `0a8cd9e164c35b86f67ffd94b9e0f17c312a2576`。完整安装生命周期仍需在干净机验收后，才可把安装包视为对外分发版本。
 - annotated tag object：`9fc790ade57fa2d3c18bc5ee84e8dc9e7018aa89`。标签之后的仅文档证据提交不改变标签所指源码。
 - DesktopClient / DesktopHost ProductVersion 均为 `0.3.0+0a8cd9e164c35b86f67ffd94b9e0f17c312a2576`，FileVersion 均为 `0.3.0.0`；发布目录共 533 个文件。
 - 正式安装包为 `artifacts/release/元枢-V0.3.0-安装包.exe`，64,039,656 bytes，SHA-256 为 `42C609E130B29C6D96784C2B0266473B6D3417BE0DC5FE9C81C7517CB100FCC7`，未签名。
 - V0.2.1 标签 `v0.2.1-baseline` 保留为上一版回滚点；回滚数据必须使用 pre-v7 备份或隔离数据目录。
+- 阶段 2 候选代码把 SQLite 升到 schema v8 并在升级前建立 `pre-v8` 备份。V0.3.0 不能直接打开 schema v8；回滚到阶段 1 时必须使用 pre-v8 备份或隔离数据目录，不能覆盖正式数据库。
 - 为保护本机同 AppId 的现有 V0.2.0 安装、卸载登记和用户数据，本阶段没有在该机器重复完整安装—卸载—重装；该发布生命周期仍应在干净机执行。

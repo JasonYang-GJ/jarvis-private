@@ -35,6 +35,15 @@ public sealed class DesktopHostOptions
 
     public string LogsDirectory => Path.Combine(DataDirectory, "logs");
 
+    public string SecretsDirectory => Path.Combine(DataDirectory, "secrets");
+
+    public string AiSettingsPath => Path.Combine(DataDirectory, "settings", "ai-settings.json");
+
+    public string PromptRegistryDirectory => Path.Combine(
+        AppContext.BaseDirectory,
+        "prompts",
+        "runtime");
+
     public string? CodexExecutablePath { get; }
 
     public string PipeName { get; }

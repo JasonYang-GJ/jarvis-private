@@ -2,9 +2,11 @@
 
 ScreenGuide Desktop 是运行在 Windows 上的个人 AI 中枢。用户打开元枢后，首页会自动进入可见的本机语音监听状态，不需要按键或输入文字；明确的低风险语音指令本身就是本次一次性授权。读取画面、打开文件和编程任务仍保留单独确认。Codex 只是可选的编程技能，不是产品中心。
 
-当前阶段 1 交付版本为 V0.3.0，V0.2.1 仍是可独立回滚的冻结基线。产品事实以 [PRODUCT.md](PRODUCT.md) 为准，当前代码结构以 [ARCHITECTURE.md](ARCHITECTURE.md) 为准，版本证据以 [V0.3.0 阶段 1 基线](docs/baselines/V0.3.0_STAGE1.md) 和 [V0.2.1 基线](docs/baselines/V0.2.1_BASELINE.md) 为准。
+最近一次正式冻结版本是 V0.3.0 阶段 1，V0.2.1 仍是更早的可独立回滚基线。当前工作树正在验收 V2 阶段 2“可替换 AI 大脑与模型路由”，尚未形成新的正式版本、标签或安装包。产品事实以 [PRODUCT.md](PRODUCT.md) 为准，当前代码结构以 [ARCHITECTURE.md](ARCHITECTURE.md) 为准，阶段 2 设计与待验收边界见 [V2_STAGE2_AI_MODEL_ROUTING_DESIGN.md](docs/V2_STAGE2_AI_MODEL_ROUTING_DESIGN.md)，冻结证据仍以 [V0.3.0 阶段 1 基线](docs/baselines/V0.3.0_STAGE1.md) 和 [V0.2.1 基线](docs/baselines/V0.2.1_BASELINE.md) 为准。
 
 V0.3.0 新增统一会话中枢：首页连续输入默认属于同一会话，用户插话会从界面到 Provider 调用链真正取消旧回答；缺项目、文件或单窗口查看同意时，原始请求会在同一任务中等待补充并自动续接。普通聊天、受控操作、窗口观察和编程任务共用一致的可见状态，但既有权限与安全门禁不变。
+
+阶段 2 候选代码在不改变 SessionCoordinator 的前提下新增统一 Chat Model、Provider Registry、Model Router、Prompt Registry、DPAPI 凭据、Codex/DeepSeek 普通聊天 Provider 和设置页。普通聊天 Provider 可以独立选择，编程任务仍由 Codex 负责；模型语义输出只是不可信建议，现实操作仍必须经过本机确定性规划、项目/文件/窗口确认和 CapabilityPolicy。当前开发期自动化边界已建立，但真实 Codex、真实 DeepSeek Key/网络、实际 Release DesktopClient、全量回归和版本冻结仍待完成，不能把候选实现描述成已发布能力。
 
 当前 V0.2 安全能力：
 

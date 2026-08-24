@@ -29,7 +29,7 @@ public sealed class SqliteTaskStoreTests
     }
 
     [Fact]
-    public async Task MigratesVersion6SessionTurnsToVersion7WithoutLosingExistingData()
+    public async Task MigratesVersion6SessionTurnsToLatestSchemaWithoutLosingExistingData()
     {
         var root = Path.Combine(Path.GetTempPath(), $"screen-guide-v6-migration-{Guid.NewGuid():N}");
         var databasePath = Path.Combine(root, "state", "tasking.db");
@@ -84,7 +84,7 @@ public sealed class SqliteTaskStoreTests
             await using (var store = new SqliteTaskStore(databasePath))
             {
                 await store.InitializeAsync();
-                Assert.Equal(7, await store.GetSchemaVersionAsync());
+                Assert.Equal(V02Contract.SchemaVersion, await store.GetSchemaVersionAsync());
             }
 
             await using (var sessions = new SqliteSessionStore(databasePath))
@@ -100,9 +100,86 @@ public sealed class SqliteTaskStoreTests
                 Assert.Null(stored?.PlanTarget);
             }
 
+            var invocations = new SqliteAiInvocationStore(databasePath);
+            await invocations.InitializeAsync();
+
             Assert.Single(Directory.GetFiles(
                 Path.GetDirectoryName(databasePath)!,
-                "tasking.pre-v7-from-v6-*.backup.db"));
+                $"tasking.pre-v{V02Contract.SchemaVersion}-from-v6-*.backup.db"));
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task MigratesStage1Version7DatabaseToAiInvocationSchemaWithoutLosingConversationHistory()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"screen-guide-v7-migration-{Guid.NewGuid():N}");
+        var databasePath = Path.Combine(root, "state", "tasking.db");
+        Directory.CreateDirectory(Path.GetDirectoryName(databasePath)!);
+        var deviceId = Guid.NewGuid();
+        var conversationId = Guid.NewGuid();
+        var messageId = Guid.NewGuid();
+        var now = new DateTimeOffset(2026, 8, 24, 3, 4, 5, TimeSpan.Zero);
+
+        try
+        {
+            await using (var connection = new SqliteConnection($"Data Source={databasePath}"))
+            {
+                await connection.OpenAsync();
+                await using var command = connection.CreateCommand();
+                command.CommandText = SqliteSchema.CreateVersion1
+                    + SqliteSchema.CreateVersion2
+                    + SqliteSchema.CreateVersion3
+                    + SqliteSchema.CreateVersion4
+                    + SqliteSchema.CreateVersion5
+                    + SqliteSchema.CreateVersion6
+                    + SqliteSchema.CreateVersion7
+                    + """
+                      INSERT INTO schema_info(version, applied_at_utc)
+                      VALUES(1, $now), (2, $now), (3, $now), (4, $now),
+                            (5, $now), (6, $now), (7, $now);
+                      INSERT INTO devices(id, display_name, device_type, trust_state, created_at_utc)
+                      VALUES($deviceId, 'Stage 1 Host', 'WindowsHost', 'Local', $now);
+                      INSERT INTO conversations(
+                          id, created_by_device_id, title, provider_id, status,
+                          created_at_utc, updated_at_utc, last_message_at_utc, version)
+                      VALUES($conversationId, $deviceId, 'Stage 1 conversation', 'codex-conversation',
+                          'Ready', $now, $now, $now, 2);
+                      INSERT INTO conversation_messages(
+                          id, conversation_id, sequence_number, role, content, created_at_utc)
+                      VALUES($messageId, $conversationId, 1, 'User', '阶段一历史不能丢', $now);
+                      """;
+                command.Parameters.AddWithValue("$now", now.ToString("O"));
+                command.Parameters.AddWithValue("$deviceId", deviceId.ToString("D"));
+                command.Parameters.AddWithValue("$conversationId", conversationId.ToString("D"));
+                command.Parameters.AddWithValue("$messageId", messageId.ToString("D"));
+                await command.ExecuteNonQueryAsync();
+            }
+
+            await using (var store = new SqliteTaskStore(databasePath))
+            {
+                await store.InitializeAsync();
+                Assert.Equal(V02Contract.SchemaVersion, await store.GetSchemaVersionAsync());
+            }
+
+            {
+                var conversations = new SqliteConversationStore(databasePath);
+                await conversations.InitializeAsync();
+                var history = await conversations.GetMessagesAsync(conversationId);
+                Assert.Equal("阶段一历史不能丢", Assert.Single(history).Content);
+            }
+
+            await new SqliteAiInvocationStore(databasePath).InitializeAsync();
+            Assert.Single(Directory.GetFiles(
+                Path.GetDirectoryName(databasePath)!,
+                $"tasking.pre-v{V02Contract.SchemaVersion}-from-v7-*.backup.db"));
         }
         finally
         {

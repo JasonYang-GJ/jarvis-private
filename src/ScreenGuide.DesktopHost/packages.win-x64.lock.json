@@ -258,8 +258,7 @@
           "Microsoft.Extensions.DependencyInjection.Abstractions": "10.0.11",
           "Microsoft.Extensions.Logging": "10.0.11",
           "Microsoft.Extensions.Logging.Abstractions": "10.0.11",
-          "Microsoft.Extensions.Options": "10.0.11",
-          "System.Diagnostics.EventLog": "10.0.11"
+          "Microsoft.Extensions.Options": "10.0.11"
         }
       },
       "Microsoft.Extensions.Logging.EventSource": {
@@ -327,29 +326,31 @@
           "SQLitePCLRaw.core": "2.1.12"
         }
       },
-      "System.Diagnostics.EventLog": {
-        "type": "Transitive",
-        "resolved": "10.0.11",
-        "contentHash": "QTXEoQBzz00SFWbo7nAg1Ogd4f99lwqcO9uAJ7MYSLEUR28f6As32QktrqG2Fr9cfAfd1GjLyGYspE7Ipj7P6w=="
-      },
       "screenguide.agent.abstractions": {
         "type": "Project"
       },
       "screenguide.agent.codex": {
         "type": "Project",
         "dependencies": {
-          "ScreenGuide.Agent.Abstractions": "[0.2.1, )",
-          "ScreenGuide.Core": "[0.2.1, )",
-          "ScreenGuide.Skills.Abstractions": "[0.2.1, )"
+          "ScreenGuide.AI.Core": "[0.3.0, )",
+          "ScreenGuide.Agent.Abstractions": "[0.3.0, )",
+          "ScreenGuide.Core": "[0.3.0, )",
+          "ScreenGuide.Skills.Abstractions": "[0.3.0, )"
         }
       },
       "screenguide.ai.core": {
         "type": "Project"
       },
+      "screenguide.ai.deepseek": {
+        "type": "Project",
+        "dependencies": {
+          "ScreenGuide.AI.Core": "[0.3.0, )"
+        }
+      },
       "screenguide.core": {
         "type": "Project",
         "dependencies": {
-          "ScreenGuide.Skills.Abstractions": "[0.2.1, )"
+          "ScreenGuide.Skills.Abstractions": "[0.3.0, )"
         }
       },
       "screenguide.desktopprotocol": {
@@ -358,14 +359,14 @@
       "screenguide.evidence": {
         "type": "Project",
         "dependencies": {
-          "ScreenGuide.Core": "[0.2.1, )"
+          "ScreenGuide.Core": "[0.3.0, )"
         }
       },
       "screenguide.persistence": {
         "type": "Project",
         "dependencies": {
           "Microsoft.Data.Sqlite": "[10.0.11, )",
-          "ScreenGuide.Core": "[0.2.1, )"
+          "ScreenGuide.Core": "[0.3.0, )"
         }
       },
       "screenguide.skills.abstractions": {
@@ -374,7 +375,7 @@
       "screenguide.skills.windows": {
         "type": "Project",
         "dependencies": {
-          "ScreenGuide.Skills.Abstractions": "[0.2.1, )"
+          "ScreenGuide.Skills.Abstractions": "[0.3.0, )"
         }
       },
       "screenguide.vision.abstractions": {
@@ -383,7 +384,7 @@
       "screenguide.vision.windows": {
         "type": "Project",
         "dependencies": {
-          "ScreenGuide.Vision.Abstractions": "[0.2.1, )"
+          "ScreenGuide.Vision.Abstractions": "[0.3.0, )"
         }
       }
     },
@@ -392,11 +393,6 @@
         "type": "Transitive",
         "resolved": "2.1.12",
         "contentHash": "fWi8Dbknuhgg72fWinIdjXVaqO1hHL4YBBwVLnr7e1c9TAZwJ0QE38j9syW1hwx6HaqEVTwI+O07WPdZn8Rp0w=="
-      },
-      "System.Diagnostics.EventLog": {
-        "type": "Transitive",
-        "resolved": "10.0.11",
-        "contentHash": "QTXEoQBzz00SFWbo7nAg1Ogd4f99lwqcO9uAJ7MYSLEUR28f6As32QktrqG2Fr9cfAfd1GjLyGYspE7Ipj7P6w=="
       }
     }
   }

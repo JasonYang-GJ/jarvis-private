@@ -37,6 +37,8 @@ public partial class MainWindow : Window
     private SessionSnapshotDto? _currentSession;
     private Task? _sessionUpdateLoop;
     private bool _isRefreshing;
+    private bool _isLoadingAiSettings;
+    private bool _isRenderingAiSettings;
     private bool _isHostOnline;
     private bool _forceClose;
     private bool _voiceCommandBusy;
@@ -49,6 +51,7 @@ public partial class MainWindow : Window
     private string? _lastVoiceUtterance;
     private DateTimeOffset _lastVoiceUtteranceAt;
     private DesktopClientSettings _settings;
+    private AiSettingsDto? _aiSettings;
 
     public MainWindow(
         IDesktopApiClient api,
@@ -435,6 +438,165 @@ public partial class MainWindow : Window
         CloseToTrayCheckBox.IsChecked = _settings.CloseToTray;
         NotificationsEnabledCheckBox.IsChecked = _settings.NotificationsEnabled;
     }
+
+    private async Task LoadAiSettingsForPageAsync()
+    {
+        if (_isLoadingAiSettings || _lifetime.IsCancellationRequested)
+        {
+            return;
+        }
+
+        _isLoadingAiSettings = true;
+        try
+        {
+            AiProviderHealthText.Text = "正在读取普通聊天大脑设置…";
+            var settings = await _api.GetAiSettingsAsync(_lifetime.Token);
+            RenderAiSettings(settings);
+        }
+        catch (OperationCanceledException) when (_lifetime.IsCancellationRequested)
+        {
+        }
+        catch (Exception exception)
+        {
+            AiProviderHealthText.Text = "AI 设置暂时无法读取。";
+            ShowError("AI 设置暂时无法读取，请确认本机中枢正在运行。", exception);
+        }
+        finally
+        {
+            _isLoadingAiSettings = false;
+        }
+    }
+
+    private void RenderAiSettings(
+        AiSettingsDto settings,
+        string? preferredProviderId = null,
+        string? preferredModelId = null)
+    {
+        _aiSettings = settings;
+        var selectedProviderId = preferredProviderId
+                                 ?? (AiChatProviderComboBox.SelectedItem as AiProviderSettingsDto)?.ProviderId
+                                 ?? settings.CurrentChatRoute.ProviderId;
+        _isRenderingAiSettings = true;
+        try
+        {
+            var providers = settings.Providers.ToArray();
+            AiChatProviderComboBox.ItemsSource = providers;
+            AiChatProviderComboBox.SelectedItem = providers.FirstOrDefault(item =>
+                    string.Equals(item.ProviderId, selectedProviderId, StringComparison.OrdinalIgnoreCase))
+                ?? providers.FirstOrDefault(item =>
+                    string.Equals(
+                        item.ProviderId,
+                        settings.CurrentChatRoute.ProviderId,
+                        StringComparison.OrdinalIgnoreCase))
+                ?? providers.FirstOrDefault();
+        }
+        finally
+        {
+            _isRenderingAiSettings = false;
+        }
+
+        RenderSelectedAiProvider(preferredModelId);
+    }
+
+    private void RenderSelectedAiProvider(string? preferredModelId = null)
+    {
+        var provider = AiChatProviderComboBox.SelectedItem as AiProviderSettingsDto;
+        if (provider is null)
+        {
+            AiChatModelComboBox.ItemsSource = Array.Empty<AiModelSettingsDto>();
+            AiDataDestinationText.Text = "当前没有可选择的普通聊天 Provider。";
+            AiCredentialStatusText.Text = "状态：未配置";
+            AiProviderHealthText.Text = "连接状态：不可用";
+            UpdateAiSettingsButtons();
+            return;
+        }
+
+        var selectedModelId = AiSettingsUiPolicy.SelectModelId(
+            provider,
+            preferredModelId
+            ?? (AiChatModelComboBox.SelectedItem as AiModelSettingsDto)?.ModelId,
+            _aiSettings?.CurrentChatRoute);
+
+        _isRenderingAiSettings = true;
+        try
+        {
+            var models = provider.Models.ToArray();
+            AiChatModelComboBox.ItemsSource = models;
+            AiChatModelComboBox.SelectedItem = models.FirstOrDefault(item =>
+                    string.Equals(item.ModelId, selectedModelId, StringComparison.OrdinalIgnoreCase))
+                ?? models.FirstOrDefault();
+        }
+        finally
+        {
+            _isRenderingAiSettings = false;
+        }
+
+        var destination = SensitiveDataSanitizer.Redact(provider.DataDestination);
+        AiDataDestinationText.Text = provider.SendsDataOffDevice
+            ? $"发送位置：{destination}。普通聊天内容会离开本机并发送到该服务。"
+            : $"处理位置：{destination}。普通聊天内容不会离开本机。";
+        var healthMessage = SensitiveDataSanitizer.Redact(provider.Health.SafeMessage);
+        AiProviderHealthText.Text = string.IsNullOrWhiteSpace(healthMessage)
+            ? $"连接状态：{HealthStateLabel(provider.Health.State)}"
+            : $"连接状态：{HealthStateLabel(provider.Health.State)}。{healthMessage}";
+        UpdateAiSettingsButtons();
+    }
+
+    private void UpdateAiSettingsButtons()
+    {
+        var provider = AiChatProviderComboBox.SelectedItem as AiProviderSettingsDto;
+        var model = AiChatModelComboBox.SelectedItem as AiModelSettingsDto;
+        SaveAiChatRouteButton.IsEnabled = _isHostOnline && provider is not null && model is not null;
+        var credential = provider is null
+            ? new AiCredentialPresentation(false, false, false, "状态：未配置")
+            : AiSettingsUiPolicy.PresentCredential(
+                provider,
+                !string.IsNullOrWhiteSpace(AiCredentialPasswordBox.Password),
+                _isHostOnline);
+        AiCredentialRequiredPanel.Visibility = credential.ShowCredentialInputs
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        AiCredentialNotRequiredText.Visibility = provider is not null && !credential.ShowCredentialInputs
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        AiCredentialNotRequiredText.Text = credential.StatusText;
+        AiCredentialStatusText.Text = credential.ShowCredentialInputs
+            ? credential.StatusText
+            : "状态：无需设置";
+        SaveAiCredentialButton.IsEnabled = credential.CanSave;
+        DeleteAiCredentialButton.IsEnabled = credential.CanDelete;
+        CheckAiProviderHealthButton.IsEnabled = _isHostOnline && provider is not null;
+    }
+
+    private void UpdateProvider(AiProviderSettingsDto updatedProvider, string? preferredModelId = null)
+    {
+        if (_aiSettings is null)
+        {
+            return;
+        }
+
+        _aiSettings = _aiSettings with
+        {
+            Providers = _aiSettings.Providers
+                .Select(item => string.Equals(
+                    item.ProviderId,
+                    updatedProvider.ProviderId,
+                    StringComparison.OrdinalIgnoreCase)
+                    ? updatedProvider
+                    : item)
+                .ToArray()
+        };
+        RenderAiSettings(_aiSettings, updatedProvider.ProviderId, preferredModelId);
+    }
+
+    private static string HealthStateLabel(string state) => state switch
+    {
+        "Healthy" => "正常",
+        "Degraded" => "可用但受限",
+        "Unavailable" => "不可用",
+        "NotConfigured" => "未配置",
+        _ => "尚未检查"
+    };
 
     private async Task LoadTaskDetailsAsync(Guid taskId, bool navigate)
     {
@@ -1296,6 +1458,150 @@ public partial class MainWindow : Window
         });
     }
 
+    private void AiChatProviderComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (!_isRenderingAiSettings)
+        {
+            AiCredentialPasswordBox.Clear();
+            RenderSelectedAiProvider();
+        }
+    }
+
+    private void AiChatModelComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (!_isRenderingAiSettings)
+        {
+            UpdateAiSettingsButtons();
+        }
+    }
+
+    private void AiCredentialPasswordBox_PasswordChanged(object sender, RoutedEventArgs e) =>
+        UpdateAiSettingsButtons();
+
+    private async void SaveAiChatRouteButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (AiChatProviderComboBox.SelectedItem is not AiProviderSettingsDto provider
+            || AiChatModelComboBox.SelectedItem is not AiModelSettingsDto model)
+        {
+            ShowError("请先选择普通聊天的 Provider 和 Model。", null);
+            return;
+        }
+
+        await RunCommandAsync(async () =>
+        {
+            var settings = await _api.SetChatRouteAsync(
+                new SetChatRouteRequestDto(provider.ProviderId, model.ModelId),
+                _lifetime.Token);
+            RenderAiSettings(settings, provider.ProviderId, model.ModelId);
+            StatusBarText.Text = "普通聊天大脑已保存，将从下一轮普通聊天开始使用；当前正在运行的回答不会切换。";
+        });
+    }
+
+    private async void SaveAiCredentialButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (AiChatProviderComboBox.SelectedItem is not AiProviderSettingsDto provider)
+        {
+            ShowError("请先选择要配置的 Provider。", null);
+            return;
+        }
+
+        var credentialPresentation = AiSettingsUiPolicy.PresentCredential(
+            provider,
+            hasSecretInput: true,
+            _isHostOnline);
+        if (!credentialPresentation.ShowCredentialInputs)
+        {
+            ShowError("这个 Provider 使用登录账号，不需要在元枢保存 Key。", null);
+            return;
+        }
+
+        var secret = AiCredentialPasswordBox.Password;
+        if (string.IsNullOrWhiteSpace(secret))
+        {
+            ShowError("请输入要保存的 Provider 密钥。", null);
+            return;
+        }
+
+        var selectedModelId = (AiChatModelComboBox.SelectedItem as AiModelSettingsDto)?.ModelId;
+        await AiCredentialSubmission.RunAsync(
+            secret,
+            value => RunCommandAsync(async () =>
+            {
+                var status = await _api.SetProviderCredentialAsync(
+                    new SetProviderCredentialRequestDto(provider.ProviderId, value),
+                    _lifetime.Token);
+                UpdateProvider(
+                    provider with { ConfigurationState = status.ConfigurationState },
+                    selectedModelId);
+                StatusBarText.Text = "密钥已安全保存；出于安全原因，元枢不会显示或读回密钥。";
+            }),
+            AiCredentialPasswordBox.Clear);
+    }
+
+    private async void DeleteAiCredentialButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (AiChatProviderComboBox.SelectedItem is not AiProviderSettingsDto provider)
+        {
+            ShowError("请先选择要清除密钥的 Provider。", null);
+            return;
+        }
+
+        var credentialPresentation = AiSettingsUiPolicy.PresentCredential(
+            provider,
+            hasSecretInput: false,
+            _isHostOnline);
+        if (!credentialPresentation.ShowCredentialInputs)
+        {
+            ShowError("这个 Provider 使用登录账号，没有可删除的 Key。", null);
+            return;
+        }
+
+        var confirmed = MessageBox.Show(
+            AiSettingsUiPolicy.CredentialDeleteConfirmation(provider),
+            "删除 Provider 密钥",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Warning,
+            MessageBoxResult.No) == MessageBoxResult.Yes;
+        if (!confirmed)
+        {
+            return;
+        }
+
+        var selectedModelId = (AiChatModelComboBox.SelectedItem as AiModelSettingsDto)?.ModelId;
+        await RunCommandAsync(async () =>
+        {
+            var status = await _api.DeleteProviderCredentialAsync(
+                new ProviderIdRequestDto(provider.ProviderId),
+                _lifetime.Token);
+            AiCredentialPasswordBox.Clear();
+            UpdateProvider(
+                provider with { ConfigurationState = status.ConfigurationState },
+                selectedModelId);
+            StatusBarText.Text = "Provider 密钥已删除。";
+        });
+    }
+
+    private async void CheckAiProviderHealthButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (AiChatProviderComboBox.SelectedItem is not AiProviderSettingsDto provider)
+        {
+            ShowError("请先选择要检查的 Provider。", null);
+            return;
+        }
+
+        var selectedModelId = (AiChatModelComboBox.SelectedItem as AiModelSettingsDto)?.ModelId;
+        await RunCommandAsync(async () =>
+        {
+            var health = await _api.CheckAiProviderHealthAsync(
+                new ProviderIdRequestDto(provider.ProviderId),
+                _lifetime.Token);
+            UpdateProvider(
+                AiSettingsUiPolicy.ApplyHealth(provider, health),
+                selectedModelId);
+            StatusBarText.Text = "Provider 连接检查已完成。";
+        });
+    }
+
     public void OpenDashboardFromTray() => ShowWindowAndPage(AppPage.Dashboard);
 
     public void OpenNewTaskFromTray() => ShowWindowAndPage(AppPage.Dashboard);
@@ -1414,6 +1720,10 @@ public partial class MainWindow : Window
         CurrentTaskPage.Visibility = page == AppPage.CurrentTask ? Visibility.Visible : Visibility.Collapsed;
         HistoryPage.Visibility = page == AppPage.History ? Visibility.Visible : Visibility.Collapsed;
         SettingsPage.Visibility = page == AppPage.Settings ? Visibility.Visible : Visibility.Collapsed;
+        if (page == AppPage.Settings)
+        {
+            _ = LoadAiSettingsForPageAsync();
+        }
         foreach (var button in new[]
                  {
                      DashboardNavButton, ConversationsNavButton, ProjectsNavButton, DesktopActionsNavButton, NewTaskNavButton,
@@ -1459,6 +1769,7 @@ public partial class MainWindow : Window
         HostStatusText.Text = online ? "本机中枢在线" : "本机中枢离线";
         HostStatusPill.Background = BrushFrom(online ? "#EAF6F0" : "#FCECED");
         HostStatusText.Foreground = BrushFrom(online ? "#1F8A6A" : "#C94C4C");
+        UpdateAiSettingsButtons();
     }
 
     private void ShowError(string message, Exception? exception)

@@ -11,6 +11,7 @@ public sealed class RuntimeDataMaintenance(
     public void CleanupStaleFiles()
     {
         CleanupFiles(Path.Combine(options.DataDirectory, "temp"), TimeSpan.FromDays(1));
+        CleanupFiles(options.SecretsDirectory, TimeSpan.FromDays(1));
         CleanupDirectories(
             Path.Combine(options.EvidenceDataDirectory, "baselines"),
             TimeSpan.FromDays(2));

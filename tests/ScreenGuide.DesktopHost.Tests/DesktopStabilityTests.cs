@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using ScreenGuide.DesktopHost.Configuration;
 using ScreenGuide.DesktopHost.Runtime;
@@ -6,6 +7,8 @@ namespace ScreenGuide.DesktopHost.Tests;
 
 public sealed class DesktopStabilityTests
 {
+    public const string CanaryApiKey = "sk-yuanshuStage2CANARY1234567890";
+
     [Fact]
     public void RedactorRemovesSecretsAndPersonalWindowsPath()
     {
@@ -17,6 +20,54 @@ public sealed class DesktopStabilityTests
         Assert.DoesNotContain("Alice", value, StringComparison.Ordinal);
         Assert.Contains("[REDACTED]", value, StringComparison.Ordinal);
         Assert.Contains("[USER]", value, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("{\"api_key\":\"sk-yuanshuStage2CANARY1234567890\",\"error\":\"invalid\"}")]
+    [InlineData("Authorization: Bearer sk-yuanshuStage2CANARY1234567890")]
+    [InlineData("provider rejected sk-yuanshuStage2CANARY1234567890")]
+    [InlineData("'token' = 'sk-yuanshuStage2CANARY1234567890'")]
+    [InlineData("https://api.deepseek.com/error?api_key=sk-yuanshuStage2CANARY1234567890&code=401")]
+    public void RedactorRemovesProviderCredentialFromCommonFailureShapes(string failure)
+    {
+        var redacted = SensitiveDataRedactor.Redact(failure);
+
+        Assert.DoesNotContain(CanaryApiKey, redacted, StringComparison.Ordinal);
+        Assert.Contains("[REDACTED]", redacted, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RedactorKeepsOrdinarySafeErrorReadable()
+    {
+        const string safeMessage = "Provider request failed with local code provider_unavailable.";
+
+        Assert.Equal(safeMessage, SensitiveDataRedactor.Redact(safeMessage));
+    }
+
+    [Fact]
+    public void HostLogDoesNotPersistExceptionMessageButKeepsReadableEvent()
+    {
+        var root = NewRoot();
+        const string rawMarker = "RAW_PROVIDER_LOG_RESPONSE";
+        try
+        {
+            using var provider = new RollingFileLoggerProvider(root);
+            var logger = provider.CreateLogger("ProviderSafetyTest");
+
+            logger.LogError(
+                new InvalidOperationException($"{rawMarker}: {CanaryApiKey}"),
+                "Provider request failed with a safe local summary.");
+            var payload = File.ReadAllText(Path.Combine(root, "desktop-host.log"));
+
+            Assert.Contains("Provider request failed with a safe local summary.", payload, StringComparison.Ordinal);
+            Assert.Contains("InvalidOperationException", payload, StringComparison.Ordinal);
+            Assert.DoesNotContain(rawMarker, payload, StringComparison.Ordinal);
+            Assert.DoesNotContain(CanaryApiKey, payload, StringComparison.Ordinal);
+        }
+        finally
+        {
+            DeleteRoot(root);
+        }
     }
 
     [Fact]
@@ -41,6 +92,52 @@ public sealed class DesktopStabilityTests
         {
             DeleteRoot(root);
         }
+    }
+
+    [Fact]
+    public void StartupCrashFileDoesNotPersistProviderResponseOrCredential()
+    {
+        var root = NewRoot();
+        try
+        {
+            var options = new DesktopHostOptions(root);
+            const string rawMarker = "RAW_PROVIDER_STARTUP_RESPONSE";
+
+            HostStartupStatusStore.Record(
+                options,
+                new InvalidOperationException($"{rawMarker}: {CanaryApiKey}"));
+            var payload = File.ReadAllText(HostStartupStatusStore.GetPath(options));
+
+            Assert.Contains("InvalidOperationException", payload, StringComparison.Ordinal);
+            Assert.DoesNotContain(rawMarker, payload, StringComparison.Ordinal);
+            Assert.DoesNotContain(CanaryApiKey, payload, StringComparison.Ordinal);
+        }
+        finally
+        {
+            DeleteRoot(root);
+        }
+    }
+
+    [Fact]
+    public async Task UnhandledFailureAuditDoesNotPersistProviderResponseOrCredential()
+    {
+        await using var environment = DesktopHostTestEnvironment.Create();
+        using var host = environment.BuildHost();
+        await host.StartAsync();
+        const string rawMarker = "RAW_PROVIDER_BODY_SHOULD_NOT_CROSS_BOUNDARY";
+
+        await HostFailureRecorder.TryRecordUnhandledAsync(
+            host.Services,
+            new InvalidOperationException($"{rawMarker}: {CanaryApiKey}"));
+        await using var store = await environment.OpenStoreAsync();
+        var audit = Assert.Single(
+            await store.GetAuditLogAsync(),
+            item => item.Action == "HostUnhandledException");
+        await host.StopAsync();
+
+        Assert.Contains("InvalidOperationException", audit.DetailsJson, StringComparison.Ordinal);
+        Assert.DoesNotContain(rawMarker, audit.DetailsJson, StringComparison.Ordinal);
+        Assert.DoesNotContain(CanaryApiKey, audit.DetailsJson, StringComparison.Ordinal);
     }
 
     [Fact]

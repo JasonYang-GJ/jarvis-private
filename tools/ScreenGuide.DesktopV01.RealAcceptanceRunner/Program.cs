@@ -11,6 +11,8 @@ var conversationSmoke = args.Any(argument =>
     string.Equals(argument, "--conversation-smoke", StringComparison.OrdinalIgnoreCase));
 var stage1Session = args.Any(argument =>
     string.Equals(argument, "--stage1-session", StringComparison.OrdinalIgnoreCase));
+var stage2LiveProviders = args.Any(argument =>
+    string.Equals(argument, "--stage2-live-providers", StringComparison.OrdinalIgnoreCase));
 var trackHost = args.Any(argument =>
     string.Equals(argument, "--track-host", StringComparison.OrdinalIgnoreCase));
 var repositoryRoot = FindRepositoryRoot();
@@ -101,7 +103,11 @@ try
             $"Codex 兼容门禁未通过：{status.Codex.Version ?? "not-found"}。 ");
     }
 
-    if (stage1Session)
+    if (stage2LiveProviders)
+    {
+        await RunStage2LiveProviderAcceptanceAsync(api, projectRoot, results);
+    }
+    else if (stage1Session)
     {
         await RunStage1SessionAcceptanceAsync(api, projectRoot, results);
     }
@@ -189,12 +195,16 @@ try
         }
     }
 
-    var project = desktopActionSmoke || conversationSmoke || stage1Session
+    var project = desktopActionSmoke || conversationSmoke || stage1Session || stage2LiveProviders
         ? null
         : await api.AddProjectAsync(new AddProjectRequestDto(
             projectRoot,
             "Desktop V0.1 real acceptance"));
-    var regularTaskCount = desktopActionSmoke || conversationSmoke || stage1Session ? 0 : smokeOnly ? 1 : 18;
+    var regularTaskCount = desktopActionSmoke || conversationSmoke || stage1Session || stage2LiveProviders
+        ? 0
+        : smokeOnly
+            ? 1
+            : 18;
     for (var number = 1; number <= regularTaskCount; number++)
     {
         var fileName = $"result-{number:D2}.txt";
@@ -225,7 +235,11 @@ try
         }
     }
 
-    if (!smokeOnly && !desktopActionSmoke && !conversationSmoke && !stage1Session)
+    if (!smokeOnly
+        && !desktopActionSmoke
+        && !conversationSmoke
+        && !stage1Session
+        && !stage2LiveProviders)
     {
     var waitingCommand = await api.CreateTaskAsync(new CreateTaskRequestDto(
         project!.Id,
@@ -308,6 +322,20 @@ try
 }
 finally
 {
+    if (stage2LiveProviders)
+    {
+        try
+        {
+            await api.SetChatRouteAsync(new SetChatRouteRequestDto("codex", "codex-default"));
+            _ = await api.DeleteProviderCredentialAsync(new ProviderIdRequestDto("deepseek"));
+            Console.WriteLine("[stage2 cleanup] isolated DeepSeek credential deleted, chat route restored to Codex");
+        }
+        catch (Exception exception)
+        {
+            Console.WriteLine($"[stage2 cleanup] failed safely: {exception.GetType().Name}");
+        }
+    }
+
     if (!client.HasExited)
     {
         client.Kill(entireProcessTree: false);
@@ -337,6 +365,311 @@ finally
 }
 
 return 0;
+
+static async Task RunStage2LiveProviderAcceptanceAsync(
+    IDesktopApiClient api,
+    string projectRoot,
+    List<object> results)
+{
+    const string codexProvider = "codex";
+    const string codexModel = "codex-default";
+    const string deepSeekProvider = "deepseek";
+
+    var initialSettings = await api.GetAiSettingsAsync();
+    if (initialSettings.ProgrammingAgent != "Codex"
+        || !initialSettings.Providers.Any(provider => provider.ProviderId == codexProvider)
+        || !initialSettings.Providers.Any(provider => provider.ProviderId == deepSeekProvider))
+    {
+        throw new InvalidOperationException("真实双 Provider 验收缺少 Codex、DeepSeek 或独立编程 Agent。 ");
+    }
+
+    await api.SetChatRouteAsync(new SetChatRouteRequestDto(codexProvider, codexModel));
+    var session = await api.StartNewSessionAsync("阶段二真实双 Provider 验收");
+    var codexToken = $"青桥-{Guid.NewGuid():N}";
+    var codexPrompts = new[]
+    {
+        $"请记住校验词“{codexToken}”。再给出两个编号方案：第一个叫青桥，第二个叫赤塔。只回答“已记录”。",
+        "第二个方案叫什么？只回答方案名。",
+        "刚才那个方案的第一步是什么？回答必须包含方案名。",
+        "继续，给它补一个风险。回答必须包含方案名。",
+        "不是这个，我说的是第二个方案。只回答它的方案名。"
+    };
+    var codexReplies = await RunLiveConversationTurnsAsync(
+        api,
+        session.SessionId,
+        codexPrompts,
+        "codex");
+    var codexContinuityPassed = codexReplies[1].Contains("赤塔", StringComparison.Ordinal)
+                                && codexReplies[2].Contains("赤塔", StringComparison.Ordinal)
+                                && codexReplies[3].Contains("赤塔", StringComparison.Ordinal)
+                                && codexReplies[4].Contains("赤塔", StringComparison.Ordinal);
+    AddStage2Result(
+        results,
+        1,
+        "real Codex multi-turn references and correction",
+        codexContinuityPassed,
+        "RealCodexFiveTurns",
+        codexReplies[^1]);
+    if (!codexContinuityPassed)
+    {
+        throw new InvalidOperationException("真实 Codex 五轮连续指代没有通过。 ");
+    }
+
+    await RunLiveInterruptionAsync(api, session.SessionId, "codex", results, 2);
+
+    Console.WriteLine("[stage2 live] WAITING_FOR_DEEPSEEK_UI_CONFIGURATION");
+    Console.WriteLine("[stage2 live] Enter the DeepSeek API Key only in the visible YuanShu settings page, select DeepSeek V4 Flash, save, and check the connection.");
+    Console.Out.Flush();
+    var health = await WaitForDeepSeekUiConfigurationAsync(api, TimeSpan.FromMinutes(20));
+    AddStage2Result(
+        results,
+        3,
+        "real DeepSeek credential, route and official endpoint health",
+        health.State == "Healthy",
+        "VisibleUiConfigurationAndRealNetwork",
+        health.SafeMessage);
+
+    var deepSeekToken = $"银舟-{Guid.NewGuid():N}";
+    var deepSeekPrompts = new[]
+    {
+        $"请记住新校验词“{deepSeekToken}”。给出两个编号方案：第一个叫银舟，第二个叫墨塔。只回答“已记录”。",
+        "第二个方案叫什么？只回答方案名。",
+        "刚才那个方案的第一步是什么？回答必须包含方案名。",
+        "继续，给它补一个风险。回答必须包含方案名。",
+        "不是这个，我说的是第二个方案。只回答它的方案名。"
+    };
+    var deepSeekReplies = await RunLiveConversationTurnsAsync(
+        api,
+        session.SessionId,
+        deepSeekPrompts,
+        "deepseek");
+    var deepSeekContinuityPassed = deepSeekReplies[1].Contains("墨塔", StringComparison.Ordinal)
+                                   && deepSeekReplies[2].Contains("墨塔", StringComparison.Ordinal)
+                                   && deepSeekReplies[3].Contains("墨塔", StringComparison.Ordinal)
+                                   && deepSeekReplies[4].Contains("墨塔", StringComparison.Ordinal);
+    AddStage2Result(
+        results,
+        4,
+        "real DeepSeek multi-turn references and correction",
+        deepSeekContinuityPassed,
+        "RealDeepSeekFiveTurns",
+        deepSeekReplies[^1]);
+    if (!deepSeekContinuityPassed)
+    {
+        throw new InvalidOperationException("真实 DeepSeek 五轮连续指代没有通过。 ");
+    }
+
+    await RunLiveInterruptionAsync(api, session.SessionId, "deepseek", results, 5);
+
+    var project = await api.AddProjectAsync(new AddProjectRequestDto(
+        projectRoot,
+        "阶段二真实编程 Agent 回归"));
+    var programming = await api.CreateTaskAsync(new CreateTaskRequestDto(
+        project.Id,
+        """
+        新建 stage2-programming-regression.txt，内容只写 stage2-codex-agent-ok。
+        不要修改其他文件。必须实际运行 dotnet test Acceptance.csproj --nologo --no-restore，并如实返回结果。
+        """,
+        "DeepSeek 普通聊天下的 Codex 编程回归"));
+    var programmingDone = await WaitForTerminalEvidenceAsync(
+        api,
+        programming.TaskId,
+        TimeSpan.FromMinutes(3));
+    var programmingPath = Path.Combine(projectRoot, "stage2-programming-regression.txt");
+    var programmingPassed = programmingDone.Summary.Status == "Succeeded"
+                            && programmingDone.Evidence?.VerificationStatus == "Verified"
+                            && programmingDone.Evidence.TestStatus == "Passed"
+                            && File.Exists(programmingPath)
+                            && await File.ReadAllTextAsync(programmingPath) == "stage2-codex-agent-ok";
+    AddStage2Result(
+        results,
+        6,
+        "real Codex programming agent while ordinary chat uses DeepSeek",
+        programmingPassed,
+        "IndependentProgrammingAgentLifecycle",
+        programmingDone.Summary.Status);
+    if (!programmingPassed)
+    {
+        throw new InvalidOperationException("DeepSeek 普通聊天下的真实 Codex 编程回归未通过。 ");
+    }
+
+    await api.SetChatRouteAsync(new SetChatRouteRequestDto(codexProvider, codexModel));
+    var returnToCodex = await api.SubmitSessionInputAsync(new SessionInputRequestDto(
+        "现在已经切回最初的聊天 Provider。只回答我先后让你记住的两个校验词，中间用顿号分隔。",
+        "Text",
+        $"stage2-return-codex-{Guid.NewGuid():N}",
+        session.SessionId));
+    var finalSnapshot = await WaitForSessionTurnAsync(
+        api,
+        returnToCodex.TurnId,
+        ["Completed"],
+        TimeSpan.FromMinutes(2));
+    var finalReply = finalSnapshot.Turns.Single(turn => turn.Id == returnToCodex.TurnId)
+        .ResultSummary ?? string.Empty;
+    var routeBack = await api.GetAiSettingsAsync();
+    var switchPassed = routeBack.CurrentChatRoute.ProviderId == codexProvider
+                       && finalSnapshot.SessionId == session.SessionId
+                       && finalReply.Contains(codexToken, StringComparison.Ordinal)
+                       && finalReply.Contains(deepSeekToken, StringComparison.Ordinal);
+    AddStage2Result(
+        results,
+        7,
+        "real same-Session Codex to DeepSeek to Codex switch",
+        switchPassed,
+        "ProviderAtoBtoAWithPersistedHistory",
+        finalReply);
+    if (!switchPassed)
+    {
+        throw new InvalidOperationException("真实 Codex→DeepSeek→Codex 同 Session 切换未通过。 ");
+    }
+}
+
+static async Task<IReadOnlyList<string>> RunLiveConversationTurnsAsync(
+    IDesktopApiClient api,
+    Guid sessionId,
+    IReadOnlyList<string> prompts,
+    string providerId)
+{
+    var replies = new List<string>(prompts.Count);
+    for (var index = 0; index < prompts.Count; index++)
+    {
+        var submitted = await api.SubmitSessionInputAsync(new SessionInputRequestDto(
+            prompts[index],
+            "Text",
+            $"stage2-{providerId}-turn-{index + 1:D2}-{Guid.NewGuid():N}",
+            sessionId));
+        var snapshot = await WaitForSessionTurnAsync(
+            api,
+            submitted.TurnId,
+            ["Completed"],
+            TimeSpan.FromMinutes(2));
+        replies.Add(snapshot.Turns.Single(turn => turn.Id == submitted.TurnId).ResultSummary
+                    ?? string.Empty);
+        Console.WriteLine($"[stage2 {providerId} conversation {index + 1:D2}/{prompts.Count:D2}] completed");
+    }
+
+    return replies;
+}
+
+static async Task RunLiveInterruptionAsync(
+    IDesktopApiClient api,
+    Guid sessionId,
+    string providerId,
+    List<object> results,
+    int resultNumber)
+{
+    var oldMarker = $"OLD-{providerId.ToUpperInvariant()}-{Guid.NewGuid():N}";
+    var before = await api.GetCurrentSessionAsync()
+                 ?? throw new InvalidOperationException("打断测试前 Session 不存在。 ");
+    var assistantCountBefore = before.Messages.Count(message => message.Role == "Assistant");
+    var old = await api.SubmitSessionInputAsync(new SessionInputRequestDto(
+        $"请写一篇至少两万字的长回答，每一段都包含标记“{oldMarker}”，不要提前结束。",
+        "Text",
+        $"stage2-{providerId}-interrupt-old-{Guid.NewGuid():N}",
+        sessionId));
+    await WaitForSessionTurnAsync(api, old.TurnId, ["Responding"], TimeSpan.FromSeconds(30));
+    await Task.Delay(TimeSpan.FromMilliseconds(750));
+    var replacementMarker = $"NEW-{providerId.ToUpperInvariant()}-{Guid.NewGuid():N}";
+    var replacement = await api.SubmitSessionInputAsync(new SessionInputRequestDto(
+        $"停，先别说这个。只回答“{replacementMarker}”。",
+        "Text",
+        $"stage2-{providerId}-interrupt-new-{Guid.NewGuid():N}",
+        sessionId));
+    var replacementDone = await WaitForSessionTurnAsync(
+        api,
+        replacement.TurnId,
+        ["Completed"],
+        TimeSpan.FromMinutes(2));
+    await Task.Delay(TimeSpan.FromSeconds(10));
+    var afterDelay = await api.GetCurrentSessionAsync()
+                     ?? throw new InvalidOperationException("打断测试后 Session 不存在。 ");
+    var oldTurn = afterDelay.Turns.Single(turn => turn.Id == old.TurnId);
+    var replacementTurn = replacementDone.Turns.Single(turn => turn.Id == replacement.TurnId);
+    var interruptionPassed = oldTurn.Phase == "Cancelled"
+                             && replacementTurn.Phase == "Completed"
+                             && replacementTurn.ResultSummary?.Contains(
+                                 replacementMarker,
+                                 StringComparison.Ordinal) == true
+                             && afterDelay.Messages.Count(message => message.Role == "Assistant")
+                             == assistantCountBefore + 1
+                             && !afterDelay.Messages.Any(message =>
+                                 message.Role == "Assistant"
+                                 && message.Content.Contains(oldMarker, StringComparison.Ordinal));
+    AddStage2Result(
+        results,
+        resultNumber,
+        $"real {providerId} cancellation and late-result guard",
+        interruptionPassed,
+        "ProviderCancellationAndLateResultGuard",
+        replacementTurn.ResultSummary ?? string.Empty);
+    if (!interruptionPassed)
+    {
+        throw new InvalidOperationException($"真实 {providerId} 打断没有通过。 ");
+    }
+}
+
+static async Task<AiProviderHealthDto> WaitForDeepSeekUiConfigurationAsync(
+    IDesktopApiClient api,
+    TimeSpan timeout)
+{
+    var deadline = DateTimeOffset.UtcNow + timeout;
+    var nextHealthCheck = DateTimeOffset.MinValue;
+    AiProviderHealthDto? latestHealth = null;
+    while (DateTimeOffset.UtcNow < deadline)
+    {
+        var settings = await api.GetAiSettingsAsync();
+        var provider = settings.Providers.Single(item => item.ProviderId == "deepseek");
+        if (provider.ConfigurationState == "Configured"
+            && settings.CurrentChatRoute.ProviderId == "deepseek"
+            && settings.CurrentChatRoute.ModelId == "deepseek-v4-flash")
+        {
+            if (provider.Health.State == "Healthy")
+            {
+                return provider.Health;
+            }
+
+            if (DateTimeOffset.UtcNow >= nextHealthCheck)
+            {
+                latestHealth = await api.CheckAiProviderHealthAsync(
+                    new ProviderIdRequestDto("deepseek"));
+                if (latestHealth.State == "Healthy")
+                {
+                    return latestHealth;
+                }
+
+                nextHealthCheck = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(20);
+                Console.WriteLine($"[stage2 live] DeepSeek health={latestHealth.State}");
+            }
+        }
+
+        await Task.Delay(TimeSpan.FromSeconds(2));
+    }
+
+    throw new TimeoutException(
+        $"等待 DeepSeek 可见设置、V4 Flash 路由和真实健康检查超时；最后状态：{latestHealth?.State ?? "NotConfigured"}。 ");
+}
+
+static void AddStage2Result(
+    List<object> results,
+    int number,
+    string scenario,
+    bool passed,
+    string verification,
+    string userSummary)
+{
+    results.Add(new
+    {
+        Number = number,
+        Scenario = scenario,
+        Status = passed ? "Succeeded" : "Failed",
+        Verification = verification,
+        ThreadId = (string?)null,
+        CurrentAttempt = 1,
+        Passed = passed,
+        UserSummary = userSummary
+    });
+    Console.WriteLine($"[stage2 {number}/7] {scenario}, pass={passed}");
+}
 
 static async Task RunStage1SessionAcceptanceAsync(
     IDesktopApiClient api,

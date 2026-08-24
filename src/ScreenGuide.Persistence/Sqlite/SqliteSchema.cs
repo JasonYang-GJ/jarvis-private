@@ -452,4 +452,37 @@ internal static class SqliteSchema
         ALTER TABLE session_turns ADD COLUMN expected_target TEXT NULL;
         ALTER TABLE session_turns ADD COLUMN plan_target TEXT NULL;
         """;
+
+    public const string CreateVersion8 = """
+        CREATE TABLE ai_invocations (
+            id TEXT NOT NULL PRIMARY KEY,
+            session_turn_id TEXT NULL,
+            conversation_turn_id TEXT NULL,
+            purpose TEXT NOT NULL,
+            provider_id TEXT NOT NULL,
+            model_id TEXT NOT NULL,
+            prompt_id TEXT NOT NULL,
+            prompt_version TEXT NOT NULL,
+            prompt_content_hash TEXT NOT NULL,
+            data_destination TEXT NOT NULL,
+            status TEXT NOT NULL,
+            started_at_utc TEXT NOT NULL,
+            completed_at_utc TEXT NULL,
+            finish_reason TEXT NULL,
+            input_tokens INTEGER NULL,
+            output_tokens INTEGER NULL,
+            total_tokens INTEGER NULL,
+            provider_request_id TEXT NULL,
+            failure_code TEXT NULL,
+            FOREIGN KEY (session_turn_id) REFERENCES session_turns(id) ON DELETE SET NULL,
+            FOREIGN KEY (conversation_turn_id) REFERENCES conversation_turns(id) ON DELETE SET NULL
+        );
+
+        CREATE INDEX ix_ai_invocations_conversation_turn
+            ON ai_invocations(conversation_turn_id, started_at_utc);
+        CREATE INDEX ix_ai_invocations_session_turn
+            ON ai_invocations(session_turn_id, started_at_utc);
+        CREATE INDEX ix_ai_invocations_provider_model
+            ON ai_invocations(provider_id, model_id, started_at_utc);
+        """;
 }

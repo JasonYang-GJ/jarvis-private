@@ -1,0 +1,150 @@
+using ScreenGuide.AI.Core;
+using Xunit;
+
+namespace ScreenGuide.AI.Core.Tests;
+
+public sealed class PromptRegistryTests
+{
+    [Fact]
+    public async Task LoadsVersionedPromptContentFromRegistryAndMarkdown()
+    {
+        await using var environment = await PromptEnvironment.CreateAsync(
+            "838699DB3D050C549492B82091605737F5A036103F3A5A445D02FF136412059E");
+
+        var registry = await PromptRegistry.LoadAsync(environment.RootDirectory);
+        var prompt = registry.GetRequired("chat.general", "1", "provider-a");
+
+        Assert.Equal("chat", prompt.Purpose);
+        Assert.Equal("Hello, {{name}}!", prompt.Content);
+        Assert.Equal("初始普通聊天提示词", prompt.ChangeReason);
+        Assert.Equal(DateTimeOffset.Parse("2026-08-24T00:00:00Z"), prompt.CreatedAtUtc);
+    }
+
+    [Fact]
+    public async Task RejectsPromptContentThatDoesNotMatchTheVersionedHash()
+    {
+        await using var environment = await PromptEnvironment.CreateAsync(
+            "0000000000000000000000000000000000000000000000000000000000000000");
+
+        var exception = await Assert.ThrowsAsync<InvalidDataException>(() =>
+            PromptRegistry.LoadAsync(environment.RootDirectory));
+
+        Assert.Contains("SHA-256", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RejectsDuplicatePromptIdAndVersion()
+    {
+        const string sha256 =
+            "838699DB3D050C549492B82091605737F5A036103F3A5A445D02FF136412059E";
+        await using var environment = await PromptEnvironment.CreateAsync(sha256);
+        await environment.WriteDuplicateRegistrationAsync(sha256);
+
+        var exception = await Assert.ThrowsAsync<InvalidDataException>(() =>
+            PromptRegistry.LoadAsync(environment.RootDirectory));
+
+        Assert.Contains("Prompt ID 和版本重复", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RepositoryRuntimePromptRegistryIsSelfConsistent()
+    {
+        var registry = await PromptRegistry.LoadAsync(Path.Combine(
+            FindRepositoryRoot(),
+            "prompts",
+            "runtime"));
+
+        var prompt = registry.GetRequired("chat.general", "1", "provider-a");
+
+        Assert.Equal("chat.general", prompt.PromptId);
+        Assert.Equal("1", prompt.Version);
+        Assert.Contains("不授予", prompt.Content, StringComparison.Ordinal);
+    }
+
+    private static string FindRepositoryRoot()
+    {
+        var current = new DirectoryInfo(AppContext.BaseDirectory);
+        while (current is not null && !File.Exists(Path.Combine(current.FullName, "ScreenGuide.slnx")))
+        {
+            current = current.Parent;
+        }
+
+        return current?.FullName
+               ?? throw new DirectoryNotFoundException("找不到测试仓库根目录。");
+    }
+
+    private sealed class PromptEnvironment(string rootDirectory) : IAsyncDisposable
+    {
+        public string RootDirectory { get; } = rootDirectory;
+
+        public static async Task<PromptEnvironment> CreateAsync(string sha256)
+        {
+            var root = Path.Combine(Path.GetTempPath(), $"screen-guide-prompts-{Guid.NewGuid():N}");
+            Directory.CreateDirectory(Path.Combine(root, "chat"));
+            await File.WriteAllTextAsync(
+                Path.Combine(root, "chat", "general.v1.md"),
+                "Hello, {{name}}!");
+            await File.WriteAllTextAsync(
+                Path.Combine(root, "registry.json"),
+                $$"""
+                {
+                  "schemaVersion": 1,
+                  "prompts": [
+                    {
+                      "id": "chat.general",
+                      "version": "1",
+                      "purpose": "chat",
+                      "contentFile": "chat/general.v1.md",
+                      "sha256": "{{sha256}}",
+                      "providerIds": ["provider-a"],
+                      "createdAtUtc": "2026-08-24T00:00:00Z",
+                      "changeReason": "初始普通聊天提示词"
+                    }
+                  ]
+                }
+                """);
+            return new PromptEnvironment(root);
+        }
+
+        public Task WriteDuplicateRegistrationAsync(string sha256) =>
+            File.WriteAllTextAsync(
+                Path.Combine(RootDirectory, "registry.json"),
+                $$"""
+                {
+                  "schemaVersion": 1,
+                  "prompts": [
+                    {
+                      "id": "chat.general",
+                      "version": "1",
+                      "purpose": "chat",
+                      "contentFile": "chat/general.v1.md",
+                      "sha256": "{{sha256}}",
+                      "providerIds": ["*"],
+                      "createdAtUtc": "2026-08-24T00:00:00Z",
+                      "changeReason": "初始版本"
+                    },
+                    {
+                      "id": "chat.general",
+                      "version": "1",
+                      "purpose": "chat",
+                      "contentFile": "chat/general.v1.md",
+                      "sha256": "{{sha256}}",
+                      "providerIds": ["*"],
+                      "createdAtUtc": "2026-08-24T00:00:00Z",
+                      "changeReason": "重复版本"
+                    }
+                  ]
+                }
+                """);
+
+        public ValueTask DisposeAsync()
+        {
+            if (Directory.Exists(RootDirectory))
+            {
+                Directory.Delete(RootDirectory, recursive: true);
+            }
+
+            return ValueTask.CompletedTask;
+        }
+    }
+}

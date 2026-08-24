@@ -1,20 +1,18 @@
 using System.Text.Json;
-using System.Text.RegularExpressions;
+using ScreenGuide.DesktopProtocol;
 
 namespace ScreenGuide.DesktopClient.Services;
 
-public static partial class DesktopClientFailureRecorder
+public static class DesktopClientFailureRecorder
 {
     public const string FileName = "client-startup-error.json";
 
-    public static void Record(Exception exception)
+    public static void Record(Exception exception, string? dataDirectory = null)
     {
         try
         {
-            var path = ResolvePath();
+            var path = ResolvePath(dataDirectory);
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-            var detail = $"{exception.GetType().Name}: {exception.Message}";
-            detail = WindowsUserPath().Replace(detail, "$1\\[USER]\\");
             File.WriteAllText(
                 path,
                 JsonSerializer.Serialize(
@@ -22,7 +20,7 @@ public static partial class DesktopClientFailureRecorder
                     {
                         occurredAtUtc = DateTimeOffset.UtcNow,
                         message = "桌面界面启动失败。",
-                        technicalDetail = detail
+                        technicalDetail = SensitiveDataSanitizer.ExceptionType(exception)
                     },
                     new JsonSerializerOptions { WriteIndented = true }));
         }
@@ -55,9 +53,11 @@ public static partial class DesktopClientFailureRecorder
         }
     }
 
-    private static string ResolvePath()
+    private static string ResolvePath(string? dataDirectory = null)
     {
-        var configured = Environment.GetEnvironmentVariable("SCREEN_GUIDE_DATA_DIRECTORY");
+        var configured = string.IsNullOrWhiteSpace(dataDirectory)
+            ? Environment.GetEnvironmentVariable("SCREEN_GUIDE_DATA_DIRECTORY")
+            : dataDirectory;
         var root = string.IsNullOrWhiteSpace(configured)
             ? Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -67,6 +67,4 @@ public static partial class DesktopClientFailureRecorder
         return Path.Combine(root, "state", FileName);
     }
 
-    [GeneratedRegex("(?i)([A-Z]:\\\\Users)\\\\[^\\\\]+\\\\")]
-    private static partial Regex WindowsUserPath();
 }

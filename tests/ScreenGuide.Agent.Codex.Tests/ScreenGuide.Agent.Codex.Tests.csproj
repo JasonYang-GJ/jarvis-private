@@ -20,6 +20,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\..\src\ScreenGuide.AI.Core\ScreenGuide.AI.Core.csproj" />
     <ProjectReference Include="..\..\src\ScreenGuide.Agent.Abstractions\ScreenGuide.Agent.Abstractions.csproj" />
     <ProjectReference Include="..\..\src\ScreenGuide.Agent.Codex\ScreenGuide.Agent.Codex.csproj" />
     <ProjectReference Include="..\..\src\ScreenGuide.Core\ScreenGuide.Core.csproj" />

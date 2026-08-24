@@ -12,6 +12,7 @@ namespace ScreenGuide.DesktopHost.Runtime;
 /// </summary>
 public sealed class AssistantCommandService(
     IIntentPlanner planner,
+    ISemanticIntentSuggester semanticIntent,
     IForegroundWindowContextProvider foregroundWindows,
     IInstalledApplicationCatalog applications,
     LocalTaskEntryService tasks,
@@ -49,6 +50,22 @@ public sealed class AssistantCommandService(
                 ? UniversalIntentKind.CodingTask
                 : null);
         var plan = planner.Plan(request.Text, context);
+        if (plan.Kind == UniversalIntentKind.Conversation
+            && context.ExplicitUserIntent is null
+            && SemanticIntentCandidateDetector.ShouldEvaluate(request.Text))
+        {
+            var suggestion = await semanticIntent.SuggestAsync(request.Text, cancellationToken)
+                .ConfigureAwait(false);
+            var explicitIntent = SemanticIntentSuggestionPolicy.SelectExplicitIntent(suggestion);
+            if (explicitIntent is not null)
+            {
+                // The model contributes only a kind. Target, missing context,
+                // permissions and confirmation are recomputed from trusted local state.
+                plan = planner.Plan(
+                    request.Text,
+                    context with { ExplicitUserIntent = explicitIntent });
+            }
+        }
         RemoveExpired();
         if (plan.Readiness == IntentPlanReadiness.Ready)
         {

@@ -1,8 +1,10 @@
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using ScreenGuide.Core.Conversations;
+using ScreenGuide.Core.Ai;
 using ScreenGuide.Core.Sessions;
 using ScreenGuide.Core.Tasking;
+using ScreenGuide.DesktopProtocol;
 using ScreenGuide.Evidence;
 using ScreenGuide.Persistence.Runtime;
 
@@ -12,6 +14,7 @@ public sealed class DesktopHostRuntime(
     ILocalTaskStore store,
     IConversationStore conversationStore,
     ISessionStore sessionStore,
+    IAiInvocationStore aiInvocationStore,
     LocalDeviceInitializer deviceInitializer,
     TaskRecoveryService recoveryService,
     TaskCancellationService cancellationService,
@@ -50,6 +53,7 @@ public sealed class DesktopHostRuntime(
             storeInitialized = true;
             await conversationStore.InitializeAsync(cancellationToken).ConfigureAwait(false);
             await sessionStore.InitializeAsync(cancellationToken).ConfigureAwait(false);
+            await aiInvocationStore.InitializeAsync(cancellationToken).ConfigureAwait(false);
             localDevice = await deviceInitializer.InitializeAsync(cancellationToken).ConfigureAwait(false);
             await AppendAuditAsync(
                 "HostStarting",
@@ -216,8 +220,7 @@ public sealed class DesktopHostRuntime(
                 AuditOutcome.Failed,
                 JsonSerializer.Serialize(new
                 {
-                    exceptionType = exception.GetType().FullName,
-                    exception.Message
+                    exceptionType = SensitiveDataSanitizer.ExceptionType(exception)
                 }),
                 cancellationToken).ConfigureAwait(false);
         }

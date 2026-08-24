@@ -2,6 +2,7 @@ using System.Reflection;
 using System.Text.Json;
 using Microsoft.Extensions.Hosting;
 using ScreenGuide.Agent.Codex;
+using ScreenGuide.AI.Core;
 using ScreenGuide.Core.Conversations;
 using ScreenGuide.Core.Sessions;
 using ScreenGuide.DesktopHost.Configuration;
@@ -19,6 +20,7 @@ public sealed class DesktopApiDispatcher(
     AssistantCommandService assistantCommands,
     ConversationService conversations,
     SessionCoordinator sessions,
+    AiSettingsService aiSettings,
     IHostApplicationLifetime applicationLifetime)
 {
     public async Task<DesktopApiResponse> DispatchAsync(
@@ -169,6 +171,25 @@ public sealed class DesktopApiDispatcher(
                 DesktopApiMethods.WaitForSessionUpdate =>
                     DesktopProtocolJson.ToElement(await WaitForSessionUpdateAsync(
                         Deserialize<WaitForSessionUpdateRequestDto>(request),
+                        cancellationToken).ConfigureAwait(false)),
+                DesktopApiMethods.GetAiSettings =>
+                    DesktopProtocolJson.ToElement(await aiSettings.GetAsync(cancellationToken)
+                        .ConfigureAwait(false)),
+                DesktopApiMethods.SetChatRoute =>
+                    DesktopProtocolJson.ToElement(await aiSettings.SetChatRouteAsync(
+                        Deserialize<SetChatRouteRequestDto>(request),
+                        cancellationToken).ConfigureAwait(false)),
+                DesktopApiMethods.SetProviderCredential =>
+                    DesktopProtocolJson.ToElement(await aiSettings.SetProviderCredentialAsync(
+                        Deserialize<SetProviderCredentialRequestDto>(request),
+                        cancellationToken).ConfigureAwait(false)),
+                DesktopApiMethods.DeleteProviderCredential =>
+                    DesktopProtocolJson.ToElement(await aiSettings.DeleteProviderCredentialAsync(
+                        Deserialize<ProviderIdRequestDto>(request),
+                        cancellationToken).ConfigureAwait(false)),
+                DesktopApiMethods.CheckAiProviderHealth =>
+                    DesktopProtocolJson.ToElement(await aiSettings.CheckProviderHealthAsync(
+                        Deserialize<ProviderIdRequestDto>(request),
                         cancellationToken).ConfigureAwait(false)),
                 DesktopApiMethods.Shutdown => Shutdown(),
                 _ => throw new NotSupportedException("当前 Desktop Host 不支持这个操作。")
@@ -635,10 +656,16 @@ internal static class DesktopApiErrors
     {
         var (code, userMessage) = exception switch
         {
+            ChatModelException chatModelException =>
+                ($"ai_{SensitiveDataSanitizer.DiagnosticCode(chatModelException.Error.Code, "provider_error")}",
+                    SafeAiMessage(chatModelException.Error.UserMessage)),
+            ProviderCredentialStoreException credentialStoreException =>
+                ($"ai_{SensitiveDataSanitizer.DiagnosticCode(credentialStoreException.Code, "credential_error")}",
+                    "AI Provider 密钥无法安全处理，请重新设置后再试。"),
             UnauthorizedAccessException when ContainsAny(
                 exception.Message,
                 "桌面", "应用", "操作", "确认", "清单") =>
-                ("desktop_action_not_authorized", exception.Message),
+                ("desktop_action_not_authorized", "这次桌面操作没有获得明确授权，已安全停止。"),
             UnauthorizedAccessException => ("project_not_authorized", "这个项目没有授权，无法执行任务。"),
             DirectoryNotFoundException => ("project_missing", "项目目录不存在，请重新选择项目。"),
             FileNotFoundException when ContainsAny(exception.Message, "文件", "选择") =>
@@ -654,19 +681,22 @@ internal static class DesktopApiErrors
                 ("network_unavailable", "当前网络不可用，Codex 无法继续。"),
             InvalidOperationException when ContainsAny(
                 exception.Message, "搜索框", "输入框", "目标窗口", "控件结构", "切到前台") =>
-                ("desktop_target_unavailable", exception.Message.Trim()),
+                ("desktop_target_unavailable", "没有找到可安全操作的目标窗口或输入框。"),
             InvalidOperationException when ContainsAny(exception.Message, "操作计划", "操作确认", "超时", "失效") =>
                 ("action_plan_expired", "这次确认已经失效，请重新说出或输入指令。"),
             InvalidOperationException when exception.Message.Contains("启动", StringComparison.OrdinalIgnoreCase) =>
                 ("codex_start_failed", "Codex 没有成功启动。"),
             InvalidDataException => ("data_invalid", "本地任务数据无法读取。"),
             InvalidOperationException => ("operation_invalid", FriendlyInvalidOperation(exception.Message)),
-            ArgumentException => ("input_invalid", exception.Message),
+            ArgumentException => ("input_invalid", "输入内容不符合要求，请检查后重试。"),
             _ when exception.GetType().Name.Contains("Sqlite", StringComparison.OrdinalIgnoreCase) =>
                 ("database_unavailable", "本地任务数据库无法打开。"),
             _ => ("host_error", "Desktop Host 执行操作时遇到错误。")
         };
-        return new DesktopApiError(code, userMessage, Technical(exception));
+        return new DesktopApiError(
+            code,
+            SensitiveDataSanitizer.Redact(userMessage),
+            SensitiveDataSanitizer.ExceptionType(exception));
     }
 
     private static string FriendlyInvalidOperation(string message) =>
@@ -682,17 +712,14 @@ internal static class DesktopApiErrors
                     ? "没有找到这个项目。"
                     : "当前状态下不能执行这个操作。";
 
-    private static string Technical(Exception exception)
-    {
-        var message = exception.Message.ReplaceLineEndings(" ").Trim();
-        if (message.Length > 500)
-        {
-            message = message[..500];
-        }
-
-        return $"{exception.GetType().Name}: {message}";
-    }
-
     private static bool ContainsAny(string value, params string[] terms) =>
         terms.Any(term => value.Contains(term, StringComparison.OrdinalIgnoreCase));
+
+    private static string SafeAiMessage(string? message)
+    {
+        var redacted = SensitiveDataSanitizer.Redact(message);
+        return string.IsNullOrWhiteSpace(redacted)
+            ? "AI Provider 暂时无法完成请求，请稍后再试。"
+            : redacted.Length <= 300 ? redacted : redacted[..300];
+    }
 }

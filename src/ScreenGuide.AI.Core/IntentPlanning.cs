@@ -80,33 +80,26 @@ public sealed partial class DeterministicIntentPlanner(TimeProvider timeProvider
             return Unsupported(text ?? string.Empty, "请说出或输入你希望电脑完成的事情。");
         }
 
-        if (context.ExplicitUserIntent == UniversalIntentKind.CodingTask
-            || IsCodingRequest(normalized))
+        var explicitPlan = context.ExplicitUserIntent switch
         {
-            return context.SelectedProjectId is null
-                ? NeedsContext(normalized, UniversalIntentKind.CodingTask,
-                    "这是一个编程任务，请先选择已授权项目。", "已授权项目")
-                : Ready(normalized, UniversalIntentKind.CodingTask,
-                    $"让编程助手在“{context.SelectedProjectName ?? "所选项目"}”中处理这个任务",
-                    context.SelectedProjectId.Value.ToString("D"), "coding.execute", true,
-                    $"确认后，编程助手只会在“{context.SelectedProjectName ?? "所选项目"}”的授权范围内执行。 ");
+            UniversalIntentKind.CodingTask => PlanCodingTask(normalized, context),
+            UniversalIntentKind.OpenFile => PlanOpenFile(normalized, context),
+            UniversalIntentKind.DescribeForeground => PlanForegroundDescription(normalized, context),
+            _ => null
+        };
+        if (explicitPlan is not null)
+        {
+            return explicitPlan;
+        }
+
+        if (IsCodingRequest(normalized))
+        {
+            return PlanCodingTask(normalized, context);
         }
 
         if (IsExplicitFileRequest(normalized))
         {
-            if (context.SelectedFilePath is null)
-            {
-                return NeedsContext(
-                    normalized,
-                    UniversalIntentKind.OpenFile,
-                    "请先选择这一次要处理的文件。",
-                    "文件");
-            }
-
-            var fileName = Path.GetFileName(context.SelectedFilePath);
-            return Ready(normalized, UniversalIntentKind.OpenFile,
-                $"用默认应用打开“{fileName}”", context.SelectedFilePath,
-                "file.open", true, $"确认打开你刚刚选择的文件“{fileName}”。");
+            return PlanOpenFile(normalized, context);
         }
 
         if (TryParseWebsite(normalized, out var website, out var websiteName))
@@ -142,22 +135,7 @@ public sealed partial class DeterministicIntentPlanner(TimeProvider timeProvider
 
         if (IsDescribeForegroundRequest(normalized))
         {
-            if (context.ForegroundApplication is null)
-            {
-                return NeedsContext(normalized, UniversalIntentKind.DescribeForeground,
-                    "没有识别到你正在询问的窗口。", "前台窗口");
-            }
-
-            if (!context.ForegroundObservationConsent)
-            {
-                return NeedsContext(normalized, UniversalIntentKind.DescribeForeground,
-                    "读取当前窗口前，需要你明确同意本次查看。", "本次窗口查看同意");
-            }
-
-            return Ready(normalized, UniversalIntentKind.DescribeForeground,
-                $"查看并识别“{context.ForegroundApplication.WindowTitle}”这个窗口",
-                context.ForegroundApplication.WindowHandle.ToString(), "desktop.window.describe", true,
-                $"确认仅查看“{context.ForegroundApplication.WindowTitle}”这个窗口。画面只在本机内存中识别，不会截取整个桌面、不会保存截图，也不会发送到云端。 ");
+            return PlanForegroundDescription(normalized, context);
         }
 
         if (TryParseApplication(normalized, out var applicationName))
@@ -197,6 +175,52 @@ public sealed partial class DeterministicIntentPlanner(TimeProvider timeProvider
     private IntentPlan Unsupported(string text, string summary) =>
         new(Guid.NewGuid(), UniversalIntentKind.Unsupported, IntentPlanReadiness.Unsupported,
             text, summary, ExpiresAtUtc: timeProvider.GetUtcNow().AddMinutes(2));
+
+    private IntentPlan PlanCodingTask(string text, IntentPlanningContext context) =>
+        context.SelectedProjectId is null
+            ? NeedsContext(text, UniversalIntentKind.CodingTask,
+                "这是一个编程任务，请先选择已授权项目。", "已授权项目")
+            : Ready(text, UniversalIntentKind.CodingTask,
+                $"让编程助手在“{context.SelectedProjectName ?? "所选项目"}”中处理这个任务",
+                context.SelectedProjectId.Value.ToString("D"), "coding.execute", true,
+                $"确认后，编程助手只会在“{context.SelectedProjectName ?? "所选项目"}”的授权范围内执行。 ");
+
+    private IntentPlan PlanOpenFile(string text, IntentPlanningContext context)
+    {
+        if (context.SelectedFilePath is null)
+        {
+            return NeedsContext(
+                text,
+                UniversalIntentKind.OpenFile,
+                "请先选择这一次要处理的文件。",
+                "文件");
+        }
+
+        var fileName = Path.GetFileName(context.SelectedFilePath);
+        return Ready(text, UniversalIntentKind.OpenFile,
+            $"用默认应用打开“{fileName}”", context.SelectedFilePath,
+            "file.open", true, $"确认打开你刚刚选择的文件“{fileName}”。");
+    }
+
+    private IntentPlan PlanForegroundDescription(string text, IntentPlanningContext context)
+    {
+        if (context.ForegroundApplication is null)
+        {
+            return NeedsContext(text, UniversalIntentKind.DescribeForeground,
+                "没有识别到你正在询问的窗口。", "前台窗口");
+        }
+
+        if (!context.ForegroundObservationConsent)
+        {
+            return NeedsContext(text, UniversalIntentKind.DescribeForeground,
+                "读取当前窗口前，需要你明确同意本次查看。", "本次窗口查看同意");
+        }
+
+        return Ready(text, UniversalIntentKind.DescribeForeground,
+            $"查看并识别“{context.ForegroundApplication.WindowTitle}”这个窗口",
+            context.ForegroundApplication.WindowHandle.ToString(), "desktop.window.describe", true,
+            $"确认仅查看“{context.ForegroundApplication.WindowTitle}”这个窗口。画面只在本机内存中识别，不会截取整个桌面、不会保存截图，也不会发送到云端。 ");
+    }
 
     private static string Normalize(string? text) =>
         Regex.Replace((text ?? string.Empty).Trim(), @"\s+", " ");

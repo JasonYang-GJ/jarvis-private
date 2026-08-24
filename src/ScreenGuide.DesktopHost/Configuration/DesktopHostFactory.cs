@@ -4,6 +4,8 @@ using Microsoft.Extensions.Logging;
 using ScreenGuide.Agent.Abstractions;
 using ScreenGuide.Agent.Codex;
 using ScreenGuide.AI.Core;
+using ScreenGuide.AI.DeepSeek;
+using ScreenGuide.Core.Ai;
 using ScreenGuide.Core.Conversations;
 using ScreenGuide.Core.Security;
 using ScreenGuide.Core.Sessions;
@@ -49,6 +51,34 @@ public static class DesktopHostFactory
             var hostOptions = services.GetRequiredService<DesktopHostOptions>();
             return new SqliteSessionStore(hostOptions.DatabasePath);
         });
+        builder.Services.AddSingleton<IAiInvocationStore>(services =>
+        {
+            var hostOptions = services.GetRequiredService<DesktopHostOptions>();
+            return new SqliteAiInvocationStore(hostOptions.DatabasePath);
+        });
+        builder.Services.AddSingleton<IProviderCredentialStore>(services =>
+        {
+            var hostOptions = services.GetRequiredService<DesktopHostOptions>();
+            return new WindowsDpapiCredentialStore(
+                hostOptions.SecretsDirectory,
+                services.GetRequiredService<TimeProvider>());
+        });
+        builder.Services.AddSingleton<IAiSettingsStore>(services =>
+        {
+            var hostOptions = services.GetRequiredService<DesktopHostOptions>();
+            return new FileAiSettingsStore(
+                hostOptions.AiSettingsPath,
+                new AiSettings(new ChatModelRoute(
+                    CodexChatModelProvider.ProviderId,
+                    CodexChatModelProvider.DefaultModelId)));
+        });
+        builder.Services.AddSingleton(services =>
+        {
+            var hostOptions = services.GetRequiredService<DesktopHostOptions>();
+            return PromptRegistry.LoadAsync(hostOptions.PromptRegistryDirectory)
+                .GetAwaiter()
+                .GetResult();
+        });
         builder.Services.AddSingleton<TaskCancellationRegistry>();
         builder.Services.AddSingleton<TaskCancellationService>();
         builder.Services.AddSingleton<TaskRecoveryService>();
@@ -70,11 +100,22 @@ public static class DesktopHostFactory
         });
         builder.Services.AddSingleton<CodexConnector>();
         builder.Services.AddSingleton<CodexConversationProvider>();
+        builder.Services.AddSingleton<CodexChatModelProvider>();
+        builder.Services.AddSingleton<DeepSeekChatModelProvider>();
+        builder.Services.AddSingleton<IChatModelProvider>(services =>
+            services.GetRequiredService<CodexChatModelProvider>());
+        builder.Services.AddSingleton<IChatModelProvider>(services =>
+            services.GetRequiredService<DeepSeekChatModelProvider>());
+        builder.Services.AddSingleton(services => new ChatProviderRegistry(
+            services.GetServices<IChatModelProvider>()));
+        builder.Services.AddSingleton<ModelRouter>();
+        builder.Services.AddSingleton<AiSettingsService>();
+        builder.Services.AddSingleton<ModelSemanticIntentSuggester>();
+        builder.Services.AddSingleton<ISemanticIntentSuggester>(services =>
+            services.GetRequiredService<ModelSemanticIntentSuggester>());
         builder.Services.AddSingleton<CodexDiagnosticsService>();
         builder.Services.AddSingleton<IAgentConnector>(services =>
             services.GetRequiredService<CodexConnector>());
-        builder.Services.AddSingleton<IConversationProvider>(services =>
-            services.GetRequiredService<CodexConversationProvider>());
         builder.Services.AddSingleton<CapabilityPolicyEngine>();
         builder.Services.AddSingleton<IIntentPlanner, DeterministicIntentPlanner>();
         builder.Services.AddSingleton<CodexSkillAdapter>();
@@ -103,6 +144,9 @@ public static class DesktopHostFactory
         builder.Services.AddSingleton<AgentConnectorRegistry>();
         builder.Services.AddSingleton<AgentTaskExecutionService>();
         builder.Services.AddSingleton<LocalTaskEntryService>();
+        builder.Services.AddSingleton<RoutedConversationProvider>();
+        builder.Services.AddSingleton<IConversationProvider>(services =>
+            services.GetRequiredService<RoutedConversationProvider>());
         builder.Services.AddSingleton<ConversationService>();
         builder.Services.AddSingleton<SessionCoordinator>();
         builder.Services.AddSingleton<DesktopActionEntryService>();

@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using ScreenGuide.Core.Tasking;
+using ScreenGuide.DesktopProtocol;
 
 namespace ScreenGuide.DesktopHost.Runtime;
 
@@ -35,8 +36,7 @@ public static class HostFailureRecorder
                     Outcome = AuditOutcome.Failed,
                     DetailsJson = JsonSerializer.Serialize(new
                     {
-                        exceptionType = exception.GetType().FullName,
-                        exception.Message
+                        exceptionType = SensitiveDataSanitizer.ExceptionType(exception)
                     })
                 },
                 cancellationToken).ConfigureAwait(false);

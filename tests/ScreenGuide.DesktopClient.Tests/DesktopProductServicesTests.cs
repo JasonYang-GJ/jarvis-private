@@ -5,6 +5,8 @@ namespace ScreenGuide.DesktopClient.Tests;
 
 public sealed class DesktopProductServicesTests
 {
+    private const string CanaryApiKey = "sk-yuanshuStage2CANARY1234567890";
+
     [Fact]
     public void NotificationPlannerUsesOnlySystemSummaryForAllowedStates()
     {
@@ -101,7 +103,7 @@ public sealed class DesktopProductServicesTests
 
         Assert.Equal("普通用户错误", error.Message);
         Assert.Contains(expected, error.SuggestedAction);
-        Assert.Equal("technical", error.TechnicalDetail);
+        Assert.Equal(code, error.TechnicalDetail);
     }
 
     [Fact]
@@ -160,7 +162,62 @@ public sealed class DesktopProductServicesTests
 
         Assert.Contains("数据", error.Message, StringComparison.Ordinal);
         Assert.Contains("备份", error.SuggestedAction, StringComparison.Ordinal);
-        Assert.Contains("SqliteException", error.TechnicalDetail, StringComparison.Ordinal);
+        Assert.Equal("database_unavailable", error.TechnicalDetail);
+    }
+
+    [Fact]
+    public void UserFacingTechnicalDetailsDoNotEchoProviderResponseOrCredential()
+    {
+        const string rawMarker = "RAW_PROVIDER_UI_RESPONSE";
+        var apiError = UserFacingErrorMapper.Map(new DesktopApiException(
+            new DesktopApiError(
+                "provider_unavailable",
+                "AI 服务暂时不可用。",
+                $"{rawMarker}: {CanaryApiKey}")));
+        var localError = UserFacingErrorMapper.Map(
+            new InvalidOperationException($"{rawMarker}: {CanaryApiKey}"));
+        var untrustedCodeError = UserFacingErrorMapper.Map(new DesktopApiException(
+            new DesktopApiError(
+                $"provider unavailable {CanaryApiKey}",
+                "AI 服务暂时不可用。",
+                "ignored")));
+
+        Assert.Equal("provider_unavailable", apiError.TechnicalDetail);
+        Assert.Equal("InvalidOperationException", localError.TechnicalDetail);
+        Assert.Equal("host_error", untrustedCodeError.TechnicalDetail);
+        Assert.DoesNotContain(rawMarker, apiError.TechnicalDetail, StringComparison.Ordinal);
+        Assert.DoesNotContain(CanaryApiKey, apiError.TechnicalDetail, StringComparison.Ordinal);
+        Assert.DoesNotContain(rawMarker, localError.TechnicalDetail, StringComparison.Ordinal);
+        Assert.DoesNotContain(CanaryApiKey, localError.TechnicalDetail, StringComparison.Ordinal);
+        Assert.DoesNotContain(CanaryApiKey, untrustedCodeError.TechnicalDetail, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ClientCrashFileDoesNotPersistProviderResponseOrCredential()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"screen-guide-client-crash-{Guid.NewGuid():N}");
+        const string rawMarker = "RAW_PROVIDER_CLIENT_RESPONSE";
+        try
+        {
+            DesktopClientFailureRecorder.Record(
+                new InvalidOperationException($"{rawMarker}: {CanaryApiKey}"),
+                root);
+            var payload = File.ReadAllText(Path.Combine(
+                root,
+                "state",
+                DesktopClientFailureRecorder.FileName));
+
+            Assert.Contains("InvalidOperationException", payload, StringComparison.Ordinal);
+            Assert.DoesNotContain(rawMarker, payload, StringComparison.Ordinal);
+            Assert.DoesNotContain(CanaryApiKey, payload, StringComparison.Ordinal);
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
     }
 
     [Fact]

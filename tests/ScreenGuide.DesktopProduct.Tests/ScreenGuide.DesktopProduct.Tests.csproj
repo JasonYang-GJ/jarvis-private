@@ -19,7 +19,12 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\ScreenGuide.DesktopProtocol\ScreenGuide.DesktopProtocol.csproj" />
     <ProjectReference Include="..\..\src\ScreenGuide.DesktopClient\ScreenGuide.DesktopClient.csproj" ReferenceOutputAssembly="false" />
-    <ProjectReference Include="..\..\src\ScreenGuide.DesktopHost\ScreenGuide.DesktopHost.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\..\src\ScreenGuide.DesktopHost\ScreenGuide.DesktopHost.csproj" />
     <ProjectReference Include="..\ScreenGuide.FakeCodexCli\ScreenGuide.FakeCodexCli.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <Content Include="..\..\prompts\runtime\**\*"
+             Link="prompts\runtime\%(RecursiveDir)%(Filename)%(Extension)"
+             CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>
