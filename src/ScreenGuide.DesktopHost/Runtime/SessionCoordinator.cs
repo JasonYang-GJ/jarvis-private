@@ -998,13 +998,18 @@ public sealed class SessionCoordinator(
         }
 
         turn = latest;
-        var plan = await assistantCommands.PlanAsync(
+        var semanticRoute = RestoreReadyRoute(turn.FrozenRoute);
+        var persistedIntent = TryParsePersistedIntent(turn.IntentKind);
+        var plan = await assistantCommands.PlanSessionAsync(
                 new PlanAssistantCommandRequestDto(
                     turn.InputText,
                     turn.FilePath,
                     turn.ProjectId ?? session.SelectedProjectId,
                     observationConsent,
                     turn.InputModality),
+                turn.Id,
+                semanticRoute,
+                persistedIntent,
                 cancellationToken)
             .ConfigureAwait(false);
         cancellationToken.ThrowIfCancellationRequested();
@@ -1291,8 +1296,10 @@ public sealed class SessionCoordinator(
                     },
                     CancellationToken.None)
                 .ConfigureAwait(false);
-            var sent = await conversations.SendAsync(
+            var sent = await conversations.SendSessionAsync(
                     session.ConversationId,
+                    responding.Id,
+                    responding.FrozenRoute,
                     responding.InputText,
                     $"session-conversation-{responding.Id:N}",
                     cancellationToken)
@@ -1598,6 +1605,38 @@ public sealed class SessionCoordinator(
         Enum.TryParse<UniversalIntentKind>(value, ignoreCase: false, out var kind)
             ? kind
             : UniversalIntentKind.Unsupported;
+
+    private static UniversalIntentKind? TryParsePersistedIntent(string? value) =>
+        Enum.TryParse<UniversalIntentKind>(value, ignoreCase: false, out var kind)
+        && kind != UniversalIntentKind.Unsupported
+            ? kind
+            : null;
+
+    private FrozenChatModelRoute? RestoreReadyRoute(SessionTurnFrozenRoute? frozenRoute)
+    {
+        if (frozenRoute?.Status != SessionTurnRouteStatus.Ready
+            || string.IsNullOrWhiteSpace(frozenRoute.ProviderId)
+            || string.IsNullOrWhiteSpace(frozenRoute.ModelId)
+            || string.IsNullOrWhiteSpace(frozenRoute.DataDestination)
+            || frozenRoute.SendsDataOffDevice is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            return modelRouter.RestoreFrozenChatRoute(
+                frozenRoute.ProviderId,
+                frozenRoute.ModelId,
+                frozenRoute.DataDestination,
+                frozenRoute.SendsDataOffDevice.Value);
+        }
+        catch (ChatModelException exception) when (
+            string.Equals(exception.Error.Code, "frozen_chat_route_invalid", StringComparison.Ordinal))
+        {
+            return null;
+        }
+    }
 
     private static SessionWorkKind WorkKindFor(UniversalIntentKind kind) => kind switch
     {

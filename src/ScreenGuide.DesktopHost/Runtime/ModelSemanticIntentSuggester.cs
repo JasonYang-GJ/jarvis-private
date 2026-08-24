@@ -5,7 +5,7 @@ using ScreenGuide.DesktopProtocol;
 namespace ScreenGuide.DesktopHost.Runtime;
 
 /// <summary>
-/// Uses the current chat model only for an untrusted semantic suggestion.
+/// Uses the Session Turn's persisted chat route only for an untrusted semantic suggestion.
 /// Deterministic planning remains the sole authority for context, consent and confirmation.
 /// </summary>
 public sealed class ModelSemanticIntentSuggester(
@@ -21,21 +21,26 @@ public sealed class ModelSemanticIntentSuggester(
         "{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"kind\",\"target\",\"confidence\",\"isAmbiguous\",\"missingContext\"],\"properties\":{\"kind\":{\"type\":\"string\",\"enum\":[\"Conversation\",\"CodingTask\",\"OpenFile\",\"DescribeForeground\"]},\"target\":{\"type\":[\"string\",\"null\"],\"maxLength\":200},\"confidence\":{\"type\":\"number\",\"minimum\":0,\"maximum\":1},\"isAmbiguous\":{\"type\":\"boolean\"},\"missingContext\":{\"type\":\"string\",\"enum\":[\"None\",\"Project\",\"File\",\"Window\",\"WindowConsent\"]}}}";
 
     public async Task<SemanticIntentSuggestion?> SuggestAsync(
+        Guid sessionTurnId,
+        FrozenChatModelRoute frozenRoute,
         string text,
         CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(frozenRoute);
+        if (sessionTurnId == Guid.Empty)
+        {
+            throw new ArgumentException("Session Turn 标识不能为空。", nameof(sessionTurnId));
+        }
+
         if (!SemanticIntentCandidateDetector.ShouldEvaluate(text))
         {
             return null;
         }
 
-        FrozenChatModelRoute route;
         PromptDefinition prompt;
         try
         {
-            route = await router.FreezeDefaultChatRouteAsync(cancellationToken)
-                .ConfigureAwait(false);
-            prompt = prompts.GetRequired(PromptId, PromptVersion, route.ProviderId);
+            prompt = prompts.GetRequired(PromptId, PromptVersion, frozenRoute.ProviderId);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -51,12 +56,12 @@ public sealed class ModelSemanticIntentSuggester(
         {
             Id = invocationId,
             Purpose = AiInvocationPurpose.SemanticIntent,
-            ProviderId = route.ProviderId,
-            ModelId = route.ModelId,
+            ProviderId = frozenRoute.ProviderId,
+            ModelId = frozenRoute.ModelId,
             PromptId = prompt.PromptId,
             PromptVersion = prompt.Version,
             PromptContentHash = prompt.ContentSha256,
-            DataDestination = route.DataDestination,
+            DataDestination = frozenRoute.DataDestination,
             Status = AiInvocationStatus.Running,
             StartedAtUtc = timeProvider.GetUtcNow()
         };
@@ -65,14 +70,14 @@ public sealed class ModelSemanticIntentSuggester(
         try
         {
             var response = await router.CompleteAsync(
-                    route,
+                    frozenRoute,
                     new ChatModelRequest(
                         invocationId,
-                        Guid.NewGuid(),
-                        route.ModelId,
+                        sessionTurnId,
+                        frozenRoute.ModelId,
                         prompt.Content,
                         [new ChatMessage(ChatMessageRole.User, text)],
-                        ResponseFormat: SelectResponseFormat(route.Capabilities),
+                        ResponseFormat: SelectResponseFormat(frozenRoute.Capabilities),
                         Prompt: new ChatPromptReference(
                             prompt.PromptId,
                             prompt.Version,

@@ -1,5 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 using ScreenGuide.AI.Core;
+using ScreenGuide.Core.Ai;
 using ScreenGuide.Core.Sessions;
 using ScreenGuide.DesktopHost.Runtime;
 
@@ -7,6 +8,164 @@ namespace ScreenGuide.DesktopHost.Tests;
 
 public sealed class SessionFrozenRouteTests
 {
+    [Fact]
+    public async Task SameTurnSemanticAndConversationUsePersistedRouteAndOriginalSessionTurnId()
+    {
+        await using var environment = DesktopHostTestEnvironment.Create();
+        var settings = new MutableSettingsStore(Route("provider-a", "model-a"));
+        var providerA = new SwitchingRecordingProvider(
+            "provider-a",
+            "model-a",
+            async request =>
+            {
+                if (string.Equals(request.Prompt?.PromptId, "intent.semantic", StringComparison.Ordinal))
+                {
+                    await settings.SaveAsync(Route("provider-b", "model-b"));
+                    return """
+                        {
+                          "kind": "Conversation",
+                          "target": null,
+                          "confidence": 0.95,
+                          "isAmbiguous": false,
+                          "missingContext": "None"
+                        }
+                        """;
+                }
+
+                return "来自 A 的回答";
+            });
+        var providerB = new SwitchingRecordingProvider(
+            "provider-b",
+            "model-b",
+            _ => Task.FromResult("不应调用 B"));
+        using var host = environment.BuildHost(services =>
+        {
+            services.AddSingleton<IAiSettingsStore>(settings);
+            services.AddSingleton(new ChatProviderRegistry([providerA, providerB]));
+        });
+        await host.StartAsync();
+        var coordinator = host.Services.GetRequiredService<SessionCoordinator>();
+        var store = host.Services.GetRequiredService<ISessionStore>();
+        var session = await coordinator.StartNewAsync("同一 Turn 冻结路由");
+
+        var submitted = await coordinator.SubmitAsync(
+            session.Session.Id,
+            "处理刚才那个",
+            "Text",
+            "same-turn-semantic-chat-route");
+        var completed = await WaitForPhaseAsync(
+            store,
+            submitted.TurnId,
+            SessionTurnPhase.Completed);
+        await host.StopAsync();
+
+        Assert.Equal("provider-a", completed.FrozenRoute?.ProviderId);
+        Assert.Equal(1, settings.LoadCount);
+        Assert.Equal(2, providerA.Requests.Count);
+        Assert.All(providerA.Requests, request => Assert.Equal(submitted.TurnId, request.TurnId));
+        Assert.Contains(providerA.Requests, request => request.Prompt?.PromptId == "intent.semantic");
+        Assert.Contains(providerA.Requests, request => request.Prompt?.PromptId == "chat.general");
+        Assert.Empty(providerB.Requests);
+    }
+
+    [Fact]
+    public async Task ContextContinuationReusesPersistedIntentAndNeverReadsOrRefreezesSettings()
+    {
+        await using var environment = DesktopHostTestEnvironment.Create();
+        var settings = new MutableSettingsStore(Route("provider-a", "model-a"));
+        var providerA = new SwitchingRecordingProvider(
+            "provider-a",
+            "model-a",
+            _ => Task.FromResult("""
+                {
+                  "kind": "CodingTask",
+                  "target": null,
+                  "confidence": 0.95,
+                  "isAmbiguous": false,
+                  "missingContext": "Project"
+                }
+                """));
+        var providerB = new SwitchingRecordingProvider(
+            "provider-b",
+            "model-b",
+            _ => Task.FromResult("不应调用 B"));
+        using var host = environment.BuildHost(services =>
+        {
+            services.AddSingleton<IAiSettingsStore>(settings);
+            services.AddSingleton(new ChatProviderRegistry([providerA, providerB]));
+        });
+        await host.StartAsync();
+        var (_, project, _) = await environment.SeedProjectsAsync();
+        var coordinator = host.Services.GetRequiredService<SessionCoordinator>();
+        var store = host.Services.GetRequiredService<ISessionStore>();
+        var session = await coordinator.StartNewAsync("补上下文不重冻");
+
+        var submitted = await coordinator.SubmitAsync(
+            session.Session.Id,
+            "处理刚才那个",
+            "Text",
+            "context-does-not-refreeze");
+        var waiting = await WaitForPhaseAsync(
+            store,
+            submitted.TurnId,
+            SessionTurnPhase.WaitingForProject);
+        await settings.SaveAsync(Route("provider-b", "model-b"));
+
+        var continued = await coordinator.ProvideProjectAsync(
+            session.Session.Id,
+            submitted.TurnId,
+            project.Id);
+        var continuedTurn = continued.Turns.Single(turn => turn.Id == submitted.TurnId);
+        await coordinator.CancelTurnAsync(session.Session.Id, submitted.TurnId);
+        await host.StopAsync();
+
+        Assert.Equal(SessionTurnPhase.WaitingForConfirmation, continuedTurn.Phase);
+        Assert.Equal(waiting.FrozenRoute, continuedTurn.FrozenRoute);
+        Assert.Equal(1, settings.LoadCount);
+        var semanticRequest = Assert.Single(providerA.Requests);
+        Assert.Equal("intent.semantic", semanticRequest.Prompt?.PromptId);
+        Assert.Equal(submitted.TurnId, semanticRequest.TurnId);
+        Assert.Empty(providerB.Requests);
+    }
+
+    [Fact]
+    public async Task UnavailableFrozenRouteFailsOrdinaryChatButDoesNotCallProvider()
+    {
+        await using var environment = DesktopHostTestEnvironment.Create();
+        var provider = new MetadataOnlyProvider("provider-a", "model-a");
+        var settings = new MutableSettingsStore(Route(" ", " "));
+        var semantic = new CountingSemanticSuggester();
+        using var host = environment.BuildHost(services =>
+        {
+            services.AddSingleton<IAiSettingsStore>(settings);
+            services.AddSingleton(new ChatProviderRegistry([provider]));
+            services.AddSingleton<ISemanticIntentSuggester>(semantic);
+        });
+        await host.StartAsync();
+        var coordinator = host.Services.GetRequiredService<SessionCoordinator>();
+        var store = host.Services.GetRequiredService<ISessionStore>();
+        var invocations = host.Services.GetRequiredService<IAiInvocationStore>();
+        var session = await coordinator.StartNewAsync("普通聊天失败关闭");
+
+        var submitted = await coordinator.SubmitAsync(
+            session.Session.Id,
+            "处理刚才那个",
+            "Text",
+            "unavailable-route-chat");
+        var failed = await WaitForPhaseAsync(store, submitted.TurnId, SessionTurnPhase.Failed);
+        Assert.NotNull(failed.ConversationTurnId);
+        Assert.Empty(await invocations.GetForConversationTurnAsync(failed.ConversationTurnId.Value));
+        await host.StopAsync();
+
+        Assert.Equal(SessionTurnRouteStatus.Unavailable, failed.FrozenRoute?.Status);
+        Assert.Equal("ai_settings_invalid", failed.FrozenRoute?.FailureCode);
+        Assert.Equal("ai_settings_invalid", failed.FailureCode);
+        Assert.Contains("没有发送", failed.FailureMessage, StringComparison.Ordinal);
+        Assert.Equal(1, settings.LoadCount);
+        Assert.Equal(0, semantic.CallCount);
+        Assert.Equal(0, provider.CompleteCount);
+    }
+
     [Fact]
     public async Task NewTurnsReadSettingsOnceAndADuplicateKeepsTheFirstFrozenRoute()
     {
@@ -292,5 +451,63 @@ public sealed class SessionFrozenRouteTests
             Task.CompletedTask;
 
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+
+    private sealed class SwitchingRecordingProvider(
+        string providerId,
+        string modelId,
+        Func<ChatModelRequest, Task<string>> response) : IChatModelProvider
+    {
+        public ChatProviderDescriptor Descriptor { get; } = new(
+            providerId,
+            providerId,
+            $"{providerId} isolated destination",
+            SendsDataOffDevice: false,
+            [new ChatModelDescriptor(modelId, modelId, ChatModelCapabilities.None)]);
+
+        public List<ChatModelRequest> Requests { get; } = [];
+
+        public async Task<ChatModelResponse> CompleteAsync(
+            ChatModelRequest request,
+            ChatModelStreamCallback? streamCallback = null,
+            CancellationToken cancellationToken = default)
+        {
+            Requests.Add(request);
+            var text = await response(request);
+            return new ChatModelResponse(
+                text,
+                ChatFinishReason.Stop,
+                null,
+                new ChatProviderMetadata(
+                    Descriptor.ProviderId,
+                    request.ModelId,
+                    null,
+                    Descriptor.DataDestination),
+                StructuredJson: request.Prompt?.PromptId == "intent.semantic" ? text : null);
+        }
+
+        public Task<ChatProviderHealth> CheckHealthAsync(
+            CancellationToken cancellationToken = default) =>
+            throw new InvalidOperationException("冻结路由执行不得调用健康检查。");
+
+        public Task CancelAsync(Guid turnId, CancellationToken cancellationToken = default) =>
+            Task.CompletedTask;
+
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+
+    private sealed class CountingSemanticSuggester : ISemanticIntentSuggester
+    {
+        public int CallCount { get; private set; }
+
+        public Task<SemanticIntentSuggestion?> SuggestAsync(
+            Guid sessionTurnId,
+            FrozenChatModelRoute frozenRoute,
+            string text,
+            CancellationToken cancellationToken = default)
+        {
+            CallCount++;
+            throw new InvalidOperationException("Unavailable 路由不得进入语义模型。");
+        }
     }
 }

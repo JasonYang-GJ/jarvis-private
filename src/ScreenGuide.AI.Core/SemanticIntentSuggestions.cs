@@ -33,6 +33,8 @@ public sealed record SemanticIntentSuggestion(
 public interface ISemanticIntentSuggester
 {
     Task<SemanticIntentSuggestion?> SuggestAsync(
+        Guid sessionTurnId,
+        FrozenChatModelRoute frozenRoute,
         string text,
         CancellationToken cancellationToken = default);
 }

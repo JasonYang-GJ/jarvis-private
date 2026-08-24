@@ -115,6 +115,50 @@ public sealed class ModelRouter(
         null,
         failureCode);
 
+    public FrozenChatModelRoute RestoreFrozenChatRoute(
+        string providerId,
+        string modelId,
+        string dataDestination,
+        bool sendsDataOffDevice)
+    {
+        ChatProviderRegistration registration;
+        try
+        {
+            registration = providers.GetRequired(providerId, modelId);
+        }
+        catch (Exception exception) when (exception is KeyNotFoundException or ArgumentException)
+        {
+            throw FrozenRouteInvalid(providerId, modelId);
+        }
+
+        var descriptor = registration.Provider.Descriptor;
+        if (!string.Equals(descriptor.ProviderId, providerId, StringComparison.Ordinal)
+            || !string.Equals(registration.Model.ModelId, modelId, StringComparison.Ordinal)
+            || !string.Equals(descriptor.DataDestination, dataDestination, StringComparison.Ordinal)
+            || descriptor.SendsDataOffDevice != sendsDataOffDevice)
+        {
+            throw FrozenRouteInvalid(providerId, modelId);
+        }
+
+        return new FrozenChatModelRoute(
+            descriptor.ProviderId,
+            registration.Model.ModelId,
+            registration.Model.Capabilities,
+            registration.Model.ContextWindowTokens,
+            descriptor.DataDestination,
+            descriptor.SendsDataOffDevice);
+    }
+
+    private static ChatModelException FrozenRouteInvalid(string providerId, string? modelId) =>
+        new(
+            providerId,
+            modelId,
+            new ChatModelError(
+                ChatModelErrorKind.InvalidRequest,
+                "frozen_chat_route_invalid",
+                "这条消息保存的 AI 路由已经与当前程序不一致，因此没有发送。请重新发送一条新消息。",
+                IsRetryable: false));
+
     public async Task<FrozenChatModelRoute> FreezeDefaultChatRouteAsync(
         CancellationToken cancellationToken = default)
     {

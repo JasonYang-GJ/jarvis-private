@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Text.Json;
 using ScreenGuide.Core.Conversations;
+using ScreenGuide.Core.Sessions;
 using ScreenGuide.Core.Tasking;
 
 namespace ScreenGuide.DesktopHost.Runtime;
@@ -73,7 +74,46 @@ public sealed class ConversationService(
         Guid conversationId,
         string message,
         string? idempotencyKey = null,
+        CancellationToken cancellationToken = default) =>
+        await SendCoreAsync(
+                conversationId,
+                sessionTurnId: null,
+                frozenRoute: null,
+                message,
+                idempotencyKey,
+                cancellationToken)
+            .ConfigureAwait(false);
+
+    public async Task<ConversationSendResult> SendSessionAsync(
+        Guid conversationId,
+        Guid sessionTurnId,
+        SessionTurnFrozenRoute? frozenRoute,
+        string message,
+        string? idempotencyKey = null,
         CancellationToken cancellationToken = default)
+    {
+        if (sessionTurnId == Guid.Empty)
+        {
+            throw new ArgumentException("Session Turn 标识不能为空。", nameof(sessionTurnId));
+        }
+
+        return await SendCoreAsync(
+                conversationId,
+                sessionTurnId,
+                frozenRoute,
+                message,
+                idempotencyKey,
+                cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    private async Task<ConversationSendResult> SendCoreAsync(
+        Guid conversationId,
+        Guid? sessionTurnId,
+        SessionTurnFrozenRoute? frozenRoute,
+        string message,
+        string? idempotencyKey,
+        CancellationToken cancellationToken)
     {
         RequireStartedHost();
         var normalized = NormalizeMessage(message);
@@ -103,6 +143,8 @@ public sealed class ConversationService(
         var run = RunTurnAsync(
             conversationId,
             registration.Turn.Id,
+            sessionTurnId,
+            frozenRoute,
             normalized,
             active.Cancellation.Token);
         active.SetRun(run);
@@ -198,6 +240,8 @@ public sealed class ConversationService(
     private async Task RunTurnAsync(
         Guid conversationId,
         Guid turnId,
+        Guid? sessionTurnId,
+        SessionTurnFrozenRoute? frozenRoute,
         string message,
         CancellationToken cancellationToken)
     {
@@ -210,7 +254,9 @@ public sealed class ConversationService(
                         conversationId,
                         turnId,
                         message,
-                        conversation.ExternalThreadId),
+                        conversation.ExternalThreadId,
+                        sessionTurnId,
+                        frozenRoute),
                     (threadId, processId) => conversationStore.RecordProviderStartedAsync(
                         conversationId,
                         turnId,

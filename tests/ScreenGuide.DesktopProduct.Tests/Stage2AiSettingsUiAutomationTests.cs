@@ -114,6 +114,7 @@ public sealed class Stage2AiSettingsUiAutomationTests
                 "Completed",
                 TimeSpan.FromSeconds(10));
             var codexRequest = Assert.Single(codex.Requests);
+            Assert.Equal(firstTurn.TurnId, codexRequest.TurnId);
             Assert.Equal("codex-default", codexRequest.ModelId);
             Assert.Collection(
                 codexRequest.Messages,
@@ -243,6 +244,7 @@ public sealed class Stage2AiSettingsUiAutomationTests
                 "Completed",
                 TimeSpan.FromSeconds(10));
             var deepSeekRequest = Assert.Single(deepSeek.Requests);
+            Assert.Equal(secondTurn.TurnId, deepSeekRequest.TurnId);
             Assert.Equal("deepseek-v4-pro", deepSeekRequest.ModelId);
             Assert.Collection(
                 deepSeekRequest.Messages,
@@ -265,6 +267,7 @@ public sealed class Stage2AiSettingsUiAutomationTests
                 session.SessionId));
             var providerTurnId = await deepSeek.BlockingTurnStarted.Task.WaitAsync(
                 TimeSpan.FromSeconds(10));
+            Assert.Equal(cancelTurn.TurnId, providerTurnId);
             await WaitForTurnPhaseAsync(
                 api,
                 cancelTurn.TurnId,
@@ -974,6 +977,8 @@ public sealed class Stage2AiSettingsUiAutomationTests
     private sealed class NoSemanticIntentSuggester : ISemanticIntentSuggester
     {
         public Task<SemanticIntentSuggestion?> SuggestAsync(
+            Guid sessionTurnId,
+            FrozenChatModelRoute frozenRoute,
             string text,
             CancellationToken cancellationToken = default) =>
             Task.FromResult<SemanticIntentSuggestion?>(null);

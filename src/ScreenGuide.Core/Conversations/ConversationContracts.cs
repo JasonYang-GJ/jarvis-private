@@ -1,3 +1,5 @@
+using ScreenGuide.Core.Sessions;
+
 namespace ScreenGuide.Core.Conversations;
 
 public interface IConversationStore
@@ -71,9 +73,14 @@ public enum ConversationProviderOutcome
 
 public sealed record ConversationProviderRequest(
     Guid ConversationId,
-    Guid TurnId,
+    Guid ConversationTurnId,
     string Message,
-    string? ExternalThreadId);
+    string? ExternalThreadId,
+    Guid? SessionTurnId = null,
+    SessionTurnFrozenRoute? FrozenRoute = null)
+{
+    public Guid TurnId => ConversationTurnId;
+}
 
 public sealed record ConversationProviderResult(
     ConversationProviderOutcome Outcome,

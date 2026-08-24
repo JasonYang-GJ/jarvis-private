@@ -2,13 +2,14 @@ using System.Collections.Concurrent;
 using ScreenGuide.AI.Core;
 using ScreenGuide.Core.Ai;
 using ScreenGuide.Core.Conversations;
+using ScreenGuide.Core.Sessions;
 using ScreenGuide.DesktopProtocol;
 
 namespace ScreenGuide.DesktopHost.Runtime;
 
 /// <summary>
-/// Compatibility boundary between the Stage 1 conversation workflow and the
-/// provider-neutral Stage 2 chat model router. Conversation history remains the
+/// Provider-neutral Stage 2 conversation boundary. It executes only the route
+/// persisted with the originating Session Turn. Conversation history remains the
 /// source of truth; provider-side threads are never required for continuity.
 /// </summary>
 public sealed class RoutedConversationProvider(
@@ -31,8 +32,48 @@ public sealed class RoutedConversationProvider(
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
-        var route = await router.FreezeDefaultChatRouteAsync(cancellationToken)
-            .ConfigureAwait(false);
+        if (request.SessionTurnId is null || request.FrozenRoute is null)
+        {
+            return Failed(
+                "chat_route_not_frozen",
+                "这条历史消息没有保存可执行的 AI 路由，因此没有发送。请重新发送一条新消息。");
+        }
+
+        if (request.FrozenRoute.Status == SessionTurnRouteStatus.Unavailable)
+        {
+            return Failed(
+                SensitiveDataSanitizer.DiagnosticCode(
+                    request.FrozenRoute.FailureCode,
+                    "chat_route_unavailable"),
+                "这条消息保存的 AI 路由暂不可用，因此没有发送。请检查 AI 设置后重新发送。");
+        }
+
+        FrozenChatModelRoute route;
+        try
+        {
+            if (request.FrozenRoute.Status != SessionTurnRouteStatus.Ready
+                || string.IsNullOrWhiteSpace(request.FrozenRoute.ProviderId)
+                || string.IsNullOrWhiteSpace(request.FrozenRoute.ModelId)
+                || string.IsNullOrWhiteSpace(request.FrozenRoute.DataDestination)
+                || request.FrozenRoute.SendsDataOffDevice is null)
+            {
+                return Failed(
+                    "frozen_chat_route_invalid",
+                    "这条消息保存的 AI 路由不完整，因此没有发送。请重新发送一条新消息。");
+            }
+
+            route = router.RestoreFrozenChatRoute(
+                request.FrozenRoute.ProviderId,
+                request.FrozenRoute.ModelId,
+                request.FrozenRoute.DataDestination,
+                request.FrozenRoute.SendsDataOffDevice.Value);
+        }
+        catch (ChatModelException exception) when (
+            string.Equals(exception.Error.Code, "frozen_chat_route_invalid", StringComparison.Ordinal))
+        {
+            return Failed(exception.Error.Code, SafeProviderMessage(exception.Error.UserMessage));
+        }
+
         var prompt = prompts.GetRequired(ChatPromptId, ChatPromptVersion, route.ProviderId);
         var history = await conversations.GetMessagesAsync(request.ConversationId, cancellationToken)
             .ConfigureAwait(false);
@@ -41,7 +82,7 @@ public sealed class RoutedConversationProvider(
         var invocation = new AiInvocationRecord
         {
             Id = invocationId,
-            ConversationTurnId = request.TurnId,
+            ConversationTurnId = request.ConversationTurnId,
             Purpose = AiInvocationPurpose.Conversation,
             ProviderId = route.ProviderId,
             ModelId = route.ModelId,
@@ -55,7 +96,7 @@ public sealed class RoutedConversationProvider(
         await invocations.StartAsync(invocation, cancellationToken).ConfigureAwait(false);
 
         using var linkedCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        var active = new ActiveRoute(request.TurnId, linkedCancellation);
+        var active = new ActiveRoute(request.SessionTurnId.Value, linkedCancellation);
         if (!_activeConversations.TryAdd(request.ConversationId, active))
         {
             await invocations.FailAsync(
@@ -74,7 +115,7 @@ public sealed class RoutedConversationProvider(
                     route,
                     new ChatModelRequest(
                         invocationId,
-                        request.TurnId,
+                        request.SessionTurnId.Value,
                         route.ModelId,
                         prompt.Content,
                         messages,

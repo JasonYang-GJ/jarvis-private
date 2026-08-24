@@ -6,6 +6,79 @@ namespace ScreenGuide.AI.Core.Tests;
 public sealed class ModelRouterTests
 {
     [Fact]
+    public void RestoreFrozenRouteUsesOnlyPersistedMetadataAndDoesNotReadCurrentSettings()
+    {
+        var providerA = new RecordingProvider("provider-a", "model-a");
+        var providerB = new RecordingProvider("provider-b", "model-b");
+        var settings = new MutableSettingsStore(new AiSettings(
+            new ChatModelRoute("provider-b", "model-b")));
+        var router = new ModelRouter(
+            new ChatProviderRegistry([providerA, providerB]),
+            settings);
+
+        var route = router.RestoreFrozenChatRoute(
+            "provider-a",
+            "model-a",
+            "api.provider-a.example",
+            sendsDataOffDevice: true);
+
+        Assert.Equal("provider-a", route.ProviderId);
+        Assert.Equal("model-a", route.ModelId);
+        Assert.Equal(ChatModelCapabilities.Streaming, route.Capabilities);
+        Assert.Equal(0, settings.LoadCount);
+        Assert.Equal(0, providerA.CompleteCount);
+        Assert.Equal(0, providerB.CompleteCount);
+    }
+
+    [Theory]
+    [InlineData("wrong destination", true)]
+    [InlineData("api.provider-a.example", false)]
+    public void RestoreFrozenRouteRejectsRegistryMetadataMismatchWithoutCallingProvider(
+        string dataDestination,
+        bool sendsDataOffDevice)
+    {
+        var provider = new RecordingProvider("provider-a", "model-a");
+        var settings = new MutableSettingsStore(new AiSettings(
+            new ChatModelRoute("provider-a", "model-a")));
+        var router = new ModelRouter(new ChatProviderRegistry([provider]), settings);
+
+        var exception = Assert.Throws<ChatModelException>(() =>
+            router.RestoreFrozenChatRoute(
+                "provider-a",
+                "model-a",
+                dataDestination,
+                sendsDataOffDevice));
+
+        Assert.Equal("frozen_chat_route_invalid", exception.Error.Code);
+        Assert.Equal(0, settings.LoadCount);
+        Assert.Equal(0, provider.CompleteCount);
+    }
+
+    [Theory]
+    [InlineData("missing-provider", "model-a")]
+    [InlineData("provider-a", "missing-model")]
+    public void RestoreFrozenRouteRejectsMissingProviderOrModelWithoutReadingSettings(
+        string providerId,
+        string modelId)
+    {
+        var provider = new RecordingProvider("provider-a", "model-a");
+        var settings = new MutableSettingsStore(new AiSettings(
+            new ChatModelRoute("provider-a", "model-a")));
+        var router = new ModelRouter(new ChatProviderRegistry([provider]), settings);
+
+        var exception = Assert.Throws<ChatModelException>(() =>
+            router.RestoreFrozenChatRoute(
+                providerId,
+                modelId,
+                "api.provider-a.example",
+                sendsDataOffDevice: true));
+
+        Assert.Equal("frozen_chat_route_invalid", exception.Error.Code);
+        Assert.Equal(0, settings.LoadCount);
+        Assert.Equal(0, provider.CompleteCount);
+    }
+
+    [Fact]
     public async Task FrozenRouteKeepsItsProviderWhenTheDefaultChanges()
     {
         var providerA = new RecordingProvider("provider-a", "model-a");

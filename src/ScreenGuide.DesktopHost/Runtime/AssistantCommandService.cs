@@ -27,7 +27,42 @@ public sealed class AssistantCommandService(
 
     public async Task<AssistantIntentPlanDto> PlanAsync(
         PlanAssistantCommandRequestDto request,
+        CancellationToken cancellationToken = default) =>
+        await PlanCoreAsync(
+                request,
+                sessionTurnId: null,
+                frozenRoute: null,
+                persistedIntent: null,
+                cancellationToken)
+            .ConfigureAwait(false);
+
+    public async Task<AssistantIntentPlanDto> PlanSessionAsync(
+        PlanAssistantCommandRequestDto request,
+        Guid sessionTurnId,
+        FrozenChatModelRoute? frozenRoute,
+        UniversalIntentKind? persistedIntent,
         CancellationToken cancellationToken = default)
+    {
+        if (sessionTurnId == Guid.Empty)
+        {
+            throw new ArgumentException("Session Turn 标识不能为空。", nameof(sessionTurnId));
+        }
+
+        return await PlanCoreAsync(
+                request,
+                sessionTurnId,
+                frozenRoute,
+                persistedIntent,
+                cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    private async Task<AssistantIntentPlanDto> PlanCoreAsync(
+        PlanAssistantCommandRequestDto request,
+        Guid? sessionTurnId,
+        FrozenChatModelRoute? frozenRoute,
+        UniversalIntentKind? persistedIntent,
+        CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
         var selectedFile = NormalizeSelectedFile(request.SelectedFilePath);
@@ -48,13 +83,19 @@ public sealed class AssistantCommandService(
             request.ForegroundObservationConsent,
             inputModality == "ProgrammingTask"
                 ? UniversalIntentKind.CodingTask
-                : null);
+                : persistedIntent);
         var plan = planner.Plan(request.Text, context);
         if (plan.Kind == UniversalIntentKind.Conversation
             && context.ExplicitUserIntent is null
+            && sessionTurnId is not null
+            && frozenRoute is not null
             && SemanticIntentCandidateDetector.ShouldEvaluate(request.Text))
         {
-            var suggestion = await semanticIntent.SuggestAsync(request.Text, cancellationToken)
+            var suggestion = await semanticIntent.SuggestAsync(
+                    sessionTurnId.Value,
+                    frozenRoute,
+                    request.Text,
+                    cancellationToken)
                 .ConfigureAwait(false);
             var explicitIntent = SemanticIntentSuggestionPolicy.SelectExplicitIntent(suggestion);
             if (explicitIntent is not null)

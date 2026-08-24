@@ -1,6 +1,7 @@
 using ScreenGuide.AI.Core;
 using ScreenGuide.Core.Ai;
 using ScreenGuide.Core.Conversations;
+using ScreenGuide.Core.Sessions;
 using ScreenGuide.DesktopHost.Runtime;
 
 namespace ScreenGuide.DesktopHost.Tests;
@@ -8,13 +9,13 @@ namespace ScreenGuide.DesktopHost.Tests;
 public sealed class RoutedConversationProviderTests
 {
     [Fact]
-    public async Task SwitchingAtoBtoA_keeps_one_supplier_neutral_history_and_audits_each_turn()
+    public async Task PersistedRoutesAtoBtoA_ignore_current_settings_and_keep_supplier_neutral_history()
     {
         var conversationId = Guid.NewGuid();
         var history = new HistoryStore(conversationId);
         var providerA = new RecordingChatProvider("provider-a", "model-a");
         var providerB = new RecordingChatProvider("provider-b", "model-b");
-        var settings = new MutableAiSettingsStore("provider-a", "model-a");
+        var settings = new MutableAiSettingsStore("provider-b", "model-b");
         var invocations = new RecordingInvocationStore();
         var routed = new RoutedConversationProvider(
             history,
@@ -24,17 +25,15 @@ public sealed class RoutedConversationProviderTests
             TimeProvider.System);
 
         history.Add(ConversationMessageRole.User, "甲代表蓝鹭");
-        var first = await routed.SendAsync(Request(conversationId, "甲代表蓝鹭"));
+        var first = await routed.SendAsync(Request(conversationId, "甲代表蓝鹭", providerA));
         history.Add(ConversationMessageRole.Assistant, first.Reply!);
 
-        await settings.SaveAsync(new AiSettings(new ChatModelRoute("provider-b", "model-b")));
         history.Add(ConversationMessageRole.User, "刚才那个甲代表什么？");
-        var second = await routed.SendAsync(Request(conversationId, "刚才那个甲代表什么？"));
+        var second = await routed.SendAsync(Request(conversationId, "刚才那个甲代表什么？", providerB));
         history.Add(ConversationMessageRole.Assistant, second.Reply!);
 
-        await settings.SaveAsync(new AiSettings(new ChatModelRoute("provider-a", "model-a")));
         history.Add(ConversationMessageRole.User, "继续，并引用第二个回答");
-        var third = await routed.SendAsync(Request(conversationId, "继续，并引用第二个回答"));
+        var third = await routed.SendAsync(Request(conversationId, "继续，并引用第二个回答", providerA));
 
         Assert.Equal(ConversationProviderOutcome.Succeeded, third.Outcome);
         Assert.Equal(2, providerA.Requests.Count);
@@ -60,6 +59,7 @@ public sealed class RoutedConversationProviderTests
             Assert.Equal(AiInvocationPurpose.Conversation, item.Purpose);
         });
         Assert.Equal(3, invocations.Completed.Count);
+        Assert.Equal(0, settings.LoadCount);
     }
 
     [Fact]
@@ -78,13 +78,19 @@ public sealed class RoutedConversationProviderTests
             invocations,
             TimeProvider.System);
 
-        var running = routed.SendAsync(Request(conversationId, "请给一个很长的回答"));
+        var sessionTurnId = Guid.NewGuid();
+        var running = routed.SendAsync(Request(
+            conversationId,
+            "请给一个很长的回答",
+            provider,
+            sessionTurnId));
         await provider.Started.Task.WaitAsync(TimeSpan.FromSeconds(3));
 
         await routed.CancelAsync(conversationId);
         var result = await running.WaitAsync(TimeSpan.FromSeconds(3));
 
         Assert.Equal(ConversationProviderOutcome.Cancelled, result.Outcome);
+        Assert.Equal(sessionTurnId, provider.ActiveTurnId);
         Assert.Equal(provider.ActiveTurnId, provider.CancelledTurnId);
         Assert.DoesNotContain("旧回答", result.Reply ?? string.Empty, StringComparison.Ordinal);
         Assert.Single(invocations.Failed);
@@ -108,7 +114,7 @@ public sealed class RoutedConversationProviderTests
             invocations,
             TimeProvider.System);
 
-        var result = await routed.SendAsync(Request(conversationId, "你好"));
+        var result = await routed.SendAsync(Request(conversationId, "你好", provider));
 
         Assert.Equal(ConversationProviderOutcome.Failed, result.Outcome);
         Assert.Equal("rate_limited", result.FailureCode);
@@ -117,11 +123,119 @@ public sealed class RoutedConversationProviderTests
         Assert.Equal("rate_limited", Assert.Single(invocations.Failed).FailureCode);
     }
 
-    private static ConversationProviderRequest Request(Guid conversationId, string message) =>
-        new(conversationId, Guid.NewGuid(), message, null);
+    [Fact]
+    public async Task MissingSessionRouteContextFailsClosedBeforePromptInvocationOrProvider()
+    {
+        var conversationId = Guid.NewGuid();
+        var provider = new RecordingChatProvider("provider-a", "model-a");
+        var invocations = new RecordingInvocationStore();
+        var (emptyPrompts, promptDirectory) = await LoadEmptyPromptRegistryAsync();
+        var routed = new RoutedConversationProvider(
+            new HistoryStore(conversationId),
+            new ModelRouter(
+                new ChatProviderRegistry([provider]),
+                new MutableAiSettingsStore("provider-a", "model-a")),
+            emptyPrompts,
+            invocations,
+            TimeProvider.System);
+        try
+        {
+            var result = await routed.SendAsync(new ConversationProviderRequest(
+                conversationId,
+                Guid.NewGuid(),
+                "ROUTE_CONTEXT_CANARY",
+                null));
+
+            Assert.Equal(ConversationProviderOutcome.Failed, result.Outcome);
+            Assert.Equal("chat_route_not_frozen", result.FailureCode);
+            Assert.Empty(provider.Requests);
+            Assert.Empty(invocations.Started);
+        }
+        finally
+        {
+            Directory.Delete(promptDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task UnavailableAndInvalidFrozenRoutesFailClosedWithoutProviderOrInvocation()
+    {
+        var conversationId = Guid.NewGuid();
+        var provider = new RecordingChatProvider("provider-a", "model-a");
+        var settings = new MutableAiSettingsStore("provider-a", "model-a");
+        var invocations = new RecordingInvocationStore();
+        var routed = new RoutedConversationProvider(
+            new HistoryStore(conversationId),
+            new ModelRouter(new ChatProviderRegistry([provider]), settings),
+            await LoadRepositoryPromptsAsync(),
+            invocations,
+            TimeProvider.System);
+        var sessionTurnId = Guid.NewGuid();
+        var unavailable = new SessionTurnFrozenRoute
+        {
+            Status = SessionTurnRouteStatus.Unavailable,
+            FrozenAtUtc = DateTimeOffset.UtcNow,
+            FailureCode = "ai_settings_invalid"
+        };
+        var invalid = Frozen(provider) with { DataDestination = "mismatched destination" };
+
+        var unavailableResult = await routed.SendAsync(new ConversationProviderRequest(
+            conversationId,
+            Guid.NewGuid(),
+            "unavailable",
+            null,
+            sessionTurnId,
+            unavailable));
+        var invalidResult = await routed.SendAsync(new ConversationProviderRequest(
+            conversationId,
+            Guid.NewGuid(),
+            "invalid",
+            null,
+            Guid.NewGuid(),
+            invalid));
+
+        Assert.Equal("ai_settings_invalid", unavailableResult.FailureCode);
+        Assert.Equal("frozen_chat_route_invalid", invalidResult.FailureCode);
+        Assert.Empty(provider.Requests);
+        Assert.Empty(invocations.Started);
+        Assert.Equal(0, settings.LoadCount);
+    }
+
+    private static ConversationProviderRequest Request(
+        Guid conversationId,
+        string message,
+        IChatModelProvider provider,
+        Guid? sessionTurnId = null) =>
+        new(
+            conversationId,
+            Guid.NewGuid(),
+            message,
+            null,
+            sessionTurnId ?? Guid.NewGuid(),
+            Frozen(provider));
+
+    private static SessionTurnFrozenRoute Frozen(IChatModelProvider provider) => new()
+    {
+        Status = SessionTurnRouteStatus.Ready,
+        ProviderId = provider.Descriptor.ProviderId,
+        ModelId = provider.Descriptor.Models[0].ModelId,
+        DataDestination = provider.Descriptor.DataDestination,
+        SendsDataOffDevice = provider.Descriptor.SendsDataOffDevice,
+        FrozenAtUtc = DateTimeOffset.UtcNow
+    };
 
     private static Task<PromptRegistry> LoadRepositoryPromptsAsync() =>
         PromptRegistry.LoadAsync(Path.Combine(FindRepositoryRoot(), "prompts", "runtime"));
+
+    private static async Task<(PromptRegistry Registry, string Directory)> LoadEmptyPromptRegistryAsync()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), $"empty-prompts-{Guid.NewGuid():N}");
+        System.IO.Directory.CreateDirectory(directory);
+        await File.WriteAllTextAsync(
+            Path.Combine(directory, "registry.json"),
+            "{\"schemaVersion\":1,\"prompts\":[]}");
+        return (await PromptRegistry.LoadAsync(directory), directory);
+    }
 
     private static string FindRepositoryRoot()
     {
@@ -139,8 +253,13 @@ public sealed class RoutedConversationProviderTests
     {
         private AiSettings _settings = new(new ChatModelRoute(providerId, modelId));
 
-        public Task<AiSettings> LoadAsync(CancellationToken cancellationToken = default) =>
-            Task.FromResult(_settings);
+        public int LoadCount { get; private set; }
+
+        public Task<AiSettings> LoadAsync(CancellationToken cancellationToken = default)
+        {
+            LoadCount++;
+            return Task.FromResult(_settings);
+        }
 
         public Task SaveAsync(AiSettings settings, CancellationToken cancellationToken = default)
         {

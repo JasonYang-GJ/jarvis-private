@@ -17,7 +17,7 @@ public sealed class ModelSemanticIntentSuggesterTests
             invocations,
             await LoadRepositoryPromptsAsync());
 
-        var suggestion = await suggester.SuggestAsync("第二个方案详细一点");
+        var suggestion = await SuggestAsync(suggester, provider, "第二个方案详细一点");
 
         Assert.Null(suggestion);
         Assert.Empty(provider.Requests);
@@ -35,11 +35,16 @@ public sealed class ModelSemanticIntentSuggesterTests
         var prompts = await LoadRepositoryPromptsAsync();
         var suggester = CreateSuggester(provider, invocations, prompts);
 
-        var suggestion = await suggester.SuggestAsync(originalText);
+        var sessionTurnId = Guid.NewGuid();
+        var suggestion = await suggester.SuggestAsync(
+            sessionTurnId,
+            Route(provider),
+            originalText);
 
         Assert.NotNull(suggestion);
         Assert.Equal(SemanticIntentKind.OpenFile, suggestion.Kind);
         var request = Assert.Single(provider.Requests);
+        Assert.Equal(sessionTurnId, request.TurnId);
         Assert.Equal("model-a", request.ModelId);
         Assert.Equal(prompts.GetRequired("intent.semantic", "1", "provider-a").Content, request.SystemPrompt);
         Assert.Contains("不拥有任何操作权、授权权或确认权", request.SystemPrompt, StringComparison.Ordinal);
@@ -83,7 +88,7 @@ public sealed class ModelSemanticIntentSuggesterTests
             new RecordingInvocationStore(),
             await LoadRepositoryPromptsAsync());
 
-        _ = await suggester.SuggestAsync("处理刚才那个");
+        _ = await SuggestAsync(suggester, provider, "处理刚才那个");
 
         var format = Assert.Single(provider.Requests).ResponseFormat;
         Assert.NotNull(format);
@@ -117,7 +122,7 @@ public sealed class ModelSemanticIntentSuggesterTests
             invocations,
             await LoadRepositoryPromptsAsync());
 
-        var suggestion = await suggester.SuggestAsync("打开刚才那个");
+        var suggestion = await SuggestAsync(suggester, provider, "打开刚才那个");
 
         Assert.Null(suggestion);
         var failure = Assert.Single(invocations.Failed);
@@ -149,7 +154,7 @@ public sealed class ModelSemanticIntentSuggesterTests
             invocations,
             await LoadRepositoryPromptsAsync());
 
-        var suggestion = await suggester.SuggestAsync("看看这个");
+        var suggestion = await SuggestAsync(suggester, provider, "看看这个");
 
         Assert.Null(suggestion);
         var failure = Assert.Single(invocations.Failed);
@@ -175,7 +180,7 @@ public sealed class ModelSemanticIntentSuggesterTests
             invocations,
             await LoadRepositoryPromptsAsync());
         using var cancellation = new CancellationTokenSource();
-        var running = suggester.SuggestAsync("处理刚才那个", cancellation.Token);
+        var running = SuggestAsync(suggester, provider, "处理刚才那个", cancellation.Token);
         await provider.Started.Task.WaitAsync(TimeSpan.FromSeconds(3));
 
         cancellation.Cancel();
@@ -195,10 +200,29 @@ public sealed class ModelSemanticIntentSuggesterTests
         new(
             new ModelRouter(
                 new ChatProviderRegistry([provider]),
-                new FixedAiSettingsStore(provider.Descriptor.ProviderId, provider.Descriptor.Models[0].ModelId)),
+                new SettingsMustNotBeReadStore()),
             prompts,
             invocations,
             TimeProvider.System);
+
+    private static Task<SemanticIntentSuggestion?> SuggestAsync(
+        ModelSemanticIntentSuggester suggester,
+        IChatModelProvider provider,
+        string text,
+        CancellationToken cancellationToken = default) =>
+        suggester.SuggestAsync(Guid.NewGuid(), Route(provider), text, cancellationToken);
+
+    private static FrozenChatModelRoute Route(IChatModelProvider provider)
+    {
+        var model = provider.Descriptor.Models[0];
+        return new FrozenChatModelRoute(
+            provider.Descriptor.ProviderId,
+            model.ModelId,
+            model.Capabilities,
+            model.ContextWindowTokens,
+            provider.Descriptor.DataDestination,
+            provider.Descriptor.SendsDataOffDevice);
+    }
 
     private static Task<PromptRegistry> LoadRepositoryPromptsAsync() =>
         PromptRegistry.LoadAsync(Path.Combine(FindRepositoryRoot(), "prompts", "runtime"));
@@ -215,10 +239,10 @@ public sealed class ModelSemanticIntentSuggesterTests
                ?? throw new DirectoryNotFoundException("找不到测试仓库根目录。");
     }
 
-    private sealed class FixedAiSettingsStore(string providerId, string modelId) : IAiSettingsStore
+    private sealed class SettingsMustNotBeReadStore : IAiSettingsStore
     {
         public Task<AiSettings> LoadAsync(CancellationToken cancellationToken = default) =>
-            Task.FromResult(new AiSettings(new ChatModelRoute(providerId, modelId)));
+            throw new InvalidOperationException("语义执行阶段不得读取当前 AI 设置。");
 
         public Task SaveAsync(AiSettings settings, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
