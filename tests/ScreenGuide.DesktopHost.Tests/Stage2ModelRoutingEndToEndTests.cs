@@ -14,12 +14,15 @@ namespace ScreenGuide.DesktopHost.Tests;
 public sealed class Stage2ModelRoutingEndToEndTests
 {
     [Fact]
-    public async Task ProductionFactoryCannotEnableCodexOrdinaryChatThroughRegisteredPolicy()
+    public async Task ProductionFactoryCannotBeReplacedWithPubliclyEnabledCodexChatProvider()
     {
         await using var environment = DesktopHostTestEnvironment.Create();
-        using var host = environment.BuildHost(services => services.AddSingleton(
-            typeof(CodexChatModelExecutionPolicy),
-            CodexChatModelExecutionPolicy.TestOnlyAllowLocalCodexCli));
+        var publiclyEnabledProvider = TryCreatePubliclyEnabledCodexChatProvider(environment.Options);
+        var replacement = publiclyEnabledProvider ?? new CodexChatModelProvider(
+            new CodexConnectorOptions(
+                environment.Options.CodexDataDirectory,
+                environment.Options.CodexExecutablePath));
+        using var host = environment.BuildHost(services => services.AddSingleton(replacement));
         var provider = host.Services.GetRequiredService<CodexChatModelProvider>();
         var request = new ChatModelRequest(
             Guid.NewGuid(),
@@ -35,6 +38,10 @@ public sealed class Stage2ModelRoutingEndToEndTests
         Assert.Equal("disabled_by_security_policy", exception.Error.Code);
         Assert.False(exception.Error.IsRetryable);
         Assert.False(Directory.Exists(environment.Options.CodexDataDirectory));
+        Assert.Null(publiclyEnabledProvider);
+        var publicConstructor = Assert.Single(typeof(CodexChatModelProvider).GetConstructors());
+        var publicParameter = Assert.Single(publicConstructor.GetParameters());
+        Assert.Equal(typeof(CodexConnectorOptions), publicParameter.ParameterType);
     }
 
     [Fact]
@@ -260,6 +267,29 @@ public sealed class Stage2ModelRoutingEndToEndTests
         ControllableChatProvider providerB) =>
         environment.BuildHost(services => services.AddSingleton(
             new ChatProviderRegistry([providerA, providerB])));
+
+    private static CodexChatModelProvider? TryCreatePubliclyEnabledCodexChatProvider(
+        ScreenGuide.DesktopHost.Configuration.DesktopHostOptions options)
+    {
+        var policyType = typeof(CodexChatModelProvider).Assembly
+            .GetExportedTypes()
+            .SingleOrDefault(type => string.Equals(
+                type.FullName,
+                "ScreenGuide.Agent.Codex.CodexChatModelExecutionPolicy",
+                StringComparison.Ordinal));
+        if (policyType is null)
+        {
+            return null;
+        }
+
+        var testPolicy = Enum.Parse(policyType, "TestOnlyAllowLocalCodexCli");
+        var connectorOptions = options.CodexExecutablePath is null
+            ? CodexConnectorOptions.FromDataDirectory(options.CodexDataDirectory)
+            : new CodexConnectorOptions(options.CodexDataDirectory, options.CodexExecutablePath);
+        return Activator.CreateInstance(
+            typeof(CodexChatModelProvider),
+            [connectorOptions, testPolicy]) as CodexChatModelProvider;
+    }
 
     private static Task<AiSettingsDto> SetRouteAsync(
         IDesktopApiClient client,

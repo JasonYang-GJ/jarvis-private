@@ -1,6 +1,7 @@
 using ScreenGuide.AI.Core;
 using ScreenGuide.Agent.Codex;
 using ScreenGuide.FakeCodexCli;
+using System.Reflection;
 using System.Text.Json;
 
 namespace ScreenGuide.Agent.Codex.Tests;
@@ -293,34 +294,39 @@ public sealed class CodexChatModelProviderTests
     [Fact]
     public async Task UnterminatedProtocolLineIsRejectedAtTheLimitWithoutWaitingForNewlineOrExit()
     {
-        await using var environment = ChatProviderEnvironment.Create();
-        await using var provider = environment.CreateProvider();
-        var turnId = Guid.NewGuid();
-        var running = provider.CompleteAsync(Request(
-            turnId,
-            "只使用请求传入的系统提示。",
-            new ChatMessage(ChatMessageRole.User, "TEST_OVERSIZED_PROTOCOL_LINE_NO_NEWLINE")));
-
-        try
+        var attempts = Enumerable.Range(0, 20).Select(async _ =>
         {
-            var exception = await Assert.ThrowsAsync<ChatModelException>(
-                () => running.WaitAsync(TimeSpan.FromSeconds(3)));
+            await using var environment = ChatProviderEnvironment.Create();
+            await using var provider = environment.CreateProvider();
+            var turnId = Guid.NewGuid();
+            var running = provider.CompleteAsync(Request(
+                turnId,
+                "只使用请求传入的系统提示。",
+                new ChatMessage(ChatMessageRole.User, "TEST_OVERSIZED_PROTOCOL_LINE_NO_NEWLINE")));
 
-            Assert.Equal(ChatModelErrorKind.InvalidResponse, exception.Error.Kind);
-            Assert.Equal("invalid_response", exception.Error.Code);
-        }
-        finally
-        {
-            await provider.CancelAsync(turnId);
             try
             {
-                await running.WaitAsync(TimeSpan.FromSeconds(5));
+                var exception = await Assert.ThrowsAsync<ChatModelException>(
+                    () => running.WaitAsync(TimeSpan.FromSeconds(3)));
+
+                Assert.Equal(ChatModelErrorKind.InvalidResponse, exception.Error.Kind);
+                Assert.Equal("invalid_response", exception.Error.Code);
             }
-            catch
+            finally
             {
-                // The assertion above owns the verdict; this only guarantees process cleanup on red.
+                await provider.CancelAsync(turnId);
+                try
+                {
+                    await running.WaitAsync(TimeSpan.FromSeconds(5));
+                }
+                catch
+                {
+                    // The assertion above owns the verdict; this only guarantees process cleanup on red.
+                }
             }
-        }
+        });
+
+        await Task.WhenAll(attempts);
     }
 
     [Fact]
@@ -438,14 +444,27 @@ public sealed class CodexChatModelProviderTests
             return new ChatProviderEnvironment(root);
         }
 
-        public CodexChatModelProvider CreateProvider(TimeSpan? requestTimeout = null) => new(
-            new CodexConnectorOptions(
+        public CodexChatModelProvider CreateProvider(TimeSpan? requestTimeout = null)
+        {
+            var options = new CodexConnectorOptions(
                 DataDirectory,
                 Path.ChangeExtension(typeof(FakeCodexMarker).Assembly.Location, ".exe"))
             {
                 ChatRequestTimeout = requestTimeout ?? TimeSpan.FromMinutes(2)
-            },
-            CodexChatModelExecutionPolicy.TestOnlyAllowLocalCodexCli);
+            };
+            var constructor = typeof(CodexChatModelProvider)
+                .GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic)
+                .Single(candidate =>
+                {
+                    var parameters = candidate.GetParameters();
+                    return parameters.Length == 2
+                        && parameters[0].ParameterType == typeof(CodexConnectorOptions)
+                        && parameters[1].ParameterType.IsEnum;
+                });
+            var policyType = constructor.GetParameters()[1].ParameterType;
+            var testPolicy = Enum.Parse(policyType, "TestOnlyAllowLocalCodexCli");
+            return (CodexChatModelProvider)constructor.Invoke([options, testPolicy]);
+        }
 
         public void Dispose() => DisposeAsync().AsTask().GetAwaiter().GetResult();
 

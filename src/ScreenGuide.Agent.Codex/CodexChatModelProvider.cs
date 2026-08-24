@@ -6,12 +6,6 @@ using ScreenGuide.AI.Core;
 
 namespace ScreenGuide.Agent.Codex;
 
-public enum CodexChatModelExecutionPolicy
-{
-    ProductionDisabled,
-    TestOnlyAllowLocalCodexCli
-}
-
 /// <summary>
 /// Ordinary chat adapter for the locally installed Codex CLI. This is deliberately
 /// separate from <see cref="CodexConnector"/>, which remains the coding-task path.
@@ -28,6 +22,12 @@ public sealed class CodexChatModelProvider : IChatModelProvider
     private const string DataDestination =
         "OpenAI Codex 云端服务（通过本机 Codex CLI 和当前登录账号）";
 
+    private enum ExecutionPolicy
+    {
+        ProductionDisabled,
+        TestOnlyAllowLocalCodexCli
+    }
+
     private static readonly ChatProviderDescriptor ProviderDescriptor = new(
         ProviderId,
         "Codex",
@@ -41,7 +41,7 @@ public sealed class CodexChatModelProvider : IChatModelProvider
         ]);
 
     private readonly CodexConnectorOptions _options;
-    private readonly CodexChatModelExecutionPolicy _executionPolicy;
+    private readonly ExecutionPolicy _executionPolicy;
     private readonly CodexCapabilityProbe _capabilityProbe;
     private readonly SemaphoreSlim _capabilityGate = new(1, 1);
     private readonly SemaphoreSlim _schemaGate = new(1, 1);
@@ -50,13 +50,13 @@ public sealed class CodexChatModelProvider : IChatModelProvider
     private bool _disposed;
 
     public CodexChatModelProvider(CodexConnectorOptions options)
-        : this(options, CodexChatModelExecutionPolicy.ProductionDisabled)
+        : this(options, ExecutionPolicy.ProductionDisabled)
     {
     }
 
-    public CodexChatModelProvider(
+    private CodexChatModelProvider(
         CodexConnectorOptions options,
-        CodexChatModelExecutionPolicy executionPolicy)
+        ExecutionPolicy executionPolicy)
     {
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _executionPolicy = executionPolicy;
@@ -79,7 +79,7 @@ public sealed class CodexChatModelProvider : IChatModelProvider
         CancellationToken cancellationToken = default)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        if (_executionPolicy != CodexChatModelExecutionPolicy.TestOnlyAllowLocalCodexCli)
+        if (_executionPolicy != ExecutionPolicy.TestOnlyAllowLocalCodexCli)
         {
             throw DisabledBySecurityPolicyError();
         }
@@ -113,6 +113,8 @@ public sealed class CodexChatModelProvider : IChatModelProvider
 
         Process? process = null;
         WindowsProcessJob? job = null;
+        Task stderrTask = Task.CompletedTask;
+        var processStarted = false;
         try
         {
             var capability = await EnsureCapabilityAsync(requestLifetime.Token).ConfigureAwait(false);
@@ -127,6 +129,8 @@ public sealed class CodexChatModelProvider : IChatModelProvider
                 throw new InvalidOperationException("Codex 聊天进程无法启动。");
             }
 
+            processStarted = true;
+
             try
             {
                 job.Assign(process);
@@ -139,7 +143,7 @@ public sealed class CodexChatModelProvider : IChatModelProvider
 
             active.Attach(process, job);
 
-            var stderrTask = DrainStandardErrorAsync(process.StandardError);
+            stderrTask = DrainStandardErrorAsync(process.StandardError);
             var input = SerializeRequest(request);
             await process.StandardInput.WriteAsync(input.AsMemory(), CancellationToken.None)
                 .ConfigureAwait(false);
@@ -294,13 +298,25 @@ public sealed class CodexChatModelProvider : IChatModelProvider
             }
             catch
             {
-                // Disposing the Job Object remains the final process-tree cleanup boundary.
+                // Job disposal remains the final process-tree termination boundary.
             }
             finally
             {
                 job?.Dispose();
-                process?.Dispose();
-                _active.TryRemove(request.TurnId, out _);
+                try
+                {
+                    if (processStarted && process is not null)
+                    {
+                        await process.WaitForExitAsync(CancellationToken.None).ConfigureAwait(false);
+                    }
+
+                    await stderrTask.ConfigureAwait(false);
+                }
+                finally
+                {
+                    process?.Dispose();
+                    _active.TryRemove(request.TurnId, out _);
+                }
             }
         }
     }
@@ -310,7 +326,7 @@ public sealed class CodexChatModelProvider : IChatModelProvider
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
-        if (_executionPolicy != CodexChatModelExecutionPolicy.TestOnlyAllowLocalCodexCli)
+        if (_executionPolicy != ExecutionPolicy.TestOnlyAllowLocalCodexCli)
         {
             return new ChatProviderHealth(
                 ProviderId,
