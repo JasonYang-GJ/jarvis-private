@@ -477,6 +477,7 @@ public sealed class SessionCoordinatorP1RegressionTests
             string inputText,
             string inputModality,
             string idempotencyKey,
+            SessionTurnFrozenRoute frozenRoute,
             DateTimeOffset startedAtUtc,
             CancellationToken cancellationToken = default)
         {
@@ -503,6 +504,7 @@ public sealed class SessionCoordinatorP1RegressionTests
                 inputText,
                 inputModality,
                 idempotencyKey,
+                frozenRoute,
                 startedAtUtc,
                 cancellationToken);
         }

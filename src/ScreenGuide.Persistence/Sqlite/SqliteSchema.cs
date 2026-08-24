@@ -454,6 +454,14 @@ internal static class SqliteSchema
         """;
 
     public const string CreateVersion8 = """
+        ALTER TABLE session_turns ADD COLUMN frozen_route_status TEXT NULL;
+        ALTER TABLE session_turns ADD COLUMN frozen_provider_id TEXT NULL;
+        ALTER TABLE session_turns ADD COLUMN frozen_model_id TEXT NULL;
+        ALTER TABLE session_turns ADD COLUMN frozen_data_destination TEXT NULL;
+        ALTER TABLE session_turns ADD COLUMN frozen_sends_data_off_device INTEGER NULL;
+        ALTER TABLE session_turns ADD COLUMN frozen_at_utc TEXT NULL;
+        ALTER TABLE session_turns ADD COLUMN frozen_route_failure_code TEXT NULL;
+
         CREATE TABLE ai_invocations (
             id TEXT NOT NULL PRIMARY KEY,
             session_turn_id TEXT NULL,

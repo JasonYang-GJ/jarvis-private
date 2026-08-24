@@ -10,11 +10,110 @@ public sealed record FrozenChatModelRoute(
     string DataDestination,
     bool SendsDataOffDevice);
 
+public enum ChatRouteResolutionStatus
+{
+    Ready,
+    Unavailable
+}
+
+public sealed record DefaultChatRouteResolution(
+    ChatRouteResolutionStatus Status,
+    string? ProviderId,
+    string? ModelId,
+    string? DataDestination,
+    bool? SendsDataOffDevice,
+    string? FailureCode);
+
 public sealed class ModelRouter(
     ChatProviderRegistry providers,
     IAiSettingsStore settingsStore)
 {
     private readonly ConcurrentDictionary<Guid, IChatModelProvider> _activeTurns = new();
+
+    public async Task<DefaultChatRouteResolution> ResolveDefaultChatRouteAsync(
+        CancellationToken cancellationToken = default)
+    {
+        AiSettings? settings;
+        try
+        {
+            settings = await settingsStore.LoadAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (InvalidDataException)
+        {
+            return Unavailable("ai_settings_invalid");
+        }
+        catch (Exception exception) when (
+            exception is IOException or UnauthorizedAccessException or OperationCanceledException)
+        {
+            return Unavailable("ai_settings_unreadable");
+        }
+
+        if (settings?.DefaultChatRoute is null
+            || string.IsNullOrWhiteSpace(settings.DefaultChatRoute.ProviderId)
+            || string.IsNullOrWhiteSpace(settings.DefaultChatRoute.ModelId))
+        {
+            return Unavailable("ai_settings_invalid");
+        }
+
+        var providerId = settings.DefaultChatRoute.ProviderId.Trim();
+        var modelId = settings.DefaultChatRoute.ModelId.Trim();
+        var provider = providers.Providers.SingleOrDefault(item =>
+            string.Equals(item.ProviderId, providerId, StringComparison.OrdinalIgnoreCase));
+        if (provider is null)
+        {
+            return new DefaultChatRouteResolution(
+                ChatRouteResolutionStatus.Unavailable,
+                providerId,
+                modelId,
+                null,
+                null,
+                "configured_chat_provider_not_found");
+        }
+
+        var model = provider.Models.SingleOrDefault(item =>
+            string.Equals(item.ModelId, modelId, StringComparison.OrdinalIgnoreCase));
+        if (model is null)
+        {
+            return new DefaultChatRouteResolution(
+                ChatRouteResolutionStatus.Unavailable,
+                providerId,
+                modelId,
+                null,
+                null,
+                "configured_chat_model_not_found");
+        }
+
+        if (string.IsNullOrWhiteSpace(provider.DataDestination))
+        {
+            return new DefaultChatRouteResolution(
+                ChatRouteResolutionStatus.Unavailable,
+                provider.ProviderId,
+                model.ModelId,
+                null,
+                null,
+                "configured_chat_route_invalid");
+        }
+
+        return new DefaultChatRouteResolution(
+            ChatRouteResolutionStatus.Ready,
+            provider.ProviderId,
+            model.ModelId,
+            provider.DataDestination,
+            provider.SendsDataOffDevice,
+            null);
+    }
+
+    private static DefaultChatRouteResolution Unavailable(string failureCode) => new(
+        ChatRouteResolutionStatus.Unavailable,
+        null,
+        null,
+        null,
+        null,
+        failureCode);
 
     public async Task<FrozenChatModelRoute> FreezeDefaultChatRouteAsync(
         CancellationToken cancellationToken = default)

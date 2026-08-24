@@ -30,6 +30,7 @@ public sealed class SessionCoordinator(
     AssistantCommandService assistantCommands,
     LocalTaskEntryService tasks,
     DesktopHostState hostState,
+    ModelRouter modelRouter,
     TimeProvider timeProvider)
 {
     private const int MaximumInputLength = 20_000;
@@ -183,14 +184,39 @@ public sealed class SessionCoordinator(
             await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
             {
+                var normalizedIdempotencyKey = string.IsNullOrWhiteSpace(idempotencyKey)
+                    ? Guid.NewGuid().ToString("N")
+                    : idempotencyKey.Trim();
+                var existingTurn = (await sessionStore.GetTurnsAsync(session.Id, cancellationToken)
+                        .ConfigureAwait(false))
+                    .SingleOrDefault(turn => string.Equals(
+                        turn.IdempotencyKey,
+                        normalizedIdempotencyKey,
+                        StringComparison.Ordinal));
+                if (existingTurn is not null)
+                {
+                    if (!MatchesExpectedAction(
+                            existingTurn,
+                            expectation.IntentKind,
+                            expectation.Target))
+                    {
+                        throw new InvalidOperationException(
+                            "同一个请求编号不能改成另一个电脑操作目标。 ");
+                    }
+
+                    return new SessionSubmitResult(session.Id, existingTurn.Id, true);
+                }
+
+                var resolvedRoute = await modelRouter.ResolveDefaultChatRouteAsync(cancellationToken)
+                    .ConfigureAwait(false);
+                var startedAtUtc = timeProvider.GetUtcNow();
                 var registration = await sessionStore.StartTurnAsync(
                         session.Id,
                         normalized,
                         NormalizeModality(inputModality),
-                        string.IsNullOrWhiteSpace(idempotencyKey)
-                            ? Guid.NewGuid().ToString("N")
-                            : idempotencyKey.Trim(),
-                        timeProvider.GetUtcNow(),
+                        normalizedIdempotencyKey,
+                        ToFrozenRoute(resolvedRoute, startedAtUtc),
+                        startedAtUtc,
                         cancellationToken)
                     .ConfigureAwait(false);
                 var registeredTurn = registration.Turn;
@@ -251,6 +277,21 @@ public sealed class SessionCoordinator(
             _currentSessionGate.Release();
         }
     }
+
+    private static SessionTurnFrozenRoute ToFrozenRoute(
+        DefaultChatRouteResolution route,
+        DateTimeOffset frozenAtUtc) => new()
+    {
+        Status = route.Status == ChatRouteResolutionStatus.Ready
+            ? SessionTurnRouteStatus.Ready
+            : SessionTurnRouteStatus.Unavailable,
+        ProviderId = route.ProviderId,
+        ModelId = route.ModelId,
+        DataDestination = route.DataDestination,
+        SendsDataOffDevice = route.SendsDataOffDevice,
+        FrozenAtUtc = frozenAtUtc,
+        FailureCode = route.FailureCode
+    };
 
     public async Task<LocalSessionSnapshot> ProvideProjectAsync(
         Guid sessionId,

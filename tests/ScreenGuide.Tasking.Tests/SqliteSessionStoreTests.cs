@@ -8,6 +8,171 @@ namespace ScreenGuide.Tasking.Tests;
 public sealed class SqliteSessionStoreTests
 {
     [Fact]
+    public async Task NewTurnPersistsReadyFrozenRouteAcrossAStoreRestart()
+    {
+        await using var environment = await SessionStoreEnvironment.CreateAsync();
+        var session = await environment.CreateSessionAsync("冻结路由");
+        var frozenAt = environment.Now.AddMilliseconds(250);
+        var route = new SessionTurnFrozenRoute
+        {
+            Status = SessionTurnRouteStatus.Ready,
+            ProviderId = "provider-a",
+            ModelId = "model-a",
+            DataDestination = "provider-a isolated destination",
+            SendsDataOffDevice = false,
+            FrozenAtUtc = frozenAt
+        };
+
+        var registration = await environment.Store.StartTurnAsync(
+            session.Id,
+            "保存本轮路由。",
+            "Text",
+            "persist-ready-route",
+            route,
+            environment.Now);
+
+        await using var reopened = new SqliteSessionStore(environment.DatabasePath);
+        await reopened.InitializeAsync();
+        var stored = await reopened.GetTurnAsync(registration.Turn.Id);
+
+        Assert.True(registration.Accepted);
+        Assert.Equal(route, registration.Turn.FrozenRoute);
+        Assert.Equal(route, stored?.FrozenRoute);
+    }
+
+    [Fact]
+    public async Task DuplicateKeepsTheFirstFrozenRouteAndANewTurnGetsTheNewRoute()
+    {
+        await using var environment = await SessionStoreEnvironment.CreateAsync();
+        var session = await environment.CreateSessionAsync("幂等冻结路由");
+        var routeA = CreateReadyRoute(environment.Now) with
+        {
+            ProviderId = "provider-a",
+            ModelId = "model-a"
+        };
+        var routeB = CreateReadyRoute(environment.Now.AddMinutes(1)) with
+        {
+            ProviderId = "provider-b",
+            ModelId = "model-b"
+        };
+
+        var first = await environment.Store.StartTurnAsync(
+            session.Id,
+            "第一次请求",
+            "Text",
+            "frozen-route-idempotency",
+            routeA,
+            environment.Now);
+        var duplicate = await environment.Store.StartTurnAsync(
+            session.Id,
+            "第一次请求",
+            "Text",
+            "frozen-route-idempotency",
+            routeB,
+            environment.Now.AddMinutes(1));
+        var next = await environment.Store.StartTurnAsync(
+            session.Id,
+            "第二次请求",
+            "Text",
+            "frozen-route-next-turn",
+            routeB,
+            environment.Now.AddMinutes(1));
+
+        Assert.True(first.Accepted);
+        Assert.False(duplicate.Accepted);
+        Assert.Equal(first.Turn.Id, duplicate.Turn.Id);
+        Assert.Equal(routeA, duplicate.Turn.FrozenRoute);
+        Assert.True(next.Accepted);
+        Assert.Equal(routeB, next.Turn.FrozenRoute);
+        Assert.Equal(2, (await environment.Store.GetTurnsAsync(session.Id)).Count);
+    }
+
+    [Fact]
+    public async Task UpdateTurnCannotReplaceThePersistedFrozenRoute()
+    {
+        await using var environment = await SessionStoreEnvironment.CreateAsync();
+        var session = await environment.CreateSessionAsync("路由不可变");
+        var routeA = CreateReadyRoute(environment.Now);
+        var routeB = CreateReadyRoute(environment.Now.AddMinutes(1)) with
+        {
+            ProviderId = "provider-b",
+            ModelId = "model-b"
+        };
+        var registration = await environment.Store.StartTurnAsync(
+            session.Id,
+            "更新状态但不更新路由",
+            "Text",
+            "immutable-frozen-route",
+            routeA,
+            environment.Now);
+
+        var updated = await environment.Store.UpdateTurnAsync(
+            registration.Turn with
+            {
+                FrozenRoute = routeB,
+                Phase = SessionTurnPhase.WaitingForUser,
+                MissingContext = SessionMissingContext.UserInput
+            },
+            registration.Turn.Version,
+            environment.Now.AddSeconds(1));
+
+        Assert.Equal(SessionTurnPhase.WaitingForUser, updated.Phase);
+        Assert.Equal(routeA, updated.FrozenRoute);
+    }
+
+    [Fact]
+    public async Task UnavailableFrozenRoutePersistsWithoutBlockingTurnAcceptance()
+    {
+        await using var environment = await SessionStoreEnvironment.CreateAsync();
+        var session = await environment.CreateSessionAsync("不可用路由");
+        var route = new SessionTurnFrozenRoute
+        {
+            Status = SessionTurnRouteStatus.Unavailable,
+            ProviderId = "missing-provider",
+            ModelId = "missing-model",
+            FrozenAtUtc = environment.Now,
+            FailureCode = "configured_chat_provider_not_found"
+        };
+
+        var registration = await environment.Store.StartTurnAsync(
+            session.Id,
+            "确定性工作仍可登记",
+            "Text",
+            "unavailable-frozen-route",
+            route,
+            environment.Now);
+
+        Assert.True(registration.Accepted);
+        Assert.Equal(route, (await environment.Store.GetTurnAsync(registration.Turn.Id))?.FrozenRoute);
+    }
+
+    [Fact]
+    public async Task InvalidFrozenRouteFailsWithoutPersistingAPartialTurn()
+    {
+        await using var environment = await SessionStoreEnvironment.CreateAsync();
+        var session = await environment.CreateSessionAsync("原子失败");
+        var invalidRoute = new SessionTurnFrozenRoute
+        {
+            Status = SessionTurnRouteStatus.Ready,
+            ProviderId = "provider-a",
+            ModelId = "model-a",
+            FrozenAtUtc = environment.Now
+        };
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            environment.Store.StartTurnAsync(
+                session.Id,
+                "不能留下半条记录",
+                "Text",
+                "invalid-route-atomicity",
+                invalidRoute,
+                environment.Now));
+
+        Assert.Contains("Ready 冻结路由", exception.Message, StringComparison.Ordinal);
+        Assert.Empty(await environment.Store.GetTurnsAsync(session.Id));
+    }
+
+    [Fact]
     public async Task CurrentSessionAndProjectContextSurviveAStoreRestart()
     {
         await using var environment = await SessionStoreEnvironment.CreateAsync();
@@ -34,6 +199,7 @@ public sealed class SqliteSessionStoreTests
             "帮我修改一下这个项目",
             "Voice",
             "stage1-waiting-project",
+            CreateReadyRoute(environment.Now),
             environment.Now);
         var turn = registration.Turn;
         var waiting = await environment.Store.UpdateTurnAsync(
@@ -62,6 +228,16 @@ public sealed class SqliteSessionStoreTests
         Assert.Equal("notepad.exe", stored?.PlanTarget);
         Assert.Equal(waiting.Version, stored?.Version);
     }
+
+    private static SessionTurnFrozenRoute CreateReadyRoute(DateTimeOffset frozenAtUtc) => new()
+    {
+        Status = SessionTurnRouteStatus.Ready,
+        ProviderId = "provider-a",
+        ModelId = "model-a",
+        DataDestination = "provider-a isolated destination",
+        SendsDataOffDevice = false,
+        FrozenAtUtc = frozenAtUtc
+    };
 
     private sealed class SessionStoreEnvironment : IAsyncDisposable
     {

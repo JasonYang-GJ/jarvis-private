@@ -6,6 +6,16 @@ namespace ScreenGuide.Persistence.Sqlite;
 
 public sealed class SqliteSessionStore : ISessionStore
 {
+    private static readonly string[] FrozenRouteColumns =
+    [
+        "frozen_route_status",
+        "frozen_provider_id",
+        "frozen_model_id",
+        "frozen_data_destination",
+        "frozen_sends_data_off_device",
+        "frozen_at_utc",
+        "frozen_route_failure_code"
+    ];
     private readonly string _connectionString;
 
     public SqliteSessionStore(string databasePath)
@@ -36,6 +46,23 @@ public sealed class SqliteSessionStore : ISessionStore
         if (count != 1)
         {
             throw new InvalidOperationException("统一会话数据表尚未完成初始化。");
+        }
+
+        command.CommandText = "SELECT name FROM pragma_table_info('session_turns');";
+        var columns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        await using (var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false))
+        {
+            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+            {
+                columns.Add(reader.GetString(0));
+            }
+        }
+
+        var missingColumns = FrozenRouteColumns.Where(column => !columns.Contains(column)).ToArray();
+        if (missingColumns.Length != 0)
+        {
+            throw new InvalidOperationException(
+                $"统一会话数据库 schema v8 不完整，session_turns 缺少冻结路由列：{string.Join(", ", missingColumns)}。");
         }
     }
 
@@ -174,6 +201,7 @@ public sealed class SqliteSessionStore : ISessionStore
         string inputText,
         string inputModality,
         string idempotencyKey,
+        SessionTurnFrozenRoute frozenRoute,
         DateTimeOffset startedAtUtc,
         CancellationToken cancellationToken = default)
     {
@@ -186,6 +214,8 @@ public sealed class SqliteSessionStore : ISessionStore
         {
             throw new ArgumentException("会话请求必须包含幂等编号。", nameof(idempotencyKey));
         }
+
+        ArgumentNullException.ThrowIfNull(frozenRoute);
 
         await using var connection = await OpenAsync(cancellationToken).ConfigureAwait(false);
         await using var transaction = connection.BeginTransaction();
@@ -216,6 +246,7 @@ public sealed class SqliteSessionStore : ISessionStore
                     ? "ProgrammingTask"
                     : "Text",
             IdempotencyKey = idempotencyKey.Trim(),
+            FrozenRoute = ValidateFrozenRoute(frozenRoute),
             CreatedAtUtc = startedAtUtc,
             UpdatedAtUtc = startedAtUtc
         };
@@ -511,6 +542,9 @@ public sealed class SqliteSessionStore : ISessionStore
                 window_handle, window_title, window_process_name,
                 requires_confirmation, confirmation_granted, cancellation_requested,
                 result_summary, failure_code, failure_message,
+                frozen_route_status, frozen_provider_id, frozen_model_id,
+                frozen_data_destination, frozen_sends_data_off_device,
+                frozen_at_utc, frozen_route_failure_code,
                 created_at_utc, updated_at_utc, completed_at_utc, version)
             VALUES(
                 $id, $sessionId, $sequenceNumber, $inputText, $inputModality, $idempotencyKey,
@@ -520,6 +554,9 @@ public sealed class SqliteSessionStore : ISessionStore
                 NULL, NULL, NULL,
                 0, 0, 0,
                 NULL, NULL, NULL,
+                $frozenRouteStatus, $frozenProviderId, $frozenModelId,
+                $frozenDataDestination, $frozenSendsDataOffDevice,
+                $frozenAtUtc, $frozenRouteFailureCode,
                 $createdAtUtc, $updatedAtUtc, NULL, 0);
             """;
         Add(command, "$id", turn.Id);
@@ -536,6 +573,17 @@ public sealed class SqliteSessionStore : ISessionStore
         command.Parameters.AddWithValue("$expectedTarget", TextOrNull(turn.ExpectedTarget));
         command.Parameters.AddWithValue("$planTarget", TextOrNull(turn.PlanTarget));
         command.Parameters.AddWithValue("$planId", GuidOrNull(turn.PlanId));
+        command.Parameters.AddWithValue("$frozenRouteStatus", turn.FrozenRoute!.Status.ToString());
+        command.Parameters.AddWithValue("$frozenProviderId", TextOrNull(turn.FrozenRoute.ProviderId));
+        command.Parameters.AddWithValue("$frozenModelId", TextOrNull(turn.FrozenRoute.ModelId));
+        command.Parameters.AddWithValue("$frozenDataDestination", TextOrNull(turn.FrozenRoute.DataDestination));
+        command.Parameters.AddWithValue(
+            "$frozenSendsDataOffDevice",
+            turn.FrozenRoute.SendsDataOffDevice is { } sendsDataOffDevice
+                ? sendsDataOffDevice ? 1 : 0
+                : DBNull.Value);
+        command.Parameters.AddWithValue("$frozenAtUtc", ToDb(turn.FrozenRoute.FrozenAtUtc));
+        command.Parameters.AddWithValue("$frozenRouteFailureCode", TextOrNull(turn.FrozenRoute.FailureCode));
         command.Parameters.AddWithValue("$createdAtUtc", ToDb(turn.CreatedAtUtc));
         command.Parameters.AddWithValue("$updatedAtUtc", ToDb(turn.UpdatedAtUtc));
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
@@ -567,6 +615,7 @@ public sealed class SqliteSessionStore : ISessionStore
         InputText = reader.GetString(reader.GetOrdinal("input_text")),
         InputModality = reader.GetString(reader.GetOrdinal("input_modality")),
         IdempotencyKey = reader.GetString(reader.GetOrdinal("idempotency_key")),
+        FrozenRoute = ReadFrozenRoute(reader),
         WorkKind = Enum.Parse<SessionWorkKind>(reader.GetString(reader.GetOrdinal("work_kind"))),
         Phase = Enum.Parse<SessionTurnPhase>(reader.GetString(reader.GetOrdinal("phase"))),
         MissingContext = Enum.Parse<SessionMissingContext>(reader.GetString(reader.GetOrdinal("missing_context"))),
@@ -595,6 +644,65 @@ public sealed class SqliteSessionStore : ISessionStore
         Version = reader.GetInt64(reader.GetOrdinal("version"))
     };
 
+    private static SessionTurnFrozenRoute? ReadFrozenRoute(SqliteDataReader reader)
+    {
+        var statusOrdinal = reader.GetOrdinal("frozen_route_status");
+        if (reader.IsDBNull(statusOrdinal))
+        {
+            return null;
+        }
+
+        return ValidateFrozenRoute(new SessionTurnFrozenRoute
+        {
+            Status = Enum.Parse<SessionTurnRouteStatus>(reader.GetString(statusOrdinal)),
+            ProviderId = ReadNullableString(reader, "frozen_provider_id"),
+            ModelId = ReadNullableString(reader, "frozen_model_id"),
+            DataDestination = ReadNullableString(reader, "frozen_data_destination"),
+            SendsDataOffDevice = ReadNullableBoolean(reader, "frozen_sends_data_off_device"),
+            FrozenAtUtc = ReadDate(reader, "frozen_at_utc"),
+            FailureCode = ReadNullableString(reader, "frozen_route_failure_code")
+        });
+    }
+
+    private static SessionTurnFrozenRoute ValidateFrozenRoute(SessionTurnFrozenRoute route)
+    {
+        if (route.FrozenAtUtc == default)
+        {
+            throw new InvalidOperationException("冻结路由必须记录冻结时间。");
+        }
+
+        if (route.Status == SessionTurnRouteStatus.Ready)
+        {
+            if (string.IsNullOrWhiteSpace(route.ProviderId)
+                || string.IsNullOrWhiteSpace(route.ModelId)
+                || string.IsNullOrWhiteSpace(route.DataDestination)
+                || route.SendsDataOffDevice is null
+                || !string.IsNullOrWhiteSpace(route.FailureCode))
+            {
+                throw new InvalidOperationException("Ready 冻结路由缺少 Provider、模型或数据目的地元数据。");
+            }
+        }
+        else if (route.Status != SessionTurnRouteStatus.Unavailable)
+        {
+            throw new InvalidOperationException("冻结路由状态无效。");
+        }
+        else if (string.IsNullOrWhiteSpace(route.FailureCode)
+                 || route.DataDestination is not null
+                 || route.SendsDataOffDevice is not null)
+        {
+            throw new InvalidOperationException("Unavailable 冻结路由必须包含失败码且不能声明数据目的地。");
+        }
+
+        return route with
+        {
+            ProviderId = NullIfWhiteSpace(route.ProviderId),
+            ModelId = NullIfWhiteSpace(route.ModelId),
+            DataDestination = NullIfWhiteSpace(route.DataDestination),
+            FrozenAtUtc = route.FrozenAtUtc.ToUniversalTime(),
+            FailureCode = NullIfWhiteSpace(route.FailureCode)
+        };
+    }
+
     private static void Add(SqliteCommand command, string name, Guid value) =>
         command.Parameters.AddWithValue(name, value.ToString("D"));
 
@@ -604,7 +712,9 @@ public sealed class SqliteSessionStore : ISessionStore
     private static Guid ReadGuid(SqliteDataReader reader, string name) => Guid.Parse(reader.GetString(reader.GetOrdinal(name)));
     private static Guid? ReadNullableGuid(SqliteDataReader reader, string name) => reader.IsDBNull(reader.GetOrdinal(name)) ? null : Guid.Parse(reader.GetString(reader.GetOrdinal(name)));
     private static long? ReadNullableLong(SqliteDataReader reader, string name) => reader.IsDBNull(reader.GetOrdinal(name)) ? null : reader.GetInt64(reader.GetOrdinal(name));
+    private static bool? ReadNullableBoolean(SqliteDataReader reader, string name) => reader.IsDBNull(reader.GetOrdinal(name)) ? null : reader.GetInt32(reader.GetOrdinal(name)) == 1;
     private static string? ReadNullableString(SqliteDataReader reader, string name) => reader.IsDBNull(reader.GetOrdinal(name)) ? null : reader.GetString(reader.GetOrdinal(name));
+    private static string? NullIfWhiteSpace(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
     private static string ToDb(DateTimeOffset value) => value.ToUniversalTime().ToString("O");
     private static DateTimeOffset ReadDate(SqliteDataReader reader, string name) => DateTimeOffset.Parse(reader.GetString(reader.GetOrdinal(name)), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind);
     private static DateTimeOffset? ReadNullableDate(SqliteDataReader reader, string name) => reader.IsDBNull(reader.GetOrdinal(name)) ? null : ReadDate(reader, name);

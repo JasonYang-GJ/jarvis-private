@@ -126,6 +126,8 @@ public sealed class SqliteTaskStoreTests
         var deviceId = Guid.NewGuid();
         var conversationId = Guid.NewGuid();
         var messageId = Guid.NewGuid();
+        var sessionId = Guid.NewGuid();
+        var sessionTurnId = Guid.NewGuid();
         var now = new DateTimeOffset(2026, 8, 24, 3, 4, 5, TimeSpan.Zero);
 
         try
@@ -155,11 +157,25 @@ public sealed class SqliteTaskStoreTests
                       INSERT INTO conversation_messages(
                           id, conversation_id, sequence_number, role, content, created_at_utc)
                       VALUES($messageId, $conversationId, 1, 'User', '阶段一历史不能丢', $now);
+                      INSERT INTO sessions(
+                          id, conversation_id, created_by_device_id, title, status, is_current,
+                          created_at_utc, updated_at_utc, last_active_at_utc, version)
+                      VALUES($sessionId, $conversationId, $deviceId, 'Stage 1 session', 'Active', 1,
+                          $now, $now, $now, 0);
+                      INSERT INTO session_turns(
+                          id, session_id, sequence_number, input_text, input_modality,
+                          idempotency_key, work_kind, phase, missing_context,
+                          created_at_utc, updated_at_utc, version)
+                      VALUES($sessionTurnId, $sessionId, 1, '阶段一历史 Turn', 'Text',
+                          'stage1-historical-turn', 'Conversation', 'Completed', 'None',
+                          $now, $now, 0);
                       """;
                 command.Parameters.AddWithValue("$now", now.ToString("O"));
                 command.Parameters.AddWithValue("$deviceId", deviceId.ToString("D"));
                 command.Parameters.AddWithValue("$conversationId", conversationId.ToString("D"));
                 command.Parameters.AddWithValue("$messageId", messageId.ToString("D"));
+                command.Parameters.AddWithValue("$sessionId", sessionId.ToString("D"));
+                command.Parameters.AddWithValue("$sessionTurnId", sessionTurnId.ToString("D"));
                 await command.ExecuteNonQueryAsync();
             }
 
@@ -176,10 +192,104 @@ public sealed class SqliteTaskStoreTests
                 Assert.Equal("阶段一历史不能丢", Assert.Single(history).Content);
             }
 
+            await using (var sessions = new SqliteSessionStore(databasePath))
+            {
+                await sessions.InitializeAsync();
+                var historicalTurn = await sessions.GetTurnAsync(sessionTurnId);
+                Assert.Equal("阶段一历史 Turn", historicalTurn?.InputText);
+                Assert.Null(historicalTurn?.FrozenRoute);
+            }
+
             await new SqliteAiInvocationStore(databasePath).InitializeAsync();
             Assert.Single(Directory.GetFiles(
                 Path.GetDirectoryName(databasePath)!,
                 $"tasking.pre-v{V02Contract.SchemaVersion}-from-v7-*.backup.db"));
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task IncompleteCandidateVersion8FailsClosedWithoutAddingFrozenRouteColumns()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"screen-guide-incomplete-v8-{Guid.NewGuid():N}");
+        var databasePath = Path.Combine(root, "state", "tasking.db");
+        Directory.CreateDirectory(Path.GetDirectoryName(databasePath)!);
+        var now = new DateTimeOffset(2026, 8, 25, 1, 0, 0, TimeSpan.Zero);
+
+        try
+        {
+            await using (var connection = new SqliteConnection($"Data Source={databasePath}"))
+            {
+                await connection.OpenAsync();
+                await using var command = connection.CreateCommand();
+                command.CommandText = SqliteSchema.CreateVersion1
+                    + SqliteSchema.CreateVersion2
+                    + SqliteSchema.CreateVersion3
+                    + SqliteSchema.CreateVersion4
+                    + SqliteSchema.CreateVersion5
+                    + SqliteSchema.CreateVersion6
+                    + SqliteSchema.CreateVersion7
+                    + """
+                      CREATE TABLE ai_invocations (
+                          id TEXT NOT NULL PRIMARY KEY,
+                          session_turn_id TEXT NULL,
+                          conversation_turn_id TEXT NULL,
+                          purpose TEXT NOT NULL,
+                          provider_id TEXT NOT NULL,
+                          model_id TEXT NOT NULL,
+                          prompt_id TEXT NOT NULL,
+                          prompt_version TEXT NOT NULL,
+                          prompt_content_hash TEXT NOT NULL,
+                          data_destination TEXT NOT NULL,
+                          status TEXT NOT NULL,
+                          started_at_utc TEXT NOT NULL,
+                          completed_at_utc TEXT NULL,
+                          finish_reason TEXT NULL,
+                          input_tokens INTEGER NULL,
+                          output_tokens INTEGER NULL,
+                          total_tokens INTEGER NULL,
+                          provider_request_id TEXT NULL,
+                          failure_code TEXT NULL,
+                          FOREIGN KEY (session_turn_id) REFERENCES session_turns(id) ON DELETE SET NULL,
+                          FOREIGN KEY (conversation_turn_id) REFERENCES conversation_turns(id) ON DELETE SET NULL
+                      );
+                      CREATE INDEX ix_ai_invocations_conversation_turn
+                          ON ai_invocations(conversation_turn_id, started_at_utc);
+                      CREATE INDEX ix_ai_invocations_session_turn
+                          ON ai_invocations(session_turn_id, started_at_utc);
+                      CREATE INDEX ix_ai_invocations_provider_model
+                          ON ai_invocations(provider_id, model_id, started_at_utc);
+                      INSERT INTO schema_info(version, applied_at_utc)
+                      VALUES(1, $now), (2, $now), (3, $now), (4, $now),
+                            (5, $now), (6, $now), (7, $now), (8, $now);
+                      """;
+                command.Parameters.AddWithValue("$now", now.ToString("O"));
+                await command.ExecuteNonQueryAsync();
+            }
+
+            await using (var taskStore = new SqliteTaskStore(databasePath))
+            {
+                await taskStore.InitializeAsync();
+                Assert.Equal(8, await taskStore.GetSchemaVersionAsync());
+            }
+
+            var before = await ReadSessionTurnColumnsAsync(databasePath);
+            await using var sessions = new SqliteSessionStore(databasePath);
+            var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                sessions.InitializeAsync());
+            var after = await ReadSessionTurnColumnsAsync(databasePath);
+
+            Assert.Contains("schema v8 不完整", exception.Message, StringComparison.Ordinal);
+            Assert.Contains("frozen_route_status", exception.Message, StringComparison.Ordinal);
+            Assert.Equal(before, after);
+            Assert.DoesNotContain("frozen_route_status", after);
         }
         finally
         {
@@ -695,6 +805,22 @@ public sealed class SqliteTaskStoreTests
         Assert.Equal(evidence.UserSummary, persisted.UserSummary);
         Assert.Contains(audit, item =>
             item.Action == "TaskEvidenceRecorded" && item.EntityId == task.Id.ToString("D"));
+    }
+
+    private static async Task<string[]> ReadSessionTurnColumnsAsync(string databasePath)
+    {
+        await using var connection = new SqliteConnection($"Data Source={databasePath}");
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT name FROM pragma_table_info('session_turns') ORDER BY cid;";
+        await using var reader = await command.ExecuteReaderAsync();
+        var columns = new List<string>();
+        while (await reader.ReadAsync())
+        {
+            columns.Add(reader.GetString(0));
+        }
+
+        return columns.ToArray();
     }
 
     private static (AgentRunRecord Run, AgentAttemptRecord Attempt) NewAgentAttempt(

@@ -45,6 +45,23 @@ public enum SessionMissingContext
     UserInput
 }
 
+public enum SessionTurnRouteStatus
+{
+    Ready,
+    Unavailable
+}
+
+public sealed record SessionTurnFrozenRoute
+{
+    public required SessionTurnRouteStatus Status { get; init; }
+    public string? ProviderId { get; init; }
+    public string? ModelId { get; init; }
+    public string? DataDestination { get; init; }
+    public bool? SendsDataOffDevice { get; init; }
+    public required DateTimeOffset FrozenAtUtc { get; init; }
+    public string? FailureCode { get; init; }
+}
+
 public sealed record SessionRecord
 {
     public required Guid Id { get; init; }
@@ -68,6 +85,7 @@ public sealed record SessionTurnRecord
     public required string InputText { get; init; }
     public required string InputModality { get; init; }
     public required string IdempotencyKey { get; init; }
+    public SessionTurnFrozenRoute? FrozenRoute { get; init; }
     public SessionWorkKind WorkKind { get; init; } = SessionWorkKind.Unknown;
     public SessionTurnPhase Phase { get; init; } = SessionTurnPhase.Understanding;
     public SessionMissingContext MissingContext { get; init; } = SessionMissingContext.None;
