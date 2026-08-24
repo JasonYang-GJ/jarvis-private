@@ -6,6 +6,12 @@ using ScreenGuide.AI.Core;
 
 namespace ScreenGuide.Agent.Codex;
 
+public enum CodexChatModelExecutionPolicy
+{
+    ProductionDisabled,
+    TestOnlyAllowLocalCodexCli
+}
+
 /// <summary>
 /// Ordinary chat adapter for the locally installed Codex CLI. This is deliberately
 /// separate from <see cref="CodexConnector"/>, which remains the coding-task path.
@@ -35,6 +41,7 @@ public sealed class CodexChatModelProvider : IChatModelProvider
         ]);
 
     private readonly CodexConnectorOptions _options;
+    private readonly CodexChatModelExecutionPolicy _executionPolicy;
     private readonly CodexCapabilityProbe _capabilityProbe;
     private readonly SemaphoreSlim _capabilityGate = new(1, 1);
     private readonly SemaphoreSlim _schemaGate = new(1, 1);
@@ -43,8 +50,16 @@ public sealed class CodexChatModelProvider : IChatModelProvider
     private bool _disposed;
 
     public CodexChatModelProvider(CodexConnectorOptions options)
+        : this(options, CodexChatModelExecutionPolicy.ProductionDisabled)
+    {
+    }
+
+    public CodexChatModelProvider(
+        CodexConnectorOptions options,
+        CodexChatModelExecutionPolicy executionPolicy)
     {
         _options = options ?? throw new ArgumentNullException(nameof(options));
+        _executionPolicy = executionPolicy;
         if (options.ChatRequestTimeout <= TimeSpan.Zero
             || options.ChatRequestTimeout > TimeSpan.FromMinutes(10))
         {
@@ -64,6 +79,11 @@ public sealed class CodexChatModelProvider : IChatModelProvider
         CancellationToken cancellationToken = default)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+        if (_executionPolicy != CodexChatModelExecutionPolicy.TestOnlyAllowLocalCodexCli)
+        {
+            throw DisabledBySecurityPolicyError();
+        }
+
         ValidateRequest(request);
         if (cancellationToken.IsCancellationRequested)
         {
@@ -289,6 +309,17 @@ public sealed class CodexChatModelProvider : IChatModelProvider
         CancellationToken cancellationToken = default)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+
+        if (_executionPolicy != CodexChatModelExecutionPolicy.TestOnlyAllowLocalCodexCli)
+        {
+            return new ChatProviderHealth(
+                ProviderId,
+                ChatProviderHealthState.Unavailable,
+                IsConfigured: false,
+                "出于安全原因，Codex 普通聊天当前已停用；编程任务不受影响。",
+                DateTimeOffset.UtcNow);
+        }
+
         try
         {
             _ = await EnsureCapabilityAsync(cancellationToken).ConfigureAwait(false);
@@ -646,6 +677,15 @@ public sealed class CodexChatModelProvider : IChatModelProvider
             code,
             message,
             IsRetryable: true));
+
+    private static ChatModelException DisabledBySecurityPolicyError() => new(
+        ProviderId,
+        DefaultModelId,
+        new ChatModelError(
+            ChatModelErrorKind.Unavailable,
+            "disabled_by_security_policy",
+            "出于安全原因，当前版本暂不提供 Codex 普通聊天。你可以改用其他已配置的聊天服务；编程任务不受影响。",
+            IsRetryable: false));
 
     private sealed class BoundedProtocolLineReader(
         TextReader reader,

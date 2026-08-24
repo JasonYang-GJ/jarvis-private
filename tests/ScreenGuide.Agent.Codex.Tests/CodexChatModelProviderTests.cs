@@ -8,6 +8,66 @@ namespace ScreenGuide.Agent.Codex.Tests;
 public sealed class CodexChatModelProviderTests
 {
     [Fact]
+    public async Task ProductionPolicyFailsClosedBeforeCodexCliOrFilesystemAccess()
+    {
+        var root = Path.Combine(
+            Path.GetTempPath(),
+            $"screen-guide-codex-chat-production-{Guid.NewGuid():N}");
+        var dataDirectory = Path.Combine(root, "must-not-create");
+        var privateProject = Path.Combine(root, "private-user-project");
+        const string privateRequest = "PRIVATE_CHAT_SENTINEL 请读取用户项目并调用工具";
+        await using var provider = new CodexChatModelProvider(new CodexConnectorOptions(
+            dataDirectory,
+            Path.Combine(root, "missing-codex.exe")));
+
+        var exception = await Assert.ThrowsAsync<ChatModelException>(() =>
+            provider.CompleteAsync(Request(
+                Guid.NewGuid(),
+                "只使用请求传入的系统提示。",
+                new ChatMessage(
+                    ChatMessageRole.User,
+                    $"{privateRequest} {privateProject}"))));
+        var exposed = JsonSerializer.Serialize(new
+        {
+            exception.Message,
+            exception.Error
+        });
+
+        Assert.Equal("codex", exception.ProviderId);
+        Assert.Equal("codex-default", exception.ModelId);
+        Assert.Equal(ChatModelErrorKind.Unavailable, exception.Error.Kind);
+        Assert.Equal("disabled_by_security_policy", exception.Error.Code);
+        Assert.False(exception.Error.IsRetryable);
+        Assert.Equal(
+            "出于安全原因，当前版本暂不提供 Codex 普通聊天。你可以改用其他已配置的聊天服务；编程任务不受影响。",
+            exception.Error.UserMessage);
+        Assert.DoesNotContain(privateRequest, exposed, StringComparison.Ordinal);
+        Assert.DoesNotContain(privateProject, exposed, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(root, exposed, StringComparison.OrdinalIgnoreCase);
+        Assert.False(Directory.Exists(root));
+    }
+
+    [Fact]
+    public async Task ProductionHealthDoesNotProbeOrAdvertiseCodexCliAvailability()
+    {
+        await using var environment = ChatProviderEnvironment.Create();
+        await using var provider = new CodexChatModelProvider(new CodexConnectorOptions(
+            environment.DataDirectory,
+            Path.ChangeExtension(typeof(FakeCodexMarker).Assembly.Location, ".exe")));
+
+        var health = await provider.CheckHealthAsync();
+
+        Assert.Equal("codex", health.ProviderId);
+        Assert.Equal(ChatProviderHealthState.Unavailable, health.State);
+        Assert.False(health.IsConfigured);
+        Assert.Equal(
+            "出于安全原因，Codex 普通聊天当前已停用；编程任务不受影响。",
+            health.Message);
+        Assert.DoesNotContain(environment.RootDirectory, health.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.False(Directory.Exists(environment.DataDirectory));
+    }
+
+    [Fact]
     public async Task DescriptorDeclaresHonestChatModelAndDataDestination()
     {
         using var environment = ChatProviderEnvironment.Create();
@@ -384,7 +444,8 @@ public sealed class CodexChatModelProviderTests
                 Path.ChangeExtension(typeof(FakeCodexMarker).Assembly.Location, ".exe"))
             {
                 ChatRequestTimeout = requestTimeout ?? TimeSpan.FromMinutes(2)
-            });
+            },
+            CodexChatModelExecutionPolicy.TestOnlyAllowLocalCodexCli);
 
         public void Dispose() => DisposeAsync().AsTask().GetAwaiter().GetResult();
 

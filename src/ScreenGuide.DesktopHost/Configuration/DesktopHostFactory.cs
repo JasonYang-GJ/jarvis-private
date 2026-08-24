@@ -100,7 +100,9 @@ public static class DesktopHostFactory
         });
         builder.Services.AddSingleton<CodexConnector>();
         builder.Services.AddSingleton<CodexConversationProvider>();
-        builder.Services.AddSingleton<CodexChatModelProvider>();
+        builder.Services.AddSingleton(services => new CodexChatModelProvider(
+            services.GetRequiredService<CodexConnectorOptions>(),
+            CodexChatModelExecutionPolicy.ProductionDisabled));
         builder.Services.AddSingleton<DeepSeekChatModelProvider>();
         builder.Services.AddSingleton<IChatModelProvider>(services =>
             services.GetRequiredService<CodexChatModelProvider>());

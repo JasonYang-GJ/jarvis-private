@@ -1,6 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using ScreenGuide.Agent.Abstractions;
+using ScreenGuide.Agent.Codex;
 using ScreenGuide.AI.Core;
 using ScreenGuide.Core.Ai;
 using ScreenGuide.Core.Tasking;
@@ -12,6 +13,30 @@ namespace ScreenGuide.DesktopHost.Tests;
 
 public sealed class Stage2ModelRoutingEndToEndTests
 {
+    [Fact]
+    public async Task ProductionFactoryCannotEnableCodexOrdinaryChatThroughRegisteredPolicy()
+    {
+        await using var environment = DesktopHostTestEnvironment.Create();
+        using var host = environment.BuildHost(services => services.AddSingleton(
+            typeof(CodexChatModelExecutionPolicy),
+            CodexChatModelExecutionPolicy.TestOnlyAllowLocalCodexCli));
+        var provider = host.Services.GetRequiredService<CodexChatModelProvider>();
+        var request = new ChatModelRequest(
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            CodexChatModelProvider.DefaultModelId,
+            "ECHO_CHAT_INPUT",
+            [new ChatMessage(ChatMessageRole.User, "生产工厂不得执行这段普通聊天正文。")]);
+
+        var exception = await Assert.ThrowsAsync<ChatModelException>(() =>
+            provider.CompleteAsync(request));
+
+        Assert.Equal(ChatModelErrorKind.Unavailable, exception.Error.Kind);
+        Assert.Equal("disabled_by_security_policy", exception.Error.Code);
+        Assert.False(exception.Error.IsRetryable);
+        Assert.False(Directory.Exists(environment.Options.CodexDataDirectory));
+    }
+
     [Fact]
     public async Task SameSessionSwitchesAtoBtoAWithCompleteNeutralHistoryAndNoProviderCrossTalk()
     {
