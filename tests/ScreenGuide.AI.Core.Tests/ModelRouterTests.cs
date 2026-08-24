@@ -78,6 +78,30 @@ public sealed class ModelRouterTests
         Assert.Equal(0, provider.CompleteCount);
     }
 
+    [Theory]
+    [InlineData(" ", "model-a")]
+    [InlineData("provider-a", " ")]
+    public void RestoreFrozenRouteMapsBlankProviderOrModelToStableSafetyError(
+        string providerId,
+        string modelId)
+    {
+        var provider = new RecordingProvider("provider-a", "model-a");
+        var settings = new MutableSettingsStore(new AiSettings(
+            new ChatModelRoute("provider-a", "model-a")));
+        var router = new ModelRouter(new ChatProviderRegistry([provider]), settings);
+
+        var exception = Assert.Throws<ChatModelException>(() =>
+            router.RestoreFrozenChatRoute(
+                providerId,
+                modelId,
+                "api.provider-a.example",
+                sendsDataOffDevice: true));
+
+        Assert.Equal("frozen_chat_route_invalid", exception.Error.Code);
+        Assert.Equal(0, settings.LoadCount);
+        Assert.Equal(0, provider.CompleteCount);
+    }
+
     [Fact]
     public async Task FrozenRouteKeepsItsProviderWhenTheDefaultChanges()
     {

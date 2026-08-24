@@ -126,7 +126,8 @@ public sealed class ModelRouter(
         {
             registration = providers.GetRequired(providerId, modelId);
         }
-        catch (Exception exception) when (exception is KeyNotFoundException or ArgumentException)
+        catch (Exception exception) when (
+            exception is KeyNotFoundException or ArgumentException or InvalidOperationException)
         {
             throw FrozenRouteInvalid(providerId, modelId);
         }
@@ -151,8 +152,8 @@ public sealed class ModelRouter(
 
     private static ChatModelException FrozenRouteInvalid(string providerId, string? modelId) =>
         new(
-            providerId,
-            modelId,
+            string.IsNullOrWhiteSpace(providerId) ? "model-router" : providerId,
+            string.IsNullOrWhiteSpace(modelId) ? null : modelId,
             new ChatModelError(
                 ChatModelErrorKind.InvalidRequest,
                 "frozen_chat_route_invalid",
