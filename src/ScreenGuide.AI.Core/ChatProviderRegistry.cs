@@ -2,7 +2,8 @@ namespace ScreenGuide.AI.Core;
 
 public sealed record ChatProviderRegistration(
     IChatModelProvider Provider,
-    ChatModelDescriptor Model);
+    ChatModelDescriptor Model,
+    ChatProviderDescriptor ProviderDescriptor);
 
 public sealed class ChatProviderRegistry
 {
@@ -74,7 +75,10 @@ public sealed class ChatProviderRegistry
                 $"Provider“{registration.Descriptor.ProviderId}”未注册模型：{normalizedModelId}");
         }
 
-        return new ChatProviderRegistration(registration.Provider, model);
+        return new ChatProviderRegistration(
+            registration.Provider,
+            model,
+            registration.Descriptor);
     }
 
     public IChatModelProvider GetProviderRequired(string providerId)

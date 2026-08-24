@@ -132,7 +132,7 @@ public sealed class ModelRouter(
             throw FrozenRouteInvalid(providerId, modelId);
         }
 
-        var descriptor = registration.Provider.Descriptor;
+        var descriptor = registration.ProviderDescriptor;
         if (!string.Equals(descriptor.ProviderId, providerId, StringComparison.Ordinal)
             || !string.Equals(registration.Model.ModelId, modelId, StringComparison.Ordinal)
             || !string.Equals(descriptor.DataDestination, dataDestination, StringComparison.Ordinal)

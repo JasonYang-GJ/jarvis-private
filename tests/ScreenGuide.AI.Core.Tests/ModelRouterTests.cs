@@ -30,6 +30,31 @@ public sealed class ModelRouterTests
         Assert.Equal(0, providerB.CompleteCount);
     }
 
+    [Fact]
+    public void RestoreFrozenRouteUsesRegistrySnapshotWithoutTouchingProviderAgain()
+    {
+        var provider = new DescriptorGuardProvider("provider-a", "model-a");
+        var settings = new MutableSettingsStore(new AiSettings(
+            new ChatModelRoute("provider-b", "model-b")));
+        var registry = new ChatProviderRegistry([provider]);
+        var descriptorReadsAfterRegistration = provider.DescriptorReadCount;
+        provider.ThrowOnDescriptorRead = true;
+        var router = new ModelRouter(registry, settings);
+
+        var route = router.RestoreFrozenChatRoute(
+            "provider-a",
+            "model-a",
+            "api.provider-a.example",
+            sendsDataOffDevice: true);
+
+        Assert.Equal("provider-a", route.ProviderId);
+        Assert.Equal("model-a", route.ModelId);
+        Assert.Equal(ChatModelCapabilities.Streaming, route.Capabilities);
+        Assert.Equal(descriptorReadsAfterRegistration, provider.DescriptorReadCount);
+        Assert.Equal(0, settings.LoadCount);
+        Assert.Equal(0, provider.CompleteCount);
+    }
+
     [Theory]
     [InlineData("wrong destination", true)]
     [InlineData("api.provider-a.example", false)]
@@ -387,6 +412,57 @@ public sealed class ModelRouterTests
 
         public Task CancelAsync(Guid turnId, CancellationToken cancellationToken = default) =>
             Task.CompletedTask;
+
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+
+    private sealed class DescriptorGuardProvider(
+        string providerId,
+        string modelId) : IChatModelProvider
+    {
+        private readonly ChatProviderDescriptor _descriptor = new(
+            providerId,
+            providerId,
+            $"api.{providerId}.example",
+            true,
+            [new ChatModelDescriptor(modelId, modelId, ChatModelCapabilities.Streaming)]);
+
+        public int DescriptorReadCount { get; private set; }
+
+        public bool ThrowOnDescriptorRead { get; set; }
+
+        public int CompleteCount { get; private set; }
+
+        public ChatProviderDescriptor Descriptor
+        {
+            get
+            {
+                DescriptorReadCount++;
+                if (ThrowOnDescriptorRead)
+                {
+                    throw new InvalidOperationException(
+                        "Provider descriptor must not be read after registry construction.");
+                }
+
+                return _descriptor;
+            }
+        }
+
+        public Task<ChatModelResponse> CompleteAsync(
+            ChatModelRequest request,
+            ChatModelStreamCallback? streamCallback = null,
+            CancellationToken cancellationToken = default)
+        {
+            CompleteCount++;
+            throw new InvalidOperationException("Provider completion must not be called.");
+        }
+
+        public Task<ChatProviderHealth> CheckHealthAsync(
+            CancellationToken cancellationToken = default) =>
+            throw new InvalidOperationException("Provider health must not be called.");
+
+        public Task CancelAsync(Guid turnId, CancellationToken cancellationToken = default) =>
+            throw new InvalidOperationException("Provider cancellation must not be called.");
 
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
