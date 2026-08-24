@@ -5,6 +5,7 @@ using System.Text.Json;
 using System.Windows.Automation;
 using ScreenGuide.DesktopProtocol;
 using ScreenGuide.FakeCodexCli;
+using ScreenGuide.Persistence.Sqlite;
 
 namespace ScreenGuide.DesktopProduct.Tests;
 
@@ -79,37 +80,38 @@ public sealed class DesktopSessionUiAutomationTests
                 "Text",
                 $"session-ui-stop-{Guid.NewGuid():N}",
                 newSession.SessionId));
-            await WaitForTurnPhaseAsync(
+            var failed = await WaitForTurnPhaseAsync(
                 api,
                 longTurn.TurnId,
-                "Responding",
+                "Failed",
                 TimeSpan.FromSeconds(10));
+            var failedTurn = Assert.Single(failed.Turns, turn => turn.Id == longTurn.TurnId);
+            Assert.Equal(newSession.SessionId, failed.SessionId);
+            Assert.Equal(newSession.ConversationId, failed.ConversationId);
+            Assert.Empty(failed.ActiveTurns);
+            Assert.NotNull(failedTurn.FailureMessage);
+            Assert.Contains("安全原因", failedTurn.FailureMessage, StringComparison.Ordinal);
+            Assert.Contains("Codex 普通聊天", failedTurn.FailureMessage, StringComparison.Ordinal);
+            Assert.Contains("暂不提供", failedTurn.FailureMessage, StringComparison.Ordinal);
+            Assert.Contains("编程任务不受影响", failedTurn.FailureMessage, StringComparison.Ordinal);
+            Assert.DoesNotContain("TEST_LONG_RUNNING", failedTurn.FailureMessage, StringComparison.Ordinal);
+            Assert.DoesNotContain(markerPath, failedTurn.FailureMessage, StringComparison.OrdinalIgnoreCase);
             await WaitForAutomationTextAsync(
                 automationRoot,
                 "SessionStatus",
-                "正在回答",
+                "处理失败",
                 TimeSpan.FromSeconds(10));
-            var stop = await WaitForElementAsync(
-                automationRoot,
-                "StopSession",
-                TimeSpan.FromSeconds(10));
-
-            Invoke(stop);
-            var stopped = await WaitForTurnPhaseAsync(
-                api,
-                longTurn.TurnId,
-                "Cancelled",
-                TimeSpan.FromSeconds(10));
-            Assert.Equal(newSession.SessionId, stopped.SessionId);
-            await WaitForAutomationTextAsync(
-                automationRoot,
-                "SessionStatus",
-                "已取消",
-                TimeSpan.FromSeconds(10));
-            await Task.Delay(TimeSpan.FromSeconds(5));
             Assert.False(
                 File.Exists(markerPath),
-                "UI 的停止按钮必须让 Host 真正取消 FakeCodex 进程树，不能只隐藏回答。");
+                "生产普通聊天安全策略必须在 Fake Codex 启动前失败关闭。");
+            await using (var sessionStore = new SqliteSessionStore(
+                             Path.Combine(dataRoot, "state", "tasking.db")))
+            {
+                await sessionStore.InitializeAsync();
+                var persistedTurn = await sessionStore.GetTurnAsync(longTurn.TurnId);
+                Assert.Equal("disabled_by_security_policy", persistedTurn?.FailureCode);
+                Assert.Equal(failedTurn.FailureMessage, persistedTurn?.FailureMessage);
+            }
 
             syntheticWindowProcess = StartSyntheticWindow();
             var syntheticWindow = await WaitForTopLevelWindowAsync(
@@ -155,11 +157,18 @@ public sealed class DesktopSessionUiAutomationTests
                 "Cancelled",
                 TimeSpan.FromSeconds(10));
             Assert.Equal(newSession.SessionId, rejected.SessionId);
+            Assert.Equal(newSession.ConversationId, rejected.ConversationId);
+            Assert.Empty(rejected.ActiveTurns);
+            Assert.Contains(rejected.Turns, turn => turn.Id == longTurn.TurnId && turn.Phase == "Failed");
+            Assert.Contains(rejected.Turns, turn => turn.Id == windowTurn.TurnId && turn.Phase == "Cancelled");
             await WaitForAutomationTextAsync(
                 automationRoot,
                 "SessionStatus",
                 "已取消",
                 TimeSpan.FromSeconds(10));
+            Assert.False(
+                File.Exists(markerPath),
+                "后续窗口授权流程也不得让已停用的 Codex 普通聊天进程迟到启动。");
 
             await api.ShutdownHostAsync();
             await hostProcess.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10));

@@ -45,10 +45,23 @@ public sealed class AiSettingsIpcIntegrationTests
             var codexHealth = await client.CheckAiProviderHealthAsync(
                 new ProviderIdRequestDto("codex"));
             var afterHealth = await client.GetAiSettingsAsync();
-            Assert.Equal("Healthy", codexHealth.State);
-            Assert.Equal(
-                "NotRequired",
-                afterHealth.Providers.Single(item => item.ProviderId == "codex").ConfigurationState);
+            var codex = afterHealth.Providers.Single(item => item.ProviderId == "codex");
+            Assert.Equal("Unavailable", codexHealth.State);
+            Assert.False(codexHealth.IsConfigured);
+            Assert.Contains("安全原因", codexHealth.SafeMessage, StringComparison.Ordinal);
+            Assert.Contains("Codex 普通聊天", codexHealth.SafeMessage, StringComparison.Ordinal);
+            Assert.Contains("停用", codexHealth.SafeMessage, StringComparison.Ordinal);
+            Assert.Contains("编程任务不受影响", codexHealth.SafeMessage, StringComparison.Ordinal);
+            Assert.DoesNotContain(canaryKey, codexHealth.ToString(), StringComparison.Ordinal);
+            Assert.DoesNotContain(
+                environment.Options.DataDirectory,
+                codexHealth.SafeMessage,
+                StringComparison.OrdinalIgnoreCase);
+            Assert.Equal("NotRequired", codex.ConfigurationState);
+            Assert.Equal(new AiChatRouteDto("deepseek", "deepseek-v4-pro"), afterHealth.CurrentChatRoute);
+            Assert.Equal("Codex", afterHealth.ProgrammingAgent);
+            Assert.DoesNotContain(canaryKey, afterHealth.ToString(), StringComparison.Ordinal);
+            Assert.False(Directory.Exists(environment.Options.CodexDataDirectory));
 
             var deleted = await client.DeleteProviderCredentialAsync(
                 new ProviderIdRequestDto("deepseek"));
