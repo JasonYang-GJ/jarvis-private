@@ -1995,15 +1995,8 @@ public sealed class SqliteTaskStore : ILocalTaskStore
 
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 
-    private async Task<SqliteConnection> OpenConnectionAsync(CancellationToken cancellationToken)
-    {
-        var connection = new SqliteConnection(_connectionString);
-        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
-        await using var command = connection.CreateCommand();
-        command.CommandText = "PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;";
-        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
-        return connection;
-    }
+    private Task<SqliteConnection> OpenConnectionAsync(CancellationToken cancellationToken) =>
+        SqliteConnectionOpener.OpenAsync(_connectionString, cancellationToken);
 
     private async Task<T?> QuerySingleAsync<T>(
         string sql,

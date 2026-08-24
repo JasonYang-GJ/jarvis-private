@@ -241,6 +241,18 @@ public sealed class DesktopIpcPressureTests(ITestOutputHelper output)
             environment.Options.PipeName,
             TimeSpan.FromSeconds(3));
         var session = await loadClient.StartNewSessionAsync(scenario);
+        var knownChangeVersion = session.ChangeVersion;
+        var currentSessionId = session.SessionId;
+        Guid? drainSessionId = null;
+        if (waitForServerDrainBetweenBatches)
+        {
+            var drainSession = await loadClient.StartNewSessionAsync($"{scenario} 排空屏障");
+            drainSessionId = drainSession.SessionId;
+            var restored = await loadClient.SetCurrentSessionAsync(session.SessionId);
+            knownChangeVersion = restored.ChangeVersion;
+            currentSessionId = restored.SessionId;
+        }
+
         using var pressureLifetime = new CancellationTokenSource(TimeSpan.FromSeconds(25));
         var pressure = Stopwatch.StartNew();
         var operations = new List<Task<WaitPressureOutcome>>(operationCount);
@@ -252,22 +264,44 @@ public sealed class DesktopIpcPressureTests(ITestOutputHelper output)
                 .Select(index => index % 2 == 0
                     ? RunCancelledWaitAsync(
                         loadClient,
-                        session.ChangeVersion,
+                        knownChangeVersion,
                         pressureLifetime.Token)
                     : RunShortWaitAsync(
                         loadClient,
-                        session.ChangeVersion,
+                        knownChangeVersion,
                         pressureLifetime.Token))
                 .ToArray();
             operations.AddRange(batch);
 
             if (waitForServerDrainBetweenBatches)
             {
-                _ = await Task.WhenAny(
-                    Task.WhenAll(batch),
-                    Task.Delay(TimeSpan.FromSeconds(3), pressureLifetime.Token));
-                await Task.Delay(TimeSpan.FromMilliseconds(1_200), pressureLifetime.Token);
+                _ = await DrainPressureOperationsAsync(batch, scenario);
+                var nextSessionId = currentSessionId == session.SessionId
+                    ? drainSessionId!.Value
+                    : session.SessionId;
+                var changed = await loadClient.SetCurrentSessionAsync(
+                    nextSessionId,
+                    pressureLifetime.Token);
+                knownChangeVersion = changed.ChangeVersion;
+                currentSessionId = changed.SessionId;
+                await AwaitServerRoundTripClosureAsync(
+                    environment.Options.PipeName,
+                    scenario,
+                    pressureLifetime.Token);
             }
+        }
+
+        if (currentSessionId != session.SessionId)
+        {
+            var restored = await loadClient.SetCurrentSessionAsync(
+                session.SessionId,
+                pressureLifetime.Token);
+            knownChangeVersion = restored.ChangeVersion;
+            currentSessionId = restored.SessionId;
+            await AwaitServerRoundTripClosureAsync(
+                environment.Options.PipeName,
+                scenario,
+                pressureLifetime.Token);
         }
 
         var allOperations = Task.WhenAll(operations);
@@ -290,29 +324,50 @@ public sealed class DesktopIpcPressureTests(ITestOutputHelper output)
             TimeSpan.FromSeconds(5));
 
         pressureLifetime.Cancel();
-        _ = await Task.WhenAny(allOperations, Task.Delay(TimeSpan.FromSeconds(3)));
+        var outcomes = await DrainPressureOperationsAsync(operations, scenario);
         await host.StopAsync();
         host.Dispose();
-        await WaitForDatabaseReleaseAsync(environment.Options.DatabasePath);
+        AssertDatabaseReleased(environment.Options.DatabasePath);
 
-        var successfulOutcomes = operations
-            .Where(operation => operation.Status == TaskStatus.RanToCompletion)
-            .Select(operation => operation.Result)
-            .ToArray();
         output.WriteLine(
             $"{scenario}: 15秒时完成 {completedByFifteenSeconds}/{operationCount}; " +
             $"观察耗时 {pressureElapsedAtObservation.TotalMilliseconds:F0} ms; " +
             $"Ping={ping.Succeeded} ({ping.Elapsed.TotalMilliseconds:F0} ms); " +
             $"Submit={submit.Succeeded} ({submit.Elapsed.TotalMilliseconds:F0} ms); " +
-            $"结果={string.Join(',', successfulOutcomes.GroupBy(item => item.Kind).Select(group => $"{group.Key}:{group.Count()}"))}");
+            $"结果={string.Join(',', outcomes.GroupBy(item => item.Kind).Select(group => $"{group.Key}:{group.Count()}"))}");
 
         Assert.Equal(operationCount, operations.Count);
+        Assert.Equal(operationCount, outcomes.Length);
         if (requireEveryOperationByFifteenSeconds)
         {
             Assert.Equal(operationCount, completedByFifteenSeconds);
-            Assert.Equal(operationCount / 2, successfulOutcomes.Count(item => item.Kind == "Cancelled"));
-            Assert.Equal(operationCount / 2, successfulOutcomes.Count(item => item.Kind == "ShortCompleted"));
+            Assert.Equal(operationCount / 2, outcomes.Count(item => item.Kind == "Cancelled"));
+            Assert.Equal(operationCount / 2, outcomes.Count(item => item.Kind == "ShortCompleted"));
+            Assert.DoesNotContain(
+                outcomes,
+                item => item.Kind is "BusyRejected" or "TransportRejected" or "PressureCancelled");
         }
+        else
+        {
+            Assert.All(outcomes, item => Assert.Contains(
+                item.Kind,
+                new[]
+                {
+                    "Cancelled",
+                    "PressureCancelled",
+                    "ShortCompleted",
+                    "BusyRejected",
+                    "TransportRejected"
+                }));
+        }
+
+        var unexpectedOutcomes = outcomes
+            .Where(item => item.Kind is "UnexpectedCompletion" or "UnexpectedNull" or "ApiFailure" or "Fault")
+            .ToArray();
+        Assert.True(
+            unexpectedOutcomes.Length == 0,
+            $"{scenario} 出现未知、协议或 SQLite 失败：" +
+            string.Join(',', unexpectedOutcomes.Select(item => $"{item.Kind}:{item.Detail}")));
 
         Assert.True(
             ping.Succeeded,
@@ -333,24 +388,70 @@ public sealed class DesktopIpcPressureTests(ITestOutputHelper output)
         await Task.WhenAll(dashboard, projects, tasks, applications, session);
     }
 
-    private static async Task WaitForDatabaseReleaseAsync(string databasePath)
+    private static async Task<WaitPressureOutcome[]> DrainPressureOperationsAsync(
+        IReadOnlyCollection<Task<WaitPressureOutcome>> operations,
+        string scenario)
     {
-        var deadline = DateTimeOffset.UtcNow.AddSeconds(2);
-        while (DateTimeOffset.UtcNow < deadline)
+        var allOperations = Task.WhenAll(operations);
+        try
         {
-            try
-            {
-                using var exclusive = File.Open(
-                    databasePath,
-                    FileMode.Open,
-                    FileAccess.ReadWrite,
-                    FileShare.None);
-                return;
-            }
-            catch (IOException)
-            {
-                await Task.Delay(25);
-            }
+            return await allOperations.WaitAsync(TimeSpan.FromSeconds(3));
+        }
+        catch (TimeoutException exception)
+        {
+            var unfinishedCount = operations.Count(operation => !operation.IsCompleted);
+            throw new Xunit.Sdk.XunitException(
+                $"{scenario} 取消后仍有 {unfinishedCount}/{operations.Count} 个压力请求未进入终态。",
+                exception);
+        }
+    }
+
+    private static void AssertDatabaseReleased(string databasePath)
+    {
+        using var exclusive = File.Open(
+            databasePath,
+            FileMode.Open,
+            FileAccess.ReadWrite,
+            FileShare.None);
+    }
+
+    private static async Task AwaitServerRoundTripClosureAsync(
+        string pipeName,
+        string scenario,
+        CancellationToken cancellationToken)
+    {
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(TimeSpan.FromSeconds(3));
+        await using var pipe = new NamedPipeClientStream(
+            ".",
+            pipeName,
+            PipeDirection.InOut,
+            PipeOptions.Asynchronous,
+            TokenImpersonationLevel.Identification);
+        await pipe.ConnectAsync(timeout.Token);
+        var requestId = Guid.NewGuid().ToString("N");
+        await DesktopIpcFraming.WriteAsync(
+            pipe,
+            new DesktopApiRequest(
+                requestId,
+                DesktopApiMethods.Ping,
+                DesktopProtocolJson.ToElement(new EmptyRequest())),
+            timeout.Token);
+        var response = await DesktopIpcFraming.ReadAsync<DesktopApiResponse>(
+            pipe,
+            timeout.Token);
+        if (!response.Success)
+        {
+            throw new Xunit.Sdk.XunitException(
+                $"{scenario} 的批次排空屏障被拒绝：{response.Error?.Code ?? "unknown"}。");
+        }
+
+        var endOfStreamProbe = new byte[1];
+        var bytesRead = await pipe.ReadAsync(endOfStreamProbe, timeout.Token);
+        if (bytesRead != 0)
+        {
+            throw new Xunit.Sdk.XunitException(
+                $"{scenario} 的批次排空屏障在响应后仍收到额外协议数据。");
         }
     }
 
@@ -372,15 +473,26 @@ public sealed class DesktopIpcPressureTests(ITestOutputHelper output)
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
         {
-            return new WaitPressureOutcome("Cancelled");
+            return new WaitPressureOutcome(
+                pressureCancellation.IsCancellationRequested
+                    ? "PressureCancelled"
+                    : "Cancelled");
+        }
+        catch (DesktopApiException exception) when (exception.Error.Code == "ipc_busy")
+        {
+            return new WaitPressureOutcome("BusyRejected");
         }
         catch (DesktopApiException exception)
         {
-            return new WaitPressureOutcome($"Api:{exception.Error.Code}");
+            return new WaitPressureOutcome("ApiFailure", exception.Error.Code);
+        }
+        catch (IOException exception)
+        {
+            return new WaitPressureOutcome("TransportRejected", exception.GetType().Name);
         }
         catch (Exception exception)
         {
-            return new WaitPressureOutcome($"Fault:{exception.GetType().Name}");
+            return new WaitPressureOutcome("Fault", exception.GetType().Name);
         }
     }
 
@@ -401,13 +513,21 @@ public sealed class DesktopIpcPressureTests(ITestOutputHelper output)
         {
             return new WaitPressureOutcome("PressureCancelled");
         }
+        catch (DesktopApiException exception) when (exception.Error.Code == "ipc_busy")
+        {
+            return new WaitPressureOutcome("BusyRejected");
+        }
         catch (DesktopApiException exception)
         {
-            return new WaitPressureOutcome($"Api:{exception.Error.Code}");
+            return new WaitPressureOutcome("ApiFailure", exception.Error.Code);
+        }
+        catch (IOException exception)
+        {
+            return new WaitPressureOutcome("TransportRejected", exception.GetType().Name);
         }
         catch (Exception exception)
         {
-            return new WaitPressureOutcome($"Fault:{exception.GetType().Name}");
+            return new WaitPressureOutcome("Fault", exception.GetType().Name);
         }
     }
 
@@ -579,7 +699,7 @@ public sealed class DesktopIpcPressureTests(ITestOutputHelper output)
 
     private sealed record PingMeasurement(bool Succeeded, TimeSpan Elapsed);
 
-    private sealed record WaitPressureOutcome(string Kind);
+    private sealed record WaitPressureOutcome(string Kind, string? Detail = null);
 
     private sealed record DisconnectObservation(bool WasDisconnected, TimeSpan Elapsed);
 
