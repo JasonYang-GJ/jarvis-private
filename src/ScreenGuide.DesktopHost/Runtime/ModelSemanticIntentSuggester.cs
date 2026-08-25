@@ -55,6 +55,7 @@ public sealed class ModelSemanticIntentSuggester(
         var invocation = new AiInvocationRecord
         {
             Id = invocationId,
+            SessionTurnId = sessionTurnId,
             Purpose = AiInvocationPurpose.SemanticIntent,
             ProviderId = frozenRoute.ProviderId,
             ModelId = frozenRoute.ModelId,
@@ -126,7 +127,7 @@ public sealed class ModelSemanticIntentSuggester(
                 return null;
             }
 
-            await invocations.CompleteAsync(
+            var terminal = await invocations.CompleteAsync(
                     invocationId,
                     response.FinishReason.ToString(),
                     response.Usage is null
@@ -139,7 +140,7 @@ public sealed class ModelSemanticIntentSuggester(
                     timeProvider.GetUtcNow(),
                     CancellationToken.None)
                 .ConfigureAwait(false);
-            return suggestion;
+            return terminal.RequestedStatusWon ? suggestion : null;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -177,17 +178,16 @@ public sealed class ModelSemanticIntentSuggester(
         }
     }
 
-    private async Task MarkFailedAsync(
+    private Task<AiInvocationTransitionResult> MarkFailedAsync(
         Guid invocationId,
         AiInvocationStatus status,
         string failureCode) =>
-        await invocations.FailAsync(
-                invocationId,
-                status,
-                failureCode,
-                timeProvider.GetUtcNow(),
-                CancellationToken.None)
-            .ConfigureAwait(false);
+        invocations.FailAsync(
+            invocationId,
+            status,
+            failureCode,
+            timeProvider.GetUtcNow(),
+            CancellationToken.None);
 
     private static ChatResponseFormat SelectResponseFormat(ChatModelCapabilities capabilities)
     {

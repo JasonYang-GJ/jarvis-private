@@ -54,6 +54,10 @@ public sealed class DesktopHostRuntime(
             await conversationStore.InitializeAsync(cancellationToken).ConfigureAwait(false);
             await sessionStore.InitializeAsync(cancellationToken).ConfigureAwait(false);
             await aiInvocationStore.InitializeAsync(cancellationToken).ConfigureAwait(false);
+            var invocationRecovery = await aiInvocationStore.InterruptRunningAsync(
+                timeProvider.GetUtcNow(),
+                "host_restarted",
+                cancellationToken).ConfigureAwait(false);
             localDevice = await deviceInitializer.InitializeAsync(cancellationToken).ConfigureAwait(false);
             await AppendAuditAsync(
                 "HostStarting",
@@ -90,6 +94,7 @@ public sealed class DesktopHostRuntime(
                     recoveredTaskCount = recovery.InterruptedTaskIds.Count,
                     recoveredConversationCount = conversationRecovery.InterruptedConversationIds.Count,
                     recoveredSessionTurnCount = sessionRecovery.InterruptedTurnIds.Count,
+                    recoveredAiInvocationCount = invocationRecovery.InterruptedInvocationIds.Count,
                     connectorCount = connectorIds.Count,
                     skillCount = skillIds.Count
                 }),

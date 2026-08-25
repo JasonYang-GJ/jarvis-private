@@ -79,7 +79,7 @@ public sealed class SqliteAiInvocationStore : IAiInvocationStore
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 
-    public Task CompleteAsync(
+    public Task<AiInvocationTransitionResult> CompleteAsync(
         Guid invocationId,
         string finishReason,
         AiTokenUsage? usage,
@@ -96,7 +96,7 @@ public sealed class SqliteAiInvocationStore : IAiInvocationStore
             completedAtUtc,
             cancellationToken);
 
-    public Task FailAsync(
+    public Task<AiInvocationTransitionResult> FailAsync(
         Guid invocationId,
         AiInvocationStatus status,
         string failureCode,
@@ -117,6 +117,41 @@ public sealed class SqliteAiInvocationStore : IAiInvocationStore
             Required(failureCode, nameof(failureCode)),
             completedAtUtc,
             cancellationToken);
+    }
+
+    public async Task<AiInvocationRecoveryResult> InterruptRunningAsync(
+        DateTimeOffset interruptedAtUtc,
+        string failureCode,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenAsync(cancellationToken).ConfigureAwait(false);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            UPDATE ai_invocations
+            SET status = 'Interrupted',
+                completed_at_utc = $interruptedAtUtc,
+                finish_reason = NULL,
+                input_tokens = NULL,
+                output_tokens = NULL,
+                total_tokens = NULL,
+                provider_request_id = NULL,
+                failure_code = $failureCode
+            WHERE status = 'Running'
+            RETURNING id;
+            """;
+        command.Parameters.AddWithValue("$interruptedAtUtc", interruptedAtUtc.ToString("O"));
+        command.Parameters.AddWithValue(
+            "$failureCode",
+            Required(failureCode, nameof(failureCode)));
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken)
+            .ConfigureAwait(false);
+        var interruptedIds = new List<Guid>();
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            interruptedIds.Add(Guid.Parse(reader.GetString(0)));
+        }
+
+        return new AiInvocationRecoveryResult(interruptedIds);
     }
 
     public async Task<AiInvocationRecord?> GetAsync(
@@ -153,7 +188,29 @@ public sealed class SqliteAiInvocationStore : IAiInvocationStore
         return results;
     }
 
-    private async Task EndAsync(
+    public async Task<IReadOnlyList<AiInvocationRecord>> GetForSessionTurnAsync(
+        Guid sessionTurnId,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenAsync(cancellationToken).ConfigureAwait(false);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT * FROM ai_invocations
+            WHERE session_turn_id = $sessionTurnId
+            ORDER BY started_at_utc, id;
+            """;
+        command.Parameters.AddWithValue("$sessionTurnId", sessionTurnId.ToString("D"));
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        var results = new List<AiInvocationRecord>();
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            results.Add(Read(reader));
+        }
+
+        return results;
+    }
+
+    private async Task<AiInvocationTransitionResult> EndAsync(
         Guid invocationId,
         AiInvocationStatus status,
         string? finishReason,
@@ -186,10 +243,32 @@ public sealed class SqliteAiInvocationStore : IAiInvocationStore
         command.Parameters.AddWithValue("$providerRequestId", DbText(providerRequestId));
         command.Parameters.AddWithValue("$failureCode", DbText(failureCode));
         command.Parameters.AddWithValue("$id", invocationId.ToString("D"));
-        if (await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) != 1)
+        var applied = await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) == 1;
+        var current = await GetAsync(connection, invocationId, cancellationToken).ConfigureAwait(false)
+            ?? throw new AiInvocationNotFoundException(invocationId);
+        var disposition = applied
+            ? AiInvocationTransitionDisposition.Applied
+            : current.Status == status
+                ? AiInvocationTransitionDisposition.AlreadyInRequestedTerminal
+                : AiInvocationTransitionDisposition.RejectedByExistingTerminal;
+        return new AiInvocationTransitionResult(status, disposition, current);
+    }
+
+    private static async Task<AiInvocationRecord?> GetAsync(
+        SqliteConnection connection,
+        Guid invocationId,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT * FROM ai_invocations WHERE id = $id;";
+        command.Parameters.AddWithValue("$id", invocationId.ToString("D"));
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        if (!await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
         {
-            throw new InvalidOperationException("AI 调用不存在或已经进入终态。");
+            return null;
         }
+
+        return Read(reader);
     }
 
     private Task<SqliteConnection> OpenAsync(CancellationToken cancellationToken) =>

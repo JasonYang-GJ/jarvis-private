@@ -8,7 +8,7 @@ public interface IAiInvocationStore
         AiInvocationRecord invocation,
         CancellationToken cancellationToken = default);
 
-    Task CompleteAsync(
+    Task<AiInvocationTransitionResult> CompleteAsync(
         Guid invocationId,
         string finishReason,
         AiTokenUsage? usage,
@@ -16,11 +16,16 @@ public interface IAiInvocationStore
         DateTimeOffset completedAtUtc,
         CancellationToken cancellationToken = default);
 
-    Task FailAsync(
+    Task<AiInvocationTransitionResult> FailAsync(
         Guid invocationId,
         AiInvocationStatus status,
         string failureCode,
         DateTimeOffset completedAtUtc,
+        CancellationToken cancellationToken = default);
+
+    Task<AiInvocationRecoveryResult> InterruptRunningAsync(
+        DateTimeOffset interruptedAtUtc,
+        string failureCode,
         CancellationToken cancellationToken = default);
 
     Task<AiInvocationRecord?> GetAsync(
@@ -29,5 +34,9 @@ public interface IAiInvocationStore
 
     Task<IReadOnlyList<AiInvocationRecord>> GetForConversationTurnAsync(
         Guid conversationTurnId,
+        CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<AiInvocationRecord>> GetForSessionTurnAsync(
+        Guid sessionTurnId,
         CancellationToken cancellationToken = default);
 }

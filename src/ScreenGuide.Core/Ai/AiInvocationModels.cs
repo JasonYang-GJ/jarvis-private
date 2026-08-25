@@ -15,7 +15,31 @@ public enum AiInvocationStatus
     Interrupted
 }
 
+public enum AiInvocationTransitionDisposition
+{
+    Applied,
+    AlreadyInRequestedTerminal,
+    RejectedByExistingTerminal
+}
+
 public sealed record AiTokenUsage(long InputTokens, long OutputTokens, long TotalTokens);
+
+public sealed record AiInvocationTransitionResult(
+    AiInvocationStatus RequestedStatus,
+    AiInvocationTransitionDisposition Disposition,
+    AiInvocationRecord Current)
+{
+    public bool RequestedStatusWon => Current.Status == RequestedStatus;
+}
+
+public sealed record AiInvocationRecoveryResult(
+    IReadOnlyList<Guid> InterruptedInvocationIds);
+
+public sealed class AiInvocationNotFoundException(Guid invocationId) : Exception(
+    "AI 调用记录不存在，无法完成终态仲裁。")
+{
+    public Guid InvocationId { get; } = invocationId;
+}
 
 public sealed record AiInvocationRecord
 {

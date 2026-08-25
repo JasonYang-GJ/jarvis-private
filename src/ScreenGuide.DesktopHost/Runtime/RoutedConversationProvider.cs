@@ -82,6 +82,7 @@ public sealed class RoutedConversationProvider(
         var invocation = new AiInvocationRecord
         {
             Id = invocationId,
+            SessionTurnId = request.SessionTurnId.Value,
             ConversationTurnId = request.ConversationTurnId,
             Purpose = AiInvocationPurpose.Conversation,
             ProviderId = route.ProviderId,
@@ -130,28 +131,30 @@ public sealed class RoutedConversationProvider(
             if (linkedCancellation.IsCancellationRequested
                 || response.FinishReason == ChatFinishReason.Cancelled)
             {
-                await MarkFailedAsync(
+                var cancelled = await MarkFailedAsync(
                         invocationId,
                         AiInvocationStatus.Cancelled,
                         "cancelled")
                     .ConfigureAwait(false);
-                return Cancelled();
+                return ResolveTerminal(cancelled, Cancelled());
             }
 
             if (response.FinishReason == ChatFinishReason.Error
                 || string.IsNullOrWhiteSpace(response.Text))
             {
-                await MarkFailedAsync(
+                var failed = await MarkFailedAsync(
                         invocationId,
                         AiInvocationStatus.Failed,
                         "invalid_provider_response")
                     .ConfigureAwait(false);
-                return Failed(
-                    "invalid_provider_response",
-                    "这个 AI 服务没有返回可用回答，请稍后再试。");
+                return ResolveTerminal(
+                    failed,
+                    Failed(
+                        "invalid_provider_response",
+                        "这个 AI 服务没有返回可用回答，请稍后再试。"));
             }
 
-            await invocations.CompleteAsync(
+            var terminal = await invocations.CompleteAsync(
                     invocationId,
                     response.FinishReason.ToString(),
                     response.Usage is null
@@ -164,18 +167,23 @@ public sealed class RoutedConversationProvider(
                     timeProvider.GetUtcNow(),
                     CancellationToken.None)
                 .ConfigureAwait(false);
-            return new ConversationProviderResult(
-                ConversationProviderOutcome.Succeeded,
-                ExternalThreadId: null,
-                response.Text.Trim(),
-                response.Metadata.ProviderRequestId,
-                ProcessId: null);
+            return ResolveTerminal(
+                terminal,
+                new ConversationProviderResult(
+                    ConversationProviderOutcome.Succeeded,
+                    ExternalThreadId: null,
+                    response.Text.Trim(),
+                    response.Metadata.ProviderRequestId,
+                    ProcessId: null));
         }
         catch (OperationCanceledException) when (linkedCancellation.IsCancellationRequested)
         {
-            await MarkFailedAsync(invocationId, AiInvocationStatus.Cancelled, "cancelled")
+            var cancelled = await MarkFailedAsync(
+                    invocationId,
+                    AiInvocationStatus.Cancelled,
+                    "cancelled")
                 .ConfigureAwait(false);
-            return Cancelled();
+            return ResolveTerminal(cancelled, Cancelled());
         }
         catch (ChatModelException exception)
         {
@@ -185,21 +193,24 @@ public sealed class RoutedConversationProvider(
             var status = exception.Error.Kind == ChatModelErrorKind.Cancelled
                 ? AiInvocationStatus.Cancelled
                 : AiInvocationStatus.Failed;
-            await MarkFailedAsync(invocationId, status, code).ConfigureAwait(false);
-            return status == AiInvocationStatus.Cancelled
+            var terminal = await MarkFailedAsync(invocationId, status, code).ConfigureAwait(false);
+            var requestedResult = status == AiInvocationStatus.Cancelled
                 ? Cancelled()
                 : Failed(code, SafeProviderMessage(exception.Error.UserMessage));
+            return ResolveTerminal(terminal, requestedResult);
         }
         catch (Exception exception) when (
             exception is not OutOfMemoryException
             && exception is not StackOverflowException)
         {
-            await MarkFailedAsync(
+            var failed = await MarkFailedAsync(
                     invocationId,
                     AiInvocationStatus.Failed,
                     "chat_provider_error")
                 .ConfigureAwait(false);
-            return Failed("chat_provider_error", "这次回答没有成功，请稍后再试。");
+            return ResolveTerminal(
+                failed,
+                Failed("chat_provider_error", "这次回答没有成功，请稍后再试。"));
         }
         finally
         {
@@ -237,17 +248,16 @@ public sealed class RoutedConversationProvider(
         _activeConversations.Clear();
     }
 
-    private async Task MarkFailedAsync(
+    private Task<AiInvocationTransitionResult> MarkFailedAsync(
         Guid invocationId,
         AiInvocationStatus status,
         string code) =>
-        await invocations.FailAsync(
-                invocationId,
-                status,
-                code,
-                timeProvider.GetUtcNow(),
-                CancellationToken.None)
-            .ConfigureAwait(false);
+        invocations.FailAsync(
+            invocationId,
+            status,
+            code,
+            timeProvider.GetUtcNow(),
+            CancellationToken.None);
 
     private static IReadOnlyList<ChatMessage> BuildHistory(
         ConversationProviderRequest request,
@@ -306,6 +316,15 @@ public sealed class RoutedConversationProvider(
         "cancelled",
         "回答已停止。");
 
+    private static ConversationProviderResult Interrupted(string? failureCode = null) => new(
+        ConversationProviderOutcome.Interrupted,
+        ExternalThreadId: null,
+        Reply: null,
+        ProviderMessageId: null,
+        ProcessId: null,
+        SensitiveDataSanitizer.DiagnosticCode(failureCode, "host_restarted"),
+        "主程序已重新启动，这次回答已中断。请重新发送。");
+
     private static ConversationProviderResult Failed(string code, string message) => new(
         ConversationProviderOutcome.Failed,
         ExternalThreadId: null,
@@ -314,6 +333,31 @@ public sealed class RoutedConversationProvider(
         ProcessId: null,
         code,
         message);
+
+    private static ConversationProviderResult ResolveTerminal(
+        AiInvocationTransitionResult transition,
+        ConversationProviderResult requestedResult)
+    {
+        if (transition.RequestedStatusWon)
+        {
+            return requestedResult;
+        }
+
+        return transition.Current.Status switch
+        {
+            AiInvocationStatus.Cancelled => Cancelled(),
+            AiInvocationStatus.Interrupted => Interrupted(transition.Current.FailureCode),
+            AiInvocationStatus.Failed => Failed(
+                SensitiveDataSanitizer.DiagnosticCode(
+                    transition.Current.FailureCode,
+                    "chat_provider_error"),
+                "这次回答没有成功，请稍后再试。"),
+            AiInvocationStatus.Succeeded => requestedResult,
+            _ => Failed(
+                "invocation_terminal_conflict",
+                "这次回答的状态无法确认，请重新发送。")
+        };
+    }
 
     private static string SafeProviderMessage(string? message)
     {

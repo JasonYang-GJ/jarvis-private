@@ -46,6 +46,7 @@ public sealed class SessionFrozenRouteTests
         await host.StartAsync();
         var coordinator = host.Services.GetRequiredService<SessionCoordinator>();
         var store = host.Services.GetRequiredService<ISessionStore>();
+        var invocations = host.Services.GetRequiredService<IAiInvocationStore>();
         var session = await coordinator.StartNewAsync("同一 Turn 冻结路由");
 
         var submitted = await coordinator.SubmitAsync(
@@ -57,6 +58,7 @@ public sealed class SessionFrozenRouteTests
             store,
             submitted.TurnId,
             SessionTurnPhase.Completed);
+        var turnInvocations = await invocations.GetForSessionTurnAsync(submitted.TurnId);
         await host.StopAsync();
 
         Assert.Equal("provider-a", completed.FrozenRoute?.ProviderId);
@@ -66,6 +68,19 @@ public sealed class SessionFrozenRouteTests
         Assert.Contains(providerA.Requests, request => request.Prompt?.PromptId == "intent.semantic");
         Assert.Contains(providerA.Requests, request => request.Prompt?.PromptId == "chat.general");
         Assert.Empty(providerB.Requests);
+        Assert.Equal(2, turnInvocations.Count);
+        Assert.All(turnInvocations, invocation =>
+            Assert.Equal(submitted.TurnId, invocation.SessionTurnId));
+        var semanticInvocation = Assert.Single(turnInvocations, invocation =>
+            invocation.Purpose == AiInvocationPurpose.SemanticIntent);
+        Assert.Null(semanticInvocation.ConversationTurnId);
+        var conversationInvocation = Assert.Single(turnInvocations, invocation =>
+            invocation.Purpose == AiInvocationPurpose.Conversation);
+        Assert.Equal(completed.ConversationTurnId, conversationInvocation.ConversationTurnId);
+        Assert.Equal(
+            conversationInvocation.Id,
+            Assert.Single(await invocations.GetForConversationTurnAsync(
+                conversationInvocation.ConversationTurnId!.Value)).Id);
     }
 
     [Fact]

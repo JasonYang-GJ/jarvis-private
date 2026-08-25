@@ -9,6 +9,39 @@ namespace ScreenGuide.DesktopHost.Tests;
 public sealed class RoutedConversationProviderTests
 {
     [Fact]
+    public async Task PersistsSessionAndConversationTurnIdsForOrdinaryChatInvocation()
+    {
+        var conversationId = Guid.NewGuid();
+        var conversationTurnId = Guid.NewGuid();
+        var sessionTurnId = Guid.NewGuid();
+        var history = new HistoryStore(conversationId);
+        history.Add(ConversationMessageRole.User, "记录关联");
+        var provider = new RecordingChatProvider("provider-a", "model-a");
+        var invocations = new RecordingInvocationStore();
+        var routed = new RoutedConversationProvider(
+            history,
+            new ModelRouter(
+                new ChatProviderRegistry([provider]),
+                new MutableAiSettingsStore("provider-a", "model-a")),
+            await LoadRepositoryPromptsAsync(),
+            invocations,
+            TimeProvider.System);
+
+        var result = await routed.SendAsync(new ConversationProviderRequest(
+            conversationId,
+            conversationTurnId,
+            "记录关联",
+            ExternalThreadId: null,
+            sessionTurnId,
+            Frozen(provider)));
+
+        Assert.Equal(ConversationProviderOutcome.Succeeded, result.Outcome);
+        var invocation = Assert.Single(invocations.Started);
+        Assert.Equal(sessionTurnId, invocation.SessionTurnId);
+        Assert.Equal(conversationTurnId, invocation.ConversationTurnId);
+    }
+
+    [Fact]
     public async Task PersistedRoutesAtoBtoA_ignore_current_settings_and_keep_supplier_neutral_history()
     {
         var conversationId = Guid.NewGuid();
@@ -95,6 +128,94 @@ public sealed class RoutedConversationProviderTests
         Assert.DoesNotContain("旧回答", result.Reply ?? string.Empty, StringComparison.Ordinal);
         Assert.Single(invocations.Failed);
         Assert.Equal(AiInvocationStatus.Cancelled, invocations.Failed[0].Status);
+    }
+
+    [Theory]
+    [InlineData(
+        AiInvocationStatus.Interrupted,
+        "host_restarted",
+        ConversationProviderOutcome.Interrupted)]
+    [InlineData(
+        AiInvocationStatus.Cancelled,
+        "cancelled",
+        ConversationProviderOutcome.Cancelled)]
+    public async Task LateProviderSuccessCannotReturnBodyAfterAnEarlierTerminalState(
+        AiInvocationStatus winningStatus,
+        string winningFailureCode,
+        ConversationProviderOutcome expectedOutcome)
+    {
+        var conversationId = Guid.NewGuid();
+        var history = new HistoryStore(conversationId);
+        history.Add(ConversationMessageRole.User, "等待迟到回答");
+        var provider = new DelayedChatProvider();
+        var invocations = new RecordingInvocationStore();
+        var routed = new RoutedConversationProvider(
+            history,
+            new ModelRouter(
+                new ChatProviderRegistry([provider]),
+                new MutableAiSettingsStore("provider-a", "model-a")),
+            await LoadRepositoryPromptsAsync(),
+            invocations,
+            TimeProvider.System);
+
+        var running = routed.SendAsync(Request(
+            conversationId,
+            "等待迟到回答",
+            provider));
+        await provider.Started.Task.WaitAsync(TimeSpan.FromSeconds(3));
+        var invocation = Assert.Single(invocations.Started);
+        await invocations.FailAsync(
+            invocation.Id,
+            winningStatus,
+            winningFailureCode,
+            DateTimeOffset.UtcNow);
+
+        provider.AllowResponse.TrySetResult();
+        var result = await running.WaitAsync(TimeSpan.FromSeconds(3));
+
+        Assert.Equal(expectedOutcome, result.Outcome);
+        Assert.Null(result.Reply);
+        Assert.Equal(winningFailureCode, result.FailureCode);
+        Assert.Equal(winningStatus, (await invocations.GetAsync(invocation.Id))?.Status);
+    }
+
+    [Fact]
+    public async Task LateProviderFailurePreservesEarlierInterruptedOutcome()
+    {
+        var conversationId = Guid.NewGuid();
+        var history = new HistoryStore(conversationId);
+        history.Add(ConversationMessageRole.User, "等待迟到失败");
+        var provider = new DelayedChatProvider(failAfterRelease: true);
+        var invocations = new RecordingInvocationStore();
+        var routed = new RoutedConversationProvider(
+            history,
+            new ModelRouter(
+                new ChatProviderRegistry([provider]),
+                new MutableAiSettingsStore("provider-a", "model-a")),
+            await LoadRepositoryPromptsAsync(),
+            invocations,
+            TimeProvider.System);
+
+        var running = routed.SendAsync(Request(
+            conversationId,
+            "等待迟到失败",
+            provider));
+        await provider.Started.Task.WaitAsync(TimeSpan.FromSeconds(3));
+        var invocation = Assert.Single(invocations.Started);
+        await invocations.FailAsync(
+            invocation.Id,
+            AiInvocationStatus.Interrupted,
+            "host_restarted",
+            DateTimeOffset.UtcNow);
+
+        provider.AllowResponse.TrySetResult();
+        var result = await running.WaitAsync(TimeSpan.FromSeconds(3));
+
+        Assert.Equal(ConversationProviderOutcome.Interrupted, result.Outcome);
+        Assert.Null(result.Reply);
+        Assert.Equal("host_restarted", result.FailureCode);
+        Assert.Equal(AiInvocationStatus.Interrupted,
+            (await invocations.GetAsync(invocation.Id))?.Status);
     }
 
     [Fact]
@@ -352,6 +473,65 @@ public sealed class RoutedConversationProviderTests
         }
     }
 
+    private sealed class DelayedChatProvider(bool failAfterRelease = false) : IChatModelProvider
+    {
+        public ChatProviderDescriptor Descriptor { get; } = new(
+            "provider-a",
+            "Provider A",
+            "Provider A test destination",
+            true,
+            [new ChatModelDescriptor("model-a", "Model A", ChatModelCapabilities.None)]);
+
+        public TaskCompletionSource Started { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource AllowResponse { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public async Task<ChatModelResponse> CompleteAsync(
+            ChatModelRequest request,
+            ChatModelStreamCallback? streamCallback = null,
+            CancellationToken cancellationToken = default)
+        {
+            Started.TrySetResult();
+            await AllowResponse.Task.WaitAsync(cancellationToken);
+            if (failAfterRelease)
+            {
+                throw new ChatModelException(
+                    Descriptor.ProviderId,
+                    request.ModelId,
+                    new ChatModelError(
+                        ChatModelErrorKind.Unavailable,
+                        "late_provider_failure",
+                        "迟到失败不应覆盖已有终态。",
+                        IsRetryable: true));
+            }
+
+            return new ChatModelResponse(
+                "LATE_ASSISTANT_BODY",
+                ChatFinishReason.Stop,
+                new ChatModelUsage(4, 3, 7),
+                new ChatProviderMetadata(
+                    Descriptor.ProviderId,
+                    request.ModelId,
+                    "late-provider-request",
+                    Descriptor.DataDestination));
+        }
+
+        public Task<ChatProviderHealth> CheckHealthAsync(
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task CancelAsync(Guid turnId, CancellationToken cancellationToken = default) =>
+            Task.CompletedTask;
+
+        public ValueTask DisposeAsync()
+        {
+            AllowResponse.TrySetResult();
+            return ValueTask.CompletedTask;
+        }
+    }
+
     private sealed class FailingChatProvider : IChatModelProvider
     {
         public ChatProviderDescriptor Descriptor { get; } = new(
@@ -385,6 +565,8 @@ public sealed class RoutedConversationProviderTests
 
     private sealed class RecordingInvocationStore : IAiInvocationStore
     {
+        private readonly Dictionary<Guid, AiInvocationRecord> _records = [];
+
         public List<AiInvocationRecord> Started { get; } = [];
 
         public List<(Guid Id, string FinishReason)> Completed { get; } = [];
@@ -396,10 +578,11 @@ public sealed class RoutedConversationProviderTests
         public Task StartAsync(AiInvocationRecord invocation, CancellationToken cancellationToken = default)
         {
             Started.Add(invocation);
+            _records.Add(invocation.Id, invocation);
             return Task.CompletedTask;
         }
 
-        public Task CompleteAsync(
+        public Task<AiInvocationTransitionResult> CompleteAsync(
             Guid invocationId,
             string finishReason,
             AiTokenUsage? usage,
@@ -408,10 +591,17 @@ public sealed class RoutedConversationProviderTests
             CancellationToken cancellationToken = default)
         {
             Completed.Add((invocationId, finishReason));
-            return Task.CompletedTask;
+            return Task.FromResult(Transition(
+                invocationId,
+                AiInvocationStatus.Succeeded,
+                completedAtUtc,
+                finishReason,
+                usage,
+                providerRequestId,
+                failureCode: null));
         }
 
-        public Task FailAsync(
+        public Task<AiInvocationTransitionResult> FailAsync(
             Guid invocationId,
             AiInvocationStatus status,
             string failureCode,
@@ -419,16 +609,92 @@ public sealed class RoutedConversationProviderTests
             CancellationToken cancellationToken = default)
         {
             Failed.Add((invocationId, status, failureCode));
-            return Task.CompletedTask;
+            return Task.FromResult(Transition(
+                invocationId,
+                status,
+                completedAtUtc,
+                finishReason: null,
+                usage: null,
+                providerRequestId: null,
+                failureCode));
+        }
+
+        public Task<AiInvocationRecoveryResult> InterruptRunningAsync(
+            DateTimeOffset interruptedAtUtc,
+            string failureCode,
+            CancellationToken cancellationToken = default)
+        {
+            var interrupted = _records.Values
+                .Where(record => record.Status == AiInvocationStatus.Running)
+                .Select(record => record.Id)
+                .ToArray();
+            foreach (var invocationId in interrupted)
+            {
+                _ = Transition(
+                    invocationId,
+                    AiInvocationStatus.Interrupted,
+                    interruptedAtUtc,
+                    finishReason: null,
+                    usage: null,
+                    providerRequestId: null,
+                    failureCode);
+            }
+
+            return Task.FromResult(new AiInvocationRecoveryResult(interrupted));
         }
 
         public Task<AiInvocationRecord?> GetAsync(Guid invocationId, CancellationToken cancellationToken = default) =>
-            Task.FromResult<AiInvocationRecord?>(null);
+            Task.FromResult(_records.GetValueOrDefault(invocationId));
 
         public Task<IReadOnlyList<AiInvocationRecord>> GetForConversationTurnAsync(
             Guid conversationTurnId,
             CancellationToken cancellationToken = default) =>
-            Task.FromResult<IReadOnlyList<AiInvocationRecord>>([]);
+            Task.FromResult<IReadOnlyList<AiInvocationRecord>>(
+                _records.Values.Where(record =>
+                    record.ConversationTurnId == conversationTurnId).ToArray());
+
+        public Task<IReadOnlyList<AiInvocationRecord>> GetForSessionTurnAsync(
+            Guid sessionTurnId,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<AiInvocationRecord>>(
+                _records.Values.Where(record =>
+                    record.SessionTurnId == sessionTurnId).ToArray());
+
+        private AiInvocationTransitionResult Transition(
+            Guid invocationId,
+            AiInvocationStatus requestedStatus,
+            DateTimeOffset completedAtUtc,
+            string? finishReason,
+            AiTokenUsage? usage,
+            string? providerRequestId,
+            string? failureCode)
+        {
+            if (!_records.TryGetValue(invocationId, out var current))
+            {
+                throw new AiInvocationNotFoundException(invocationId);
+            }
+
+            var disposition = current.Status == AiInvocationStatus.Running
+                ? AiInvocationTransitionDisposition.Applied
+                : current.Status == requestedStatus
+                    ? AiInvocationTransitionDisposition.AlreadyInRequestedTerminal
+                    : AiInvocationTransitionDisposition.RejectedByExistingTerminal;
+            if (disposition == AiInvocationTransitionDisposition.Applied)
+            {
+                current = current with
+                {
+                    Status = requestedStatus,
+                    CompletedAtUtc = completedAtUtc,
+                    FinishReason = finishReason,
+                    Usage = usage,
+                    ProviderRequestId = providerRequestId,
+                    FailureCode = failureCode
+                };
+                _records[invocationId] = current;
+            }
+
+            return new AiInvocationTransitionResult(requestedStatus, disposition, current);
+        }
     }
 
     private sealed class HistoryStore(Guid conversationId) : IConversationStore

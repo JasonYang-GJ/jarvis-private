@@ -59,6 +59,8 @@ public sealed class ModelSemanticIntentSuggesterTests
         Assert.Equal("1", request.Prompt?.Version);
 
         var invocation = Assert.Single(invocations.Started);
+        Assert.Equal(sessionTurnId, invocation.SessionTurnId);
+        Assert.Null(invocation.ConversationTurnId);
         Assert.Equal(AiInvocationPurpose.SemanticIntent, invocation.Purpose);
         Assert.Equal("provider-a", invocation.ProviderId);
         Assert.Equal("model-a", invocation.ModelId);
@@ -193,6 +195,52 @@ public sealed class ModelSemanticIntentSuggesterTests
         Assert.Empty(invocations.Completed);
     }
 
+    [Theory]
+    [InlineData(AiInvocationStatus.Interrupted, "host_restarted")]
+    [InlineData(AiInvocationStatus.Cancelled, "cancelled")]
+    public async Task LateProviderSuccessCannotReturnSuggestionAfterAnEarlierTerminalState(
+        AiInvocationStatus winningStatus,
+        string winningFailureCode)
+    {
+        var responseReady = new TaskCompletionSource<ChatModelResponse>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var provider = new RecordingChatProvider(
+            ChatModelCapabilities.None,
+            handler: (_, _) => responseReady.Task);
+        var invocations = new RecordingInvocationStore();
+        var suggester = CreateSuggester(
+            provider,
+            invocations,
+            await LoadRepositoryPromptsAsync());
+        var sessionTurnId = Guid.NewGuid();
+
+        var running = suggester.SuggestAsync(
+            sessionTurnId,
+            Route(provider),
+            "处理刚才那个");
+        await provider.Started.Task.WaitAsync(TimeSpan.FromSeconds(3));
+        var invocation = Assert.Single(invocations.Started);
+        await invocations.FailAsync(
+            invocation.Id,
+            winningStatus,
+            winningFailureCode,
+            DateTimeOffset.UtcNow);
+
+        responseReady.TrySetResult(new ChatModelResponse(
+            provider.ResponseText,
+            ChatFinishReason.Stop,
+            new ChatModelUsage(12, 8, 20),
+            new ChatProviderMetadata(
+                provider.Descriptor.ProviderId,
+                "model-a",
+                "late-semantic-request",
+                provider.Descriptor.DataDestination)));
+        var suggestion = await running.WaitAsync(TimeSpan.FromSeconds(3));
+
+        Assert.Null(suggestion);
+        Assert.Equal(winningStatus, (await invocations.GetAsync(invocation.Id))?.Status);
+    }
+
     private static ModelSemanticIntentSuggester CreateSuggester(
         IChatModelProvider provider,
         IAiInvocationStore invocations,
@@ -315,6 +363,8 @@ public sealed class ModelSemanticIntentSuggesterTests
 
     private sealed class RecordingInvocationStore : IAiInvocationStore
     {
+        private readonly Dictionary<Guid, AiInvocationRecord> _records = [];
+
         public List<AiInvocationRecord> Started { get; } = [];
 
         public List<(Guid Id, string FinishReason)> Completed { get; } = [];
@@ -326,10 +376,11 @@ public sealed class ModelSemanticIntentSuggesterTests
         public Task StartAsync(AiInvocationRecord invocation, CancellationToken cancellationToken = default)
         {
             Started.Add(invocation);
+            _records.Add(invocation.Id, invocation);
             return Task.CompletedTask;
         }
 
-        public Task CompleteAsync(
+        public Task<AiInvocationTransitionResult> CompleteAsync(
             Guid invocationId,
             string finishReason,
             AiTokenUsage? usage,
@@ -338,10 +389,17 @@ public sealed class ModelSemanticIntentSuggesterTests
             CancellationToken cancellationToken = default)
         {
             Completed.Add((invocationId, finishReason));
-            return Task.CompletedTask;
+            return Task.FromResult(Transition(
+                invocationId,
+                AiInvocationStatus.Succeeded,
+                completedAtUtc,
+                finishReason,
+                usage,
+                providerRequestId,
+                failureCode: null));
         }
 
-        public Task FailAsync(
+        public Task<AiInvocationTransitionResult> FailAsync(
             Guid invocationId,
             AiInvocationStatus status,
             string failureCode,
@@ -349,17 +407,93 @@ public sealed class ModelSemanticIntentSuggesterTests
             CancellationToken cancellationToken = default)
         {
             Failed.Add((invocationId, status, failureCode));
-            return Task.CompletedTask;
+            return Task.FromResult(Transition(
+                invocationId,
+                status,
+                completedAtUtc,
+                finishReason: null,
+                usage: null,
+                providerRequestId: null,
+                failureCode));
+        }
+
+        public Task<AiInvocationRecoveryResult> InterruptRunningAsync(
+            DateTimeOffset interruptedAtUtc,
+            string failureCode,
+            CancellationToken cancellationToken = default)
+        {
+            var interrupted = _records.Values
+                .Where(record => record.Status == AiInvocationStatus.Running)
+                .Select(record => record.Id)
+                .ToArray();
+            foreach (var invocationId in interrupted)
+            {
+                _ = Transition(
+                    invocationId,
+                    AiInvocationStatus.Interrupted,
+                    interruptedAtUtc,
+                    finishReason: null,
+                    usage: null,
+                    providerRequestId: null,
+                    failureCode);
+            }
+
+            return Task.FromResult(new AiInvocationRecoveryResult(interrupted));
         }
 
         public Task<AiInvocationRecord?> GetAsync(
             Guid invocationId,
             CancellationToken cancellationToken = default) =>
-            Task.FromResult<AiInvocationRecord?>(null);
+            Task.FromResult(_records.GetValueOrDefault(invocationId));
 
         public Task<IReadOnlyList<AiInvocationRecord>> GetForConversationTurnAsync(
             Guid conversationTurnId,
             CancellationToken cancellationToken = default) =>
-            Task.FromResult<IReadOnlyList<AiInvocationRecord>>([]);
+            Task.FromResult<IReadOnlyList<AiInvocationRecord>>(
+                _records.Values.Where(record =>
+                    record.ConversationTurnId == conversationTurnId).ToArray());
+
+        public Task<IReadOnlyList<AiInvocationRecord>> GetForSessionTurnAsync(
+            Guid sessionTurnId,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<AiInvocationRecord>>(
+                _records.Values.Where(record =>
+                    record.SessionTurnId == sessionTurnId).ToArray());
+
+        private AiInvocationTransitionResult Transition(
+            Guid invocationId,
+            AiInvocationStatus requestedStatus,
+            DateTimeOffset completedAtUtc,
+            string? finishReason,
+            AiTokenUsage? usage,
+            string? providerRequestId,
+            string? failureCode)
+        {
+            if (!_records.TryGetValue(invocationId, out var current))
+            {
+                throw new AiInvocationNotFoundException(invocationId);
+            }
+
+            var disposition = current.Status == AiInvocationStatus.Running
+                ? AiInvocationTransitionDisposition.Applied
+                : current.Status == requestedStatus
+                    ? AiInvocationTransitionDisposition.AlreadyInRequestedTerminal
+                    : AiInvocationTransitionDisposition.RejectedByExistingTerminal;
+            if (disposition == AiInvocationTransitionDisposition.Applied)
+            {
+                current = current with
+                {
+                    Status = requestedStatus,
+                    CompletedAtUtc = completedAtUtc,
+                    FinishReason = finishReason,
+                    Usage = usage,
+                    ProviderRequestId = providerRequestId,
+                    FailureCode = failureCode
+                };
+                _records[invocationId] = current;
+            }
+
+            return new AiInvocationTransitionResult(requestedStatus, disposition, current);
+        }
     }
 }
