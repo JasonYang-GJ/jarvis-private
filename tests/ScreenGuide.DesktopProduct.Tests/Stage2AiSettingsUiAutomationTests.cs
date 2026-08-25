@@ -17,6 +17,7 @@ namespace ScreenGuide.DesktopProduct.Tests;
 public sealed class Stage2AiSettingsUiAutomationTests
 {
     private const string FakeKey = "ds-fake-stage2-ui-canary-never-send";
+    private const string VoiceHarnessResultPrefix = "SCREEN_GUIDE_VOICE_HARNESS_RESULT ";
 
     [Fact]
     [Trait("Category", "DesktopAcceptance")]
@@ -314,13 +315,15 @@ public sealed class Stage2AiSettingsUiAutomationTests
                 await deepSeek.CancellationObserved.Task.WaitAsync(TimeSpan.FromSeconds(10)));
             Assert.False(replacementSubmit.IsCompleted);
             deepSeek.AllowLateReply.TrySetResult();
+            Assert.Equal(
+                providerTurnId,
+                await deepSeek.LateReplyReturned.Task.WaitAsync(TimeSpan.FromSeconds(10)));
             var replacementTurn = await replacementSubmit;
             var replacementCompleted = await WaitForTurnPhaseAsync(
                 api,
                 replacementTurn.TurnId,
                 "Completed",
                 TimeSpan.FromSeconds(10));
-            await Task.Delay(500);
             var afterReplacement = await api.GetCurrentSessionAsync();
             Assert.NotNull(afterReplacement);
             Assert.Equal(
@@ -493,6 +496,89 @@ public sealed class Stage2AiSettingsUiAutomationTests
 
             await DeleteDirectoryWithRetryAsync(testRoot);
         }
+    }
+
+    [Fact]
+    [Trait("Category", "DesktopAcceptance")]
+    public async Task ActualReleaseMainWindowVoiceBargeInCancelsOldTurnAndRejectsLateReply()
+    {
+        var harnessPath = LocateReleaseVoiceHarness();
+        Assert.True(File.Exists(harnessPath), "独立 WPF Voice Harness 尚未生成 Release 可执行程序。");
+
+        using var process = new Process
+        {
+            StartInfo = new ProcessStartInfo
+            {
+                FileName = harnessPath,
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                CreateNoWindow = true
+            }
+        };
+        process.StartInfo.ArgumentList.Add(LocateReleaseBinaries().FakeCodexPath);
+        Assert.True(process.Start(), "无法启动独立 WPF Voice Harness。");
+        var standardOutput = process.StandardOutput.ReadToEndAsync();
+        var standardError = process.StandardError.ReadToEndAsync();
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+        try
+        {
+            await process.WaitForExitAsync(timeout.Token);
+        }
+        catch (OperationCanceledException) when (timeout.IsCancellationRequested)
+        {
+            if (!process.HasExited)
+            {
+                process.Kill(entireProcessTree: true);
+                await process.WaitForExitAsync();
+            }
+
+            throw new TimeoutException("独立 WPF Voice Harness 未在失败上限内自然退出。");
+        }
+
+        var output = await standardOutput;
+        var error = await standardError;
+        var outputLines = output.Split(
+                ['\r', '\n'],
+                StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .ToArray();
+        var resultLine = Assert.Single(outputLines);
+        Assert.StartsWith(VoiceHarnessResultPrefix, resultLine, StringComparison.Ordinal);
+        Assert.True(string.IsNullOrWhiteSpace(error), "Voice Harness 不应向标准错误输出内容。");
+        Assert.Equal(0, process.ExitCode);
+
+        var result = JsonSerializer.Deserialize<VoiceHarnessResult>(
+            resultLine[VoiceHarnessResultPrefix.Length..],
+            new JsonSerializerOptions(JsonSerializerDefaults.Web)
+            {
+                UnmappedMemberHandling =
+                    System.Text.Json.Serialization.JsonUnmappedMemberHandling.Disallow
+            });
+        Assert.NotNull(result);
+        Assert.Equal("completed", result.Stage);
+        Assert.Equal("Cancelled", result.OldTurnState);
+        Assert.Equal("Completed", result.NewTurnState);
+        Assert.True(result.EntryAssemblyConfirmed);
+        Assert.True(result.ResourceAssemblyConfirmed);
+        Assert.True(result.FirstInputVoice);
+        Assert.True(result.SecondInputVoice);
+        Assert.True(result.DistinctSessionTurns);
+        Assert.True(result.OldTurnResponding);
+        Assert.True(result.UiShowedOldInput);
+        Assert.True(result.UiShowedStop);
+        Assert.True(result.CancellationObserved);
+        Assert.True(result.CancellationTurnMatched);
+        Assert.True(result.LateReplyReturned);
+        Assert.True(result.NewInputPersisted);
+        Assert.True(result.NewReplyPersisted);
+        Assert.True(result.LateReplyRejected);
+        Assert.True(result.UiShowedNewInput);
+        Assert.True(result.UiShowedNewReply);
+        Assert.True(result.UiRejectedLateReply);
+        Assert.True(result.NaturalShutdown);
+        Assert.InRange(result.ElapsedMilliseconds, 1, 90_000);
+        Assert.Null(result.ErrorCode);
+        Assert.Null(result.ExceptionType);
     }
 
     [Fact]
@@ -1408,6 +1494,19 @@ public sealed class Stage2AiSettingsUiAutomationTests
         return new Binaries(client, host, fakeCodex);
     }
 
+    private static string LocateReleaseVoiceHarness()
+    {
+        var repositoryRoot = FindRepositoryRoot();
+        return Path.Combine(
+            repositoryRoot,
+            "tests",
+            "ScreenGuide.DesktopClient.VoiceHarness",
+            "bin",
+            "Release",
+            "net10.0-windows10.0.19041.0",
+            "ScreenGuide.DesktopClient.VoiceHarness.exe");
+    }
+
     private static string FindRepositoryRoot()
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);
@@ -1422,6 +1521,32 @@ public sealed class Stage2AiSettingsUiAutomationTests
     }
 
     private sealed record Binaries(string ClientPath, string HostPath, string FakeCodexPath);
+
+    private sealed record VoiceHarnessResult(
+        string Stage,
+        string OldTurnState,
+        string NewTurnState,
+        bool EntryAssemblyConfirmed,
+        bool ResourceAssemblyConfirmed,
+        bool FirstInputVoice,
+        bool SecondInputVoice,
+        bool DistinctSessionTurns,
+        bool OldTurnResponding,
+        bool UiShowedOldInput,
+        bool UiShowedStop,
+        bool CancellationObserved,
+        bool CancellationTurnMatched,
+        bool LateReplyReturned,
+        bool NewInputPersisted,
+        bool NewReplyPersisted,
+        bool LateReplyRejected,
+        bool UiShowedNewInput,
+        bool UiShowedNewReply,
+        bool UiRejectedLateReply,
+        bool NaturalShutdown,
+        long ElapsedMilliseconds,
+        string? ErrorCode,
+        string? ExceptionType);
 
     private sealed class RecordingChatProvider : IChatModelProvider
     {
@@ -1446,6 +1571,9 @@ public sealed class Stage2AiSettingsUiAutomationTests
             new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         public TaskCompletionSource AllowLateReply { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource<Guid> LateReplyReturned { get; } =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         public static RecordingChatProvider Codex() => new(new ChatProviderDescriptor(
@@ -1486,10 +1614,40 @@ public sealed class Stage2AiSettingsUiAutomationTests
                 $"{Descriptor.DisplayName} Fake Provider 连接正常。",
                 DateTimeOffset.UtcNow));
 
-        public async Task<ChatModelResponse> CompleteAsync(
+        public Task<ChatModelResponse> CompleteAsync(
             ChatModelRequest request,
             ChatModelStreamCallback? streamCallback = null,
             CancellationToken cancellationToken = default)
+        {
+            var completion = CompleteCoreAsync(request, cancellationToken);
+            if (!string.Equals(
+                    request.Prompt?.PromptId,
+                    "intent.semantic",
+                    StringComparison.Ordinal)
+                && string.Equals(
+                    request.Messages.Last().Content,
+                    "STAGE2_BLOCK_THEN_LATE_RESULT",
+                    StringComparison.Ordinal))
+            {
+                _ = completion.ContinueWith(
+                    completed =>
+                    {
+                        if (completed.Status == TaskStatus.RanToCompletion)
+                        {
+                            LateReplyReturned.TrySetResult(request.TurnId);
+                        }
+                    },
+                    CancellationToken.None,
+                    TaskContinuationOptions.ExecuteSynchronously,
+                    TaskScheduler.Default);
+            }
+
+            return completion;
+        }
+
+        private async Task<ChatModelResponse> CompleteCoreAsync(
+            ChatModelRequest request,
+            CancellationToken cancellationToken)
         {
             using var local = new CancellationTokenSource();
             using var linked = CancellationTokenSource.CreateLinkedTokenSource(

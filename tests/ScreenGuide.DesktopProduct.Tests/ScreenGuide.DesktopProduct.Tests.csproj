@@ -20,6 +20,7 @@
     <ProjectReference Include="..\..\src\ScreenGuide.DesktopProtocol\ScreenGuide.DesktopProtocol.csproj" />
     <ProjectReference Include="..\..\src\ScreenGuide.DesktopClient\ScreenGuide.DesktopClient.csproj" ReferenceOutputAssembly="false" />
     <ProjectReference Include="..\..\src\ScreenGuide.DesktopHost\ScreenGuide.DesktopHost.csproj" />
+    <ProjectReference Include="..\ScreenGuide.DesktopClient.VoiceHarness\ScreenGuide.DesktopClient.VoiceHarness.csproj" ReferenceOutputAssembly="false" />
     <ProjectReference Include="..\ScreenGuide.FakeCodexCli\ScreenGuide.FakeCodexCli.csproj" />
   </ItemGroup>
   <ItemGroup>

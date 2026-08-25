@@ -22,6 +22,7 @@
     <Project Path="tests/ScreenGuide.Agent.Codex.Tests/ScreenGuide.Agent.Codex.Tests.csproj" />
     <Project Path="tests/ScreenGuide.Core.Tests/ScreenGuide.Core.Tests.csproj" />
     <Project Path="tests/ScreenGuide.DesktopClient.Tests/ScreenGuide.DesktopClient.Tests.csproj" />
+    <Project Path="tests/ScreenGuide.DesktopClient.VoiceHarness/ScreenGuide.DesktopClient.VoiceHarness.csproj" />
     <Project Path="tests/ScreenGuide.DesktopHost.Tests/ScreenGuide.DesktopHost.Tests.csproj" />
   <Project Path="tests/ScreenGuide.DesktopProduct.Tests/ScreenGuide.DesktopProduct.Tests.csproj" />
   <Project Path="tests/ScreenGuide.Skills.Windows.Tests/ScreenGuide.Skills.Windows.Tests.csproj" />
