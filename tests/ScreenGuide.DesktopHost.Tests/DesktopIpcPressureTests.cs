@@ -263,7 +263,7 @@ public sealed class DesktopIpcPressureTests(ITestOutputHelper output)
             var batch = Enumerable.Range(offset, count)
                 .Select(index => index % 2 == 0
                     ? RunCancelledWaitAsync(
-                        loadClient,
+                        environment.Options.PipeName,
                         knownChangeVersion,
                         pressureLifetime.Token)
                     : RunShortWaitAsync(
@@ -456,37 +456,79 @@ public sealed class DesktopIpcPressureTests(ITestOutputHelper output)
     }
 
     private static async Task<WaitPressureOutcome> RunCancelledWaitAsync(
-        IDesktopApiClient client,
+        string pipeName,
         long knownVersion,
         CancellationToken pressureCancellation)
     {
-        using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(
-            pressureCancellation);
-        cancellation.CancelAfter(TimeSpan.FromMilliseconds(15));
+        await using var pipe = new NamedPipeClientStream(
+            ".",
+            pipeName,
+            PipeDirection.InOut,
+            PipeOptions.Asynchronous,
+            TokenImpersonationLevel.Identification);
         try
         {
-            _ = await client.WaitForSessionUpdateAsync(
-                knownVersion,
-                waitMilliseconds: 1_000,
-                cancellation.Token);
-            return new WaitPressureOutcome("UnexpectedCompletion");
+            await pipe.ConnectAsync(3_000, pressureCancellation);
+            var requestId = Guid.NewGuid().ToString("N");
+            await DesktopIpcFraming.WriteAsync(
+                pipe,
+                new DesktopApiRequest(
+                    requestId,
+                    DesktopApiMethods.WaitForSessionUpdate,
+                    DesktopProtocolJson.ToElement(
+                        new WaitForSessionUpdateRequestDto(
+                            knownVersion,
+                            WaitMilliseconds: 1_000))),
+                pressureCancellation);
+
+            using var readCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+                pressureCancellation);
+            var responseTask = DesktopIpcFraming.ReadAsync<DesktopApiResponse>(
+                pipe,
+                readCancellation.Token);
+            readCancellation.Cancel();
+            try
+            {
+                var response = await responseTask;
+                if (!string.Equals(response.RequestId, requestId, StringComparison.Ordinal))
+                {
+                    return new WaitPressureOutcome("Fault", "MismatchedRequestId");
+                }
+
+                if (response.Success)
+                {
+                    return new WaitPressureOutcome("UnexpectedCompletion");
+                }
+
+                return response.Error?.Code == "ipc_busy"
+                    ? new WaitPressureOutcome("BusyRejected")
+                    : new WaitPressureOutcome(
+                        "ApiFailure",
+                        response.Error?.Code ?? "unknown");
+            }
+            catch (OperationCanceledException exception)
+                when (readCancellation.IsCancellationRequested)
+            {
+                if (exception.CancellationToken != readCancellation.Token)
+                {
+                    return new WaitPressureOutcome("Fault", "UnexpectedCancellationToken");
+                }
+
+                return new WaitPressureOutcome(
+                    pressureCancellation.IsCancellationRequested
+                        ? "PressureCancelled"
+                        : "Cancelled");
+            }
         }
-        catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
+        catch (OperationCanceledException) when (pressureCancellation.IsCancellationRequested)
         {
-            return new WaitPressureOutcome(
-                pressureCancellation.IsCancellationRequested
-                    ? "PressureCancelled"
-                    : "Cancelled");
-        }
-        catch (DesktopApiException exception) when (exception.Error.Code == "ipc_busy")
-        {
-            return new WaitPressureOutcome("BusyRejected");
-        }
-        catch (DesktopApiException exception)
-        {
-            return new WaitPressureOutcome("ApiFailure", exception.Error.Code);
+            return new WaitPressureOutcome("PressureCancelled");
         }
         catch (IOException exception)
+        {
+            return new WaitPressureOutcome("TransportRejected", exception.GetType().Name);
+        }
+        catch (TimeoutException exception)
         {
             return new WaitPressureOutcome("TransportRejected", exception.GetType().Name);
         }
@@ -522,6 +564,10 @@ public sealed class DesktopIpcPressureTests(ITestOutputHelper output)
             return new WaitPressureOutcome("ApiFailure", exception.Error.Code);
         }
         catch (IOException exception)
+        {
+            return new WaitPressureOutcome("TransportRejected", exception.GetType().Name);
+        }
+        catch (TimeoutException exception)
         {
             return new WaitPressureOutcome("TransportRejected", exception.GetType().Name);
         }
