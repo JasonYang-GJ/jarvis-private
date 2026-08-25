@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using System.Text.Json;
 using ScreenGuide.Core.Tasking;
 using ScreenGuide.Core.Sessions;
 using Microsoft.Data.Sqlite;
@@ -9,6 +11,71 @@ namespace ScreenGuide.Tasking.Tests;
 
 public sealed class SqliteTaskStoreTests
 {
+    [Fact]
+    public async Task ExactAnnotatedStage1SourceBuildsDedicatedCompatibilityRunner()
+    {
+        var evidence = await RunStage1CompatibilityScenarioAsync("Identity");
+
+        Assert.True(evidence.GetProperty("success").GetBoolean());
+        Assert.True(evidence.GetProperty("tagObjectVerified").GetBoolean());
+        Assert.True(evidence.GetProperty("sourceCommitVerified").GetBoolean());
+        Assert.True(evidence.GetProperty("stage1RunnerBuilt").GetBoolean());
+        Assert.Equal(7, evidence.GetProperty("stage1SchemaVersion").GetInt32());
+        Assert.Equal(8, evidence.GetProperty("currentSchemaVersion").GetInt32());
+    }
+
+    [Fact]
+    public async Task ExactStage1ReadsThePreV8BackupAfterTheCurrentStoreMigratesItsV7Database()
+    {
+        var evidence = await RunStage1CompatibilityScenarioAsync("NormalMigration");
+
+        Assert.True(evidence.GetProperty("success").GetBoolean());
+        Assert.Equal(8, evidence.GetProperty("mainSchemaVersion").GetInt32());
+        Assert.Equal(7, evidence.GetProperty("backupSchemaVersion").GetInt32());
+        Assert.True(evidence.GetProperty("uniqueBackup").GetBoolean());
+        Assert.True(evidence.GetProperty("mainIntegrityOk").GetBoolean());
+        Assert.True(evidence.GetProperty("backupIntegrityOk").GetBoolean());
+        Assert.True(evidence.GetProperty("mainCanaryReadable").GetBoolean());
+        Assert.True(evidence.GetProperty("backupCanaryReadableByExactStage1").GetBoolean());
+        Assert.True(evidence.GetProperty("historicalFrozenRouteNull").GetBoolean());
+        Assert.True(evidence.GetProperty("v8ObjectsOnlyInMain").GetBoolean());
+    }
+
+    [Fact]
+    public async Task FailedVersion8MigrationRollsBackAtomicallyAndKeepsItsPreV8BackupReadable()
+    {
+        var evidence = await RunStage1CompatibilityScenarioAsync("FailureRollback");
+
+        Assert.True(evidence.GetProperty("success").GetBoolean());
+        Assert.True(evidence.GetProperty("migrationFailed").GetBoolean());
+        Assert.Equal(7, evidence.GetProperty("mainSchemaVersion").GetInt32());
+        Assert.Equal(7, evidence.GetProperty("backupSchemaVersion").GetInt32());
+        Assert.True(evidence.GetProperty("schemaFingerprintUnchanged").GetBoolean());
+        Assert.True(evidence.GetProperty("noPartialFrozenRouteColumns").GetBoolean());
+        Assert.True(evidence.GetProperty("noPartialVersion8Indexes").GetBoolean());
+        Assert.True(evidence.GetProperty("preexistingConflictPreserved").GetBoolean());
+        Assert.True(evidence.GetProperty("mainIntegrityOk").GetBoolean());
+        Assert.True(evidence.GetProperty("backupIntegrityOk").GetBoolean());
+        Assert.True(evidence.GetProperty("mainCanaryReadableByExactStage1").GetBoolean());
+        Assert.True(evidence.GetProperty("backupCanaryReadableByExactStage1").GetBoolean());
+    }
+
+    [Fact]
+    public async Task ExactStage1RejectsAnIsolatedV8CopyWithoutChangingItsBytesOrLogicalState()
+    {
+        var evidence = await RunStage1CompatibilityScenarioAsync("RejectV8");
+
+        Assert.True(evidence.GetProperty("success").GetBoolean());
+        Assert.True(evidence.GetProperty("stage1RejectedV8").GetBoolean());
+        Assert.Equal(8, evidence.GetProperty("schemaVersion").GetInt32());
+        Assert.True(evidence.GetProperty("databaseHashUnchanged").GetBoolean());
+        Assert.True(evidence.GetProperty("schemaFingerprintUnchanged").GetBoolean());
+        Assert.True(evidence.GetProperty("canaryUnchanged").GetBoolean());
+        Assert.True(evidence.GetProperty("hostNotStarted").GetBoolean());
+        Assert.True(evidence.GetProperty("noTurnReplay").GetBoolean());
+        Assert.True(evidence.GetProperty("noInPlaceDowngrade").GetBoolean());
+    }
+
     [Fact]
     public async Task FreshDatabaseUsesV02SchemaAndCreatesExplicitResourceScope()
     {
@@ -821,6 +888,71 @@ public sealed class SqliteTaskStoreTests
         }
 
         return columns.ToArray();
+    }
+
+    private static async Task<JsonElement> RunStage1CompatibilityScenarioAsync(string scenario)
+    {
+        var repositoryRoot = FindRepositoryRoot();
+        var scriptPath = Path.Combine(
+            repositoryRoot,
+            "scripts",
+            "test-stage1-pre-v8-rollback.ps1");
+        Assert.True(
+            File.Exists(scriptPath),
+            "尚未证明精确 Stage1 能读取 pre-v8 备份并拒绝 v8：验证脚本入口不存在。");
+
+        using var process = new Process
+        {
+            StartInfo = new ProcessStartInfo
+            {
+                FileName = "pwsh",
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                CreateNoWindow = true
+            }
+        };
+        process.StartInfo.ArgumentList.Add("-NoLogo");
+        process.StartInfo.ArgumentList.Add("-NoProfile");
+        process.StartInfo.ArgumentList.Add("-File");
+        process.StartInfo.ArgumentList.Add(scriptPath);
+        process.StartInfo.ArgumentList.Add("-RepositoryRoot");
+        process.StartInfo.ArgumentList.Add(repositoryRoot);
+        process.StartInfo.ArgumentList.Add("-Scenario");
+        process.StartInfo.ArgumentList.Add(scenario);
+        Assert.True(process.Start(), "无法启动 Stage1 数据库兼容验证脚本。");
+        var standardOutput = process.StandardOutput.ReadToEndAsync();
+        var standardError = process.StandardError.ReadToEndAsync();
+        await process.WaitForExitAsync().WaitAsync(TimeSpan.FromMinutes(3));
+        var output = await standardOutput;
+        _ = await standardError;
+        var resultLine = output
+            .Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries)
+            .SingleOrDefault(line => line.StartsWith(
+                "STAGE1_PRE_V8_RESULT ",
+                StringComparison.Ordinal));
+        Assert.False(
+            string.IsNullOrWhiteSpace(resultLine),
+            "精确 Stage1 数据库兼容验证没有返回脱敏结果摘要。");
+        using var document = JsonDocument.Parse(
+            resultLine["STAGE1_PRE_V8_RESULT ".Length..]);
+        var result = document.RootElement.Clone();
+        Assert.True(
+            process.ExitCode == 0,
+            $"精确 Stage1 数据库兼容验证失败：{result.GetProperty("errorCode").GetString()}。");
+        return result;
+    }
+
+    private static string FindRepositoryRoot()
+    {
+        var current = new DirectoryInfo(AppContext.BaseDirectory);
+        while (current is not null && !File.Exists(Path.Combine(current.FullName, "ScreenGuide.slnx")))
+        {
+            current = current.Parent;
+        }
+
+        return current?.FullName
+               ?? throw new DirectoryNotFoundException("找不到仓库根目录。");
     }
 
     private static (AgentRunRecord Run, AgentAttemptRecord Attempt) NewAgentAttempt(
