@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using System.Text;
 using Microsoft.Extensions.DependencyInjection;
 using ScreenGuide.Core.Conversations;
 using ScreenGuide.DesktopProtocol;
@@ -208,41 +210,99 @@ public sealed class SessionCoordinatorConflictTests
         var (_, project, _) = await environment.SeedProjectsAsync();
         IDesktopApiClient client = new DesktopApiClient(environment.Options.PipeName);
         var session = await client.StartNewSessionAsync("编程任务联动取消");
-        var marker = Path.Combine(environment.RootDirectory, $"cancel-marker-{Guid.NewGuid():N}.txt");
-        var submitted = await client.SubmitSessionInputAsync(new SessionInputRequestDto(
-            $"帮我修改这个项目 TEST_LONG_RUNNING\nMARKER={marker}",
-            "Text",
-            "cancel-real-programming-task",
-            session.SessionId));
-        await WaitForTurnPhaseAsync(client, submitted.TurnId, "WaitingForProject");
-        await client.ProvideSessionProjectAsync(session.SessionId, submitted.TurnId, project.Id);
-        var confirmed = await client.ConfirmSessionTurnAsync(
-            session.SessionId,
-            submitted.TurnId,
-            confirmed: true);
-        var taskId = Assert.IsType<Guid>(
-            confirmed.Turns.Single(turn => turn.Id == submitted.TurnId).TaskId);
-        await WaitForTaskStatusAsync(client, taskId, "Running");
+        var readinessDirectory = Path.Combine(
+            environment.RootDirectory,
+            $"process-tree-readiness-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(readinessDirectory);
+        var rootReadinessPath = Path.Combine(readinessDirectory, "root.ready");
+        var childReadinessPath = Path.Combine(readinessDirectory, "child.ready");
+        var rootReadinessValue = Convert.ToBase64String(Encoding.UTF8.GetBytes(rootReadinessPath));
+        var childReadinessValue = Convert.ToBase64String(Encoding.UTF8.GetBytes(childReadinessPath));
+        Process? rootProcess = null;
+        Process? childProcess = null;
 
-        var cancelledSession = await client.CancelSessionTurnAsync(
-            session.SessionId,
-            submitted.TurnId);
-        var cancelledTask = await WaitForTaskStatusAsync(
-            client,
-            taskId,
-            "Cancelled",
-            TimeSpan.FromSeconds(8));
-        await Task.Delay(TimeSpan.FromSeconds(5));
-        var childProcessWroteAfterCancellation = File.Exists(marker);
-        await host.StopAsync();
+        try
+        {
+            var submitted = await client.SubmitSessionInputAsync(new SessionInputRequestDto(
+                $"帮我修改这个项目 TEST_LONG_RUNNING TEST_PROCESS_TREE_BARRIER " +
+                $"ROOT_READY_BASE64={rootReadinessValue} " +
+                $"CHILD_READY_BASE64={childReadinessValue}",
+                "Text",
+                "cancel-real-programming-task",
+                session.SessionId));
+            await WaitForTurnPhaseAsync(client, submitted.TurnId, "WaitingForProject");
+            await client.ProvideSessionProjectAsync(session.SessionId, submitted.TurnId, project.Id);
+            var confirmed = await client.ConfirmSessionTurnAsync(
+                session.SessionId,
+                submitted.TurnId,
+                confirmed: true);
+            var taskId = Assert.IsType<Guid>(
+                confirmed.Turns.Single(turn => turn.Id == submitted.TurnId).TaskId);
+            var runningDeadline = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(5);
+            rootProcess = await WaitForReadyProcessAsync(
+                rootReadinessPath,
+                "Root",
+                client,
+                taskId,
+                rootReadinessPath,
+                childReadinessPath,
+                runningDeadline);
+            childProcess = await WaitForReadyProcessAsync(
+                childReadinessPath,
+                "Child",
+                client,
+                taskId,
+                rootReadinessPath,
+                childReadinessPath,
+                runningDeadline);
+            var runningTask = await WaitForTaskStatusBeforeTerminalAsync(
+                client,
+                taskId,
+                "Running",
+                rootProcess.Id,
+                childProcess.Id,
+                rootReadinessPath,
+                childReadinessPath,
+                runningDeadline);
 
-        Assert.Equal(
-            "Cancelled",
-            cancelledSession.Turns.Single(turn => turn.Id == submitted.TurnId).Phase);
-        Assert.Equal("Cancelled", cancelledTask.Summary.Status);
-        Assert.False(
-            childProcessWroteAfterCancellation,
-            "取消 Session 后，真实编程子进程仍存活并写入了标记文件。");
+            var cancelledSession = await client.CancelSessionTurnAsync(
+                session.SessionId,
+                submitted.TurnId);
+            var rootExit = WaitForProcessExitAsync(
+                rootProcess,
+                "Root",
+                TimeSpan.FromSeconds(8));
+            var childExit = WaitForProcessExitAsync(
+                childProcess,
+                "Child",
+                TimeSpan.FromSeconds(8));
+            var cancelledTaskStatus = WaitForTaskStatusAsync(
+                client,
+                taskId,
+                "Cancelled",
+                TimeSpan.FromSeconds(8));
+            await Task.WhenAll(rootExit, childExit, cancelledTaskStatus);
+            var cancelledTask = await cancelledTaskStatus;
+            await host.StopAsync();
+
+            Assert.Equal("Running", runningTask.Summary.Status);
+            Assert.Equal(
+                "Cancelled",
+                cancelledSession.Turns.Single(turn => turn.Id == submitted.TurnId).Phase);
+            Assert.Equal("Cancelled", cancelledTask.Summary.Status);
+            Assert.True(rootProcess.HasExited, "取消 Session 后，Fake Codex 根进程仍在运行。");
+            Assert.True(childProcess.HasExited, "取消 Session 后，Fake Codex 子进程仍在运行。");
+        }
+        finally
+        {
+            rootProcess?.Dispose();
+            childProcess?.Dispose();
+            await host.StopAsync();
+            if (Directory.Exists(readinessDirectory))
+            {
+                Directory.Delete(readinessDirectory, recursive: true);
+            }
+        }
     }
 
     [Fact]
@@ -420,6 +480,123 @@ public sealed class SessionCoordinatorConflictTests
 
         throw new TimeoutException($"编程任务没有进入 {expectedStatus}。");
     }
+
+    private static async Task<Process> WaitForReadyProcessAsync(
+        string readinessPath,
+        string processRole,
+        IDesktopApiClient client,
+        Guid taskId,
+        string rootReadinessPath,
+        string childReadinessPath,
+        DateTimeOffset deadline)
+    {
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            if (File.Exists(readinessPath))
+            {
+                var value = await File.ReadAllTextAsync(readinessPath);
+                if (!int.TryParse(value, out var processId) || processId <= 0)
+                {
+                    throw new InvalidOperationException(
+                        $"{processRole} readiness PID 无效；RootReady={File.Exists(rootReadinessPath)}；" +
+                        $"ChildReady={File.Exists(childReadinessPath)}。");
+                }
+
+                var process = Process.GetProcessById(processId);
+                _ = process.Handle;
+                if (process.HasExited
+                    || !string.Equals(
+                        process.ProcessName,
+                        "ScreenGuide.FakeCodexCli",
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    process.Dispose();
+                    throw new InvalidOperationException(
+                        $"{processRole} readiness 没有指向活动 Fake Codex 进程；PID={processId}；" +
+                        $"RootReady={File.Exists(rootReadinessPath)}；" +
+                        $"ChildReady={File.Exists(childReadinessPath)}。");
+                }
+
+                return process;
+            }
+
+            var details = await client.GetTaskAsync(taskId);
+            if (details is not null && IsTerminalTaskStatus(details.Summary.Status))
+            {
+                throw new InvalidOperationException(
+                    $"编程任务在 readiness 建立前已经终止；Status={details.Summary.Status}；" +
+                    "ErrorCode=not_exposed；" +
+                    $"RootReady={File.Exists(rootReadinessPath)}；" +
+                    $"ChildReady={File.Exists(childReadinessPath)}。");
+            }
+
+            await Task.Delay(20);
+        }
+
+        var lastDetails = await client.GetTaskAsync(taskId);
+        throw new TimeoutException(
+            $"等待 {processRole} readiness 超时；Status={lastDetails?.Summary.Status ?? "Missing"}；" +
+            "ErrorCode=not_exposed；" +
+            $"RootReady={File.Exists(rootReadinessPath)}；" +
+            $"ChildReady={File.Exists(childReadinessPath)}。");
+    }
+
+    private static async Task<TaskDetailsDto> WaitForTaskStatusBeforeTerminalAsync(
+        IDesktopApiClient client,
+        Guid taskId,
+        string expectedStatus,
+        int rootProcessId,
+        int childProcessId,
+        string rootReadinessPath,
+        string childReadinessPath,
+        DateTimeOffset deadline)
+    {
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            var details = await client.GetTaskAsync(taskId);
+            if (details?.Summary.Status == expectedStatus)
+            {
+                return details;
+            }
+
+            if (details is not null && IsTerminalTaskStatus(details.Summary.Status))
+            {
+                throw new InvalidOperationException(
+                    $"编程任务在进入 {expectedStatus} 前已经终止；Status={details.Summary.Status}；" +
+                    "ErrorCode=not_exposed；" +
+                    $"RootPid={rootProcessId}；ChildPid={childProcessId}；" +
+                    $"RootReady={File.Exists(rootReadinessPath)}；" +
+                    $"ChildReady={File.Exists(childReadinessPath)}。");
+            }
+
+            await Task.Delay(20);
+        }
+
+        throw new TimeoutException(
+            $"编程任务没有进入 {expectedStatus}；RootPid={rootProcessId}；ChildPid={childProcessId}；" +
+            $"RootReady={File.Exists(rootReadinessPath)}；" +
+            $"ChildReady={File.Exists(childReadinessPath)}。");
+    }
+
+    private static async Task WaitForProcessExitAsync(
+        Process process,
+        string processRole,
+        TimeSpan timeout)
+    {
+        try
+        {
+            await process.WaitForExitAsync().WaitAsync(timeout);
+        }
+        catch (TimeoutException exception)
+        {
+            throw new TimeoutException(
+                $"取消 Session 后等待 {processRole} 进程退出超时；PID={process.Id}。",
+                exception);
+        }
+    }
+
+    private static bool IsTerminalTaskStatus(string status) =>
+        status is "Completed" or "Failed" or "Cancelled";
 
     private sealed class ImmediateConversationProvider : IConversationProvider
     {

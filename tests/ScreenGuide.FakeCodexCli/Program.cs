@@ -29,6 +29,12 @@ public static class Program
             return 0;
         }
 
+        if (args.Length >= 2 && args[0] == "--test-child-barrier")
+        {
+            await WriteReadinessAsync(args[1]);
+            await Task.Delay(Timeout.InfiniteTimeSpan);
+        }
+
         var prompt = await Console.In.ReadToEndAsync();
         var isResume = args.Contains("resume", StringComparer.Ordinal);
         var threadId = isResume
@@ -110,17 +116,35 @@ public static class Program
 
         if (prompt.Contains("TEST_LONG_RUNNING", StringComparison.Ordinal))
         {
-            var markerPath = ReadValue(prompt, "MARKER=");
             var executable = Environment.ProcessPath
                 ?? throw new InvalidOperationException("Fake Codex executable path is unavailable.");
-            _ = Process.Start(
-                new ProcessStartInfo
-                {
-                    FileName = executable,
-                    UseShellExecute = false,
-                    CreateNoWindow = true,
-                    ArgumentList = { "--test-child", markerPath }
-                });
+            if (prompt.Contains("TEST_PROCESS_TREE_BARRIER", StringComparison.Ordinal))
+            {
+                var rootReadinessPath = ReadBase64InlineValue(prompt, "ROOT_READY_BASE64=");
+                var childReadinessPath = ReadBase64InlineValue(prompt, "CHILD_READY_BASE64=");
+                await WriteReadinessAsync(rootReadinessPath);
+                _ = Process.Start(
+                    new ProcessStartInfo
+                    {
+                        FileName = executable,
+                        UseShellExecute = false,
+                        CreateNoWindow = true,
+                        ArgumentList = { "--test-child-barrier", childReadinessPath }
+                    });
+            }
+            else
+            {
+                var markerPath = ReadValue(prompt, "MARKER=");
+                _ = Process.Start(
+                    new ProcessStartInfo
+                    {
+                        FileName = executable,
+                        UseShellExecute = false,
+                        CreateNoWindow = true,
+                        ArgumentList = { "--test-child", markerPath }
+                    });
+            }
+
             Write(new
             {
                 type = "item.started",
@@ -392,6 +416,29 @@ public static class Program
     {
         var line = prompt.Split('\n').First(value => value.StartsWith(prefix, StringComparison.Ordinal));
         return line[prefix.Length..].Trim();
+    }
+
+    private static async Task WriteReadinessAsync(string path)
+    {
+        var temporaryPath = $"{path}.{Environment.ProcessId}.tmp";
+        await File.WriteAllTextAsync(temporaryPath, Environment.ProcessId.ToString());
+        File.Move(temporaryPath, path);
+    }
+
+    private static string ReadBase64InlineValue(string prompt, string prefix)
+    {
+        var prefixIndex = prompt.IndexOf(prefix, StringComparison.Ordinal);
+        if (prefixIndex < 0)
+        {
+            throw new InvalidOperationException($"Missing test barrier value: {prefix}");
+        }
+
+        var valueStart = prefixIndex + prefix.Length;
+        var valueEnd = prompt.IndexOf(' ', valueStart);
+        var encoded = valueEnd < 0
+            ? prompt[valueStart..]
+            : prompt[valueStart..valueEnd];
+        return System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(encoded));
     }
 
     private static void Write(object value)
