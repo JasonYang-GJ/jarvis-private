@@ -19,6 +19,28 @@ public sealed record R3DeepSeekValidationBudget(
     bool NoAutomaticRetry,
     bool NoFallback);
 
+public sealed record R3DeepSeekExecutionPlan(
+    bool RunHealth,
+    bool RunOrdinaryChat,
+    bool RunStreamingSuccess,
+    bool RunStreamingCancellation,
+    int ExpectedProviderRequests)
+{
+    public static R3DeepSeekExecutionPlan Full { get; } = new(
+        RunHealth: true,
+        RunOrdinaryChat: true,
+        RunStreamingSuccess: true,
+        RunStreamingCancellation: true,
+        ExpectedProviderRequests: 4);
+
+    public static R3DeepSeekExecutionPlan CancellationOnly { get; } = new(
+        RunHealth: false,
+        RunOrdinaryChat: false,
+        RunStreamingSuccess: false,
+        RunStreamingCancellation: true,
+        ExpectedProviderRequests: 1);
+}
+
 public sealed record R3DeepSeekValidationOptions(
     bool Requested,
     bool IsValid,
@@ -26,20 +48,39 @@ public sealed record R3DeepSeekValidationOptions(
     R3DeepSeekValidationBudget? Budget)
 {
     private const string ModeArgument = "--stage2-r3-deepseek";
+    private const string CancellationOnlyArgument = "--cancellation-only";
+
+    public bool CancellationOnly { get; init; }
+
+    public R3DeepSeekExecutionPlan ExecutionPlan => CancellationOnly
+        ? R3DeepSeekExecutionPlan.CancellationOnly
+        : R3DeepSeekExecutionPlan.Full;
 
     public static R3DeepSeekValidationOptions Parse(IReadOnlyList<string> arguments)
     {
         ArgumentNullException.ThrowIfNull(arguments);
-        var requested = arguments.Any(argument =>
-            string.Equals(argument, ModeArgument, StringComparison.OrdinalIgnoreCase));
+        var fullModeRequested = HasFlag(arguments, ModeArgument);
+        var cancellationOnly = HasFlag(arguments, CancellationOnlyArgument);
+        var requested = fullModeRequested || cancellationOnly;
         if (!requested)
         {
             return Invalid(requested: false, "real_provider_disabled");
         }
 
+        if (!fullModeRequested)
+        {
+            return Invalid(
+                requested: true,
+                "real_provider_mode_missing",
+                cancellationOnly: true);
+        }
+
         if (!HasFlag(arguments, "--real-provider"))
         {
-            return Invalid(requested: true, "real_provider_approval_missing");
+            return Invalid(
+                requested: true,
+                "real_provider_approval_missing",
+                cancellationOnly);
         }
 
         if (!HasFlag(arguments, "--no-automatic-retry")
@@ -48,17 +89,24 @@ public sealed record R3DeepSeekValidationOptions(
             || !TryReadInt(arguments, "--max-output-tokens=", out var maxOutputTokens)
             || !TryReadInt(arguments, "--total-timeout-seconds=", out var timeoutSeconds))
         {
-            return Invalid(requested: true, "real_provider_budget_missing");
+            return Invalid(
+                requested: true,
+                "real_provider_budget_missing",
+                cancellationOnly);
         }
 
-        if (maxRequests is < R3DeepSeekValidationLimits.MinimumRequests
+        if ((cancellationOnly && maxRequests != 1)
+            || maxRequests is < R3DeepSeekValidationLimits.MinimumRequests
                 or > R3DeepSeekValidationLimits.MaximumRequests
             || maxOutputTokens is < R3DeepSeekValidationLimits.MinimumOutputTokens
                 or > R3DeepSeekValidationLimits.MaximumOutputTokens
             || timeoutSeconds is < R3DeepSeekValidationLimits.MinimumTimeoutSeconds
                 or > R3DeepSeekValidationLimits.MaximumTimeoutSeconds)
         {
-            return Invalid(requested: true, "real_provider_budget_out_of_range");
+            return Invalid(
+                requested: true,
+                "real_provider_budget_out_of_range",
+                cancellationOnly);
         }
 
         return new R3DeepSeekValidationOptions(
@@ -70,11 +118,20 @@ public sealed record R3DeepSeekValidationOptions(
                 maxOutputTokens,
                 TimeSpan.FromSeconds(timeoutSeconds),
                 NoAutomaticRetry: true,
-                NoFallback: true));
+                NoFallback: true))
+        {
+            CancellationOnly = cancellationOnly
+        };
     }
 
-    private static R3DeepSeekValidationOptions Invalid(bool requested, string errorCode) =>
-        new(requested, IsValid: false, errorCode, Budget: null);
+    private static R3DeepSeekValidationOptions Invalid(
+        bool requested,
+        string errorCode,
+        bool cancellationOnly = false) =>
+        new(requested, IsValid: false, errorCode, Budget: null)
+        {
+            CancellationOnly = cancellationOnly
+        };
 
     private static bool HasFlag(IReadOnlyList<string> arguments, string expected) =>
         arguments.Any(argument => string.Equals(argument, expected, StringComparison.OrdinalIgnoreCase));
@@ -145,7 +202,18 @@ public sealed record R3DeepSeekValidationResult(
     bool NoAutomaticRetry,
     bool NoFallback,
     long ElapsedMilliseconds,
-    string? ErrorCode);
+    string? ErrorCode)
+{
+    public string Mode { get; init; } = "full";
+
+    public bool HealthExecuted { get; init; } = true;
+
+    public bool OrdinaryChatExecuted { get; init; } = true;
+
+    public bool StreamingSuccessExecuted { get; init; } = true;
+
+    public bool StreamingCancellationExecuted { get; init; } = true;
+}
 
 internal sealed record R3DeepSeekCancellationAuditEvidence(
     string TerminalState,

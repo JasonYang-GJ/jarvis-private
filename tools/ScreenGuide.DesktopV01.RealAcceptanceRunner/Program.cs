@@ -163,7 +163,7 @@ try
                 api,
                 r3Host!,
                 r3Provider!,
-                r3Validation.Budget!);
+                r3Validation);
             Console.WriteLine(R3ResultPrefix + JsonSerializer.Serialize(result));
             return result.Passed ? 0 : 1;
         }
@@ -458,8 +458,11 @@ static async Task<R3DeepSeekValidationResult> RunStage2R3DeepSeekPreparationAsyn
     IDesktopApiClient api,
     IHost host,
     R3BudgetedChatModelProvider provider,
-    R3DeepSeekValidationBudget budget)
+    R3DeepSeekValidationOptions options)
 {
+    var budget = options.Budget
+                 ?? throw new R3ValidationFailureException("real_provider_budget_missing");
+    var plan = options.ExecutionPlan;
     using var totalTimeout = new CancellationTokenSource(budget.TotalTimeout);
     var cancellationToken = totalTimeout.Token;
     var stopwatch = Stopwatch.StartNew();
@@ -469,10 +472,14 @@ static async Task<R3DeepSeekValidationResult> RunStage2R3DeepSeekPreparationAsyn
 
     var settings = await WaitForDeepSeekConfigurationOnlyAsync(api, cancellationToken);
     var modelId = settings.CurrentChatRoute.ModelId;
-    var health = await api.CheckAiProviderHealthAsync(new ProviderIdRequestDto("deepseek"))
-        .WaitAsync(cancellationToken);
-    var healthPassed = health.State == "Healthy";
-    RequireR3(healthPassed, "r3_health_failed");
+    var healthPassed = false;
+    if (plan.RunHealth)
+    {
+        var health = await api.CheckAiProviderHealthAsync(new ProviderIdRequestDto("deepseek"))
+            .WaitAsync(cancellationToken);
+        healthPassed = health.State == "Healthy";
+        RequireR3(healthPassed, "r3_health_failed");
+    }
 
     var invocations = host.Services.GetRequiredService<IAiInvocationStore>();
     var sessions = host.Services.GetRequiredService<ISessionStore>();
@@ -480,56 +487,71 @@ static async Task<R3DeepSeekValidationResult> RunStage2R3DeepSeekPreparationAsyn
     var session = await api.StartNewSessionAsync("R3 DeepSeek 隔离验收")
         .WaitAsync(cancellationToken);
 
-    var ordinary = await api.SubmitSessionInputAsync(new SessionInputRequestDto(
-            "R3 ordinary chat canary. Reply only with R3-CHAT-OK.",
-            "Text",
-            $"r3-chat-{Guid.NewGuid():N}",
-            session.SessionId))
-        .WaitAsync(cancellationToken);
-    var ordinarySnapshot = await WaitForSessionTurnAsync(
-            api,
-            ordinary.TurnId,
-            ["Completed"],
-            budget.TotalTimeout)
-        .WaitAsync(cancellationToken);
-    var ordinaryTurn = ordinarySnapshot.Turns.Single(item => item.Id == ordinary.TurnId);
-    var ordinaryInvocation = AssertR3ConversationInvocation(
-        await invocations.GetForSessionTurnAsync(ordinary.TurnId, cancellationToken),
-        provider,
-        ordinaryTurn,
-        modelId,
-        AiInvocationStatus.Succeeded,
-        requireProviderMetadata: true);
-    var ordinaryChatPassed = ordinaryTurn.Phase == "Completed"
+    SessionTurnCommandResultDto? ordinary = null;
+    UnifiedSessionTurnDto? ordinaryTurn = null;
+    AiInvocationRecord? ordinaryInvocation = null;
+    var ordinaryChatPassed = false;
+    if (plan.RunOrdinaryChat)
+    {
+        ordinary = await api.SubmitSessionInputAsync(new SessionInputRequestDto(
+                "R3 ordinary chat canary. Reply only with R3-CHAT-OK.",
+                "Text",
+                $"r3-chat-{Guid.NewGuid():N}",
+                session.SessionId))
+            .WaitAsync(cancellationToken);
+        var ordinarySnapshot = await WaitForSessionTurnAsync(
+                api,
+                ordinary.TurnId,
+                ["Completed"],
+                budget.TotalTimeout)
+            .WaitAsync(cancellationToken);
+        ordinaryTurn = ordinarySnapshot.Turns.Single(item => item.Id == ordinary.TurnId);
+        ordinaryInvocation = AssertR3ConversationInvocation(
+            await invocations.GetForSessionTurnAsync(ordinary.TurnId, cancellationToken),
+            provider,
+            ordinaryTurn,
+            modelId,
+            AiInvocationStatus.Succeeded,
+            requireProviderMetadata: true);
+        ordinaryChatPassed = ordinaryTurn.Phase == "Completed"
                              && ordinaryInvocation.Status == AiInvocationStatus.Succeeded;
-    RequireR3(ordinaryChatPassed, "r3_ordinary_chat_failed");
+        RequireR3(ordinaryChatPassed, "r3_ordinary_chat_failed");
+    }
 
-    var streamingObservation = provider.PrepareNextCall(R3ValidationCallMode.Streaming);
-    var streaming = await api.SubmitSessionInputAsync(new SessionInputRequestDto(
-            "R3 streaming canary. Write the numbers 1 through 20, one per line.",
-            "Text",
-            $"r3-stream-{Guid.NewGuid():N}",
-            session.SessionId))
-        .WaitAsync(cancellationToken);
-    var streamingSnapshot = await WaitForSessionTurnAsync(
-            api,
-            streaming.TurnId,
-            ["Completed"],
-            budget.TotalTimeout)
-        .WaitAsync(cancellationToken);
-    await streamingObservation.Terminal.WaitAsync(cancellationToken);
-    var streamingTurn = streamingSnapshot.Turns.Single(item => item.Id == streaming.TurnId);
-    _ = AssertR3ConversationInvocation(
-        await invocations.GetForSessionTurnAsync(streaming.TurnId, cancellationToken),
-        provider,
-        streamingTurn,
-        modelId,
-        AiInvocationStatus.Succeeded,
-        requireProviderMetadata: true);
-    var streamingPassed = streamingObservation.DeltaCount >= 2
+    var streamingDeltaCount = 0;
+    var streamingPassed = false;
+    if (plan.RunStreamingSuccess)
+    {
+        var streamingObservation = provider.PrepareNextCall(R3ValidationCallMode.Streaming);
+        var streaming = await api.SubmitSessionInputAsync(new SessionInputRequestDto(
+                "R3 streaming canary. Write the numbers 1 through 20, one per line.",
+                "Text",
+                $"r3-stream-{Guid.NewGuid():N}",
+                session.SessionId))
+            .WaitAsync(cancellationToken);
+        var streamingSnapshot = await WaitForSessionTurnAsync(
+                api,
+                streaming.TurnId,
+                ["Completed"],
+                budget.TotalTimeout)
+            .WaitAsync(cancellationToken);
+        await streamingObservation.Terminal.WaitAsync(cancellationToken);
+        var streamingTurn = streamingSnapshot.Turns.Single(item => item.Id == streaming.TurnId);
+        _ = AssertR3ConversationInvocation(
+            await invocations.GetForSessionTurnAsync(streaming.TurnId, cancellationToken),
+            provider,
+            streamingTurn,
+            modelId,
+            AiInvocationStatus.Succeeded,
+            requireProviderMetadata: true);
+        streamingDeltaCount = streamingObservation.DeltaCount;
+        streamingPassed = streamingDeltaCount >= 2
                           && streamingObservation.FinalUpdateObserved
                           && streamingObservation.ResponseReturned;
-    RequireR3(streamingPassed, "r3_streaming_failed");
+        RequireR3(streamingPassed, "r3_streaming_failed");
+    }
+
+    RequireR3(plan.RunStreamingCancellation, "r3_cancellation_not_planned");
 
     const string cancellationCanary = "R3-CANCEL-LATE-CANARY";
     var cancellationObservation = provider.PrepareNextCall(
@@ -591,7 +613,7 @@ static async Task<R3DeepSeekValidationResult> RunStage2R3DeepSeekPreparationAsyn
             budget.TotalTimeout)
         .WaitAsync(cancellationToken);
     var cancelledTurn = cancelledSnapshot.Turns.Single(item => item.Id == cancelling.TurnId);
-    _ = AssertR3ConversationInvocation(
+    var cancelledInvocation = AssertR3ConversationInvocation(
         await invocations.GetForSessionTurnAsync(cancelling.TurnId, cancellationToken),
         provider,
         cancelledTurn,
@@ -611,19 +633,31 @@ static async Task<R3DeepSeekValidationResult> RunStage2R3DeepSeekPreparationAsyn
     var cancellationPassed = lateDeltaRejected && lateFinalRejected && lateSuccessRejected;
     RequireR3(cancellationPassed, "r3_cancellation_failed");
 
-    var auditPassed = ordinaryInvocation.ProviderId == DeepSeekChatModelProvider.ProviderId
-                      && ordinaryInvocation.ModelId == modelId
-                      && ordinaryInvocation.DataDestination == DeepSeekChatModelProvider.DataDestination
-                      && !string.IsNullOrWhiteSpace(ordinaryInvocation.PromptId)
-                      && !string.IsNullOrWhiteSpace(ordinaryInvocation.PromptVersion)
-                      && !string.IsNullOrWhiteSpace(ordinaryInvocation.PromptContentHash)
-                      && ordinaryInvocation.SessionTurnId == ordinary.TurnId
-                      && ordinaryInvocation.ConversationTurnId == ordinaryTurn.ConversationTurnId
-                      && ordinaryInvocation.Usage is not null
-                      && !string.IsNullOrWhiteSpace(ordinaryInvocation.ProviderRequestId)
-                      && ordinaryInvocation.CompletedAtUtc is not null;
+    var auditPassed = plan.RunOrdinaryChat
+        ? ordinaryInvocation is not null
+          && ordinary is not null
+          && ordinaryTurn is not null
+          && ordinaryInvocation.ProviderId == DeepSeekChatModelProvider.ProviderId
+          && ordinaryInvocation.ModelId == modelId
+          && ordinaryInvocation.DataDestination == DeepSeekChatModelProvider.DataDestination
+          && !string.IsNullOrWhiteSpace(ordinaryInvocation.PromptId)
+          && !string.IsNullOrWhiteSpace(ordinaryInvocation.PromptVersion)
+          && !string.IsNullOrWhiteSpace(ordinaryInvocation.PromptContentHash)
+          && ordinaryInvocation.SessionTurnId == ordinary.TurnId
+          && ordinaryInvocation.ConversationTurnId == ordinaryTurn.ConversationTurnId
+          && ordinaryInvocation.Usage is not null
+          && !string.IsNullOrWhiteSpace(ordinaryInvocation.ProviderRequestId)
+          && ordinaryInvocation.CompletedAtUtc is not null
+        : R3DeepSeekCancellationAuditGate.IsSatisfied(new(
+            cancelledInvocation.Status.ToString(),
+            cancelledInvocation.FailureCode,
+            HasUsage: cancelledInvocation.Usage is not null,
+            HasProviderRequestId: !string.IsNullOrWhiteSpace(
+                cancelledInvocation.ProviderRequestId)));
     RequireR3(auditPassed, "r3_audit_failed");
-    RequireR3(provider.RequestCount == 4, "r3_request_count_mismatch");
+    RequireR3(
+        provider.RequestCount == plan.ExpectedProviderRequests,
+        "r3_request_count_mismatch");
 
     stopwatch.Stop();
     return new R3DeepSeekValidationResult(
@@ -635,7 +669,7 @@ static async Task<R3DeepSeekValidationResult> RunStage2R3DeepSeekPreparationAsyn
         healthPassed,
         ordinaryChatPassed,
         streamingPassed,
-        streamingObservation.DeltaCount,
+        streamingDeltaCount,
         cancellationPassed,
         cancellationObservation.DeltaCount,
         lateDeltaRejected,
@@ -645,7 +679,14 @@ static async Task<R3DeepSeekValidationResult> RunStage2R3DeepSeekPreparationAsyn
         budget.NoAutomaticRetry,
         budget.NoFallback,
         stopwatch.ElapsedMilliseconds,
-        ErrorCode: null);
+        ErrorCode: null)
+    {
+        Mode = options.CancellationOnly ? "cancellation-only" : "full",
+        HealthExecuted = plan.RunHealth,
+        OrdinaryChatExecuted = plan.RunOrdinaryChat,
+        StreamingSuccessExecuted = plan.RunStreamingSuccess,
+        StreamingCancellationExecuted = plan.RunStreamingCancellation
+    };
 }
 
 static AiInvocationRecord AssertR3ConversationInvocation(

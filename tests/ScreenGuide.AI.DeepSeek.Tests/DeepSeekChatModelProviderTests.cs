@@ -888,6 +888,7 @@ public sealed class DeepSeekChatModelProviderTests
         var disabled = R3DeepSeekValidationOptions.Parse([]);
         Assert.False(disabled.Requested);
         Assert.False(disabled.IsValid);
+        Assert.False(disabled.CancellationOnly);
         Assert.Equal("real_provider_disabled", disabled.ErrorCode);
 
         var unbudgeted = R3DeepSeekValidationOptions.Parse(["--stage2-r3-deepseek"]);
@@ -917,12 +918,93 @@ public sealed class DeepSeekChatModelProviderTests
 
         Assert.True(approved.Requested);
         Assert.True(approved.IsValid);
+        Assert.False(approved.CancellationOnly);
         Assert.Null(approved.ErrorCode);
         Assert.Equal(4, approved.Budget!.MaxRequests);
         Assert.Equal(64, approved.Budget.MaxOutputTokens);
         Assert.Equal(TimeSpan.FromSeconds(120), approved.Budget.TotalTimeout);
         Assert.True(approved.Budget.NoAutomaticRetry);
         Assert.True(approved.Budget.NoFallback);
+        Assert.True(approved.ExecutionPlan.RunHealth);
+        Assert.True(approved.ExecutionPlan.RunOrdinaryChat);
+        Assert.True(approved.ExecutionPlan.RunStreamingSuccess);
+        Assert.True(approved.ExecutionPlan.RunStreamingCancellation);
+        Assert.Equal(4, approved.ExecutionPlan.ExpectedProviderRequests);
+    }
+
+    [Fact]
+    public void R3CancellationOnlyModeIsExplicitAndAcceptsOneRequestBudget()
+    {
+        var options = R3DeepSeekValidationOptions.Parse(
+        [
+            "--stage2-r3-deepseek",
+            "--cancellation-only",
+            "--real-provider",
+            "--max-requests=1",
+            "--max-output-tokens=256",
+            "--total-timeout-seconds=600",
+            "--no-automatic-retry",
+            "--no-fallback"
+        ]);
+
+        Assert.True(options.Requested);
+        Assert.True(options.IsValid);
+        Assert.True(options.CancellationOnly);
+        Assert.Null(options.ErrorCode);
+        Assert.Equal(1, options.Budget!.MaxRequests);
+        Assert.Equal(256, options.Budget.MaxOutputTokens);
+        Assert.Equal(TimeSpan.FromSeconds(600), options.Budget.TotalTimeout);
+        Assert.True(options.Budget.NoAutomaticRetry);
+        Assert.True(options.Budget.NoFallback);
+    }
+
+    [Theory]
+    [InlineData(2)]
+    [InlineData(4)]
+    public void R3CancellationOnlyModeRejectsMoreThanOneRequestBeforeExecution(
+        int maxRequests)
+    {
+        var options = R3DeepSeekValidationOptions.Parse(
+        [
+            "--stage2-r3-deepseek",
+            "--cancellation-only",
+            "--real-provider",
+            $"--max-requests={maxRequests}",
+            "--max-output-tokens=256",
+            "--total-timeout-seconds=600",
+            "--no-automatic-retry",
+            "--no-fallback"
+        ]);
+
+        Assert.True(options.Requested);
+        Assert.False(options.IsValid);
+        Assert.True(options.CancellationOnly);
+        Assert.Equal("real_provider_budget_out_of_range", options.ErrorCode);
+        Assert.Null(options.Budget);
+    }
+
+    [Fact]
+    public void R3CancellationOnlyPlanSkipsReusableChecksAndRunsOneCancellation()
+    {
+        var options = R3DeepSeekValidationOptions.Parse(
+        [
+            "--stage2-r3-deepseek",
+            "--cancellation-only",
+            "--real-provider",
+            "--max-requests=1",
+            "--max-output-tokens=128",
+            "--total-timeout-seconds=120",
+            "--no-automatic-retry",
+            "--no-fallback"
+        ]);
+
+        var plan = options.ExecutionPlan;
+
+        Assert.False(plan.RunHealth);
+        Assert.False(plan.RunOrdinaryChat);
+        Assert.False(plan.RunStreamingSuccess);
+        Assert.True(plan.RunStreamingCancellation);
+        Assert.Equal(1, plan.ExpectedProviderRequests);
     }
 
     [Theory]
@@ -1030,17 +1112,23 @@ public sealed class DeepSeekChatModelProviderTests
     }
 
     [Fact]
-    public async Task R3ValidationHarnessObservesStreamingCancellationWithoutPublishingALateFinal()
+    public async Task R3CancellationOnlyModeUsesOneInvocationAndOneCancelWithoutLateOutput()
     {
+        var options = R3DeepSeekValidationOptions.Parse(
+        [
+            "--stage2-r3-deepseek",
+            "--cancellation-only",
+            "--real-provider",
+            "--max-requests=1",
+            "--max-output-tokens=32",
+            "--total-timeout-seconds=30",
+            "--no-automatic-retry",
+            "--no-fallback"
+        ]);
         await using var inner = new CancellableStreamingChatModelProvider();
         await using var provider = new R3BudgetedChatModelProvider(
             inner,
-            new R3DeepSeekValidationBudget(
-                MaxRequests: 1,
-                MaxOutputTokens: 32,
-                TotalTimeout: TimeSpan.FromSeconds(30),
-                NoAutomaticRetry: true,
-                NoFallback: true));
+            options.Budget!);
         var turnId = Guid.NewGuid();
         var observation = provider.PrepareNextCall(R3ValidationCallMode.StreamingCancellation);
 
@@ -1055,6 +1143,11 @@ public sealed class DeepSeekChatModelProviderTests
         Assert.Equal(2, observation.DeltaCountWhenCancellationCompleted);
         Assert.False(observation.FinalUpdateObserved);
         Assert.False(observation.ResponseReturned);
+        Assert.Equal(1, provider.RequestCount);
+        Assert.Single(provider.RequestIdentities);
+        Assert.Equal(1, inner.CompleteCount);
+        Assert.Equal(0, inner.HealthCount);
+        Assert.Equal(1, inner.CancelCount);
     }
 
     [Theory]
@@ -1279,11 +1372,18 @@ public sealed class DeepSeekChatModelProviderTests
                 "DeepSeek V4 Flash",
                 ChatModelCapabilities.Streaming)]);
 
+        public int CompleteCount { get; private set; }
+
+        public int HealthCount { get; private set; }
+
+        public int CancelCount { get; private set; }
+
         public async Task<ChatModelResponse> CompleteAsync(
             ChatModelRequest request,
             ChatModelStreamCallback? streamCallback = null,
             CancellationToken cancellationToken = default)
         {
+            CompleteCount++;
             Assert.NotNull(streamCallback);
             try
             {
@@ -1309,11 +1409,15 @@ public sealed class DeepSeekChatModelProviderTests
         }
 
         public Task<ChatProviderHealth> CheckHealthAsync(
-            CancellationToken cancellationToken = default) =>
+            CancellationToken cancellationToken = default)
+        {
+            HealthCount++;
             throw new NotSupportedException();
+        }
 
         public async Task CancelAsync(Guid turnId, CancellationToken cancellationToken = default)
         {
+            CancelCount++;
             _cancellation.Cancel();
             await _completed.Task.WaitAsync(cancellationToken);
         }
