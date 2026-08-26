@@ -895,6 +895,15 @@ public sealed class DeepSeekChatModelProviderTests
         Assert.False(unbudgeted.IsValid);
         Assert.Equal("real_provider_approval_missing", unbudgeted.ErrorCode);
 
+        var budgetMissing = R3DeepSeekValidationOptions.Parse(
+        [
+            "--stage2-r3-deepseek",
+            "--real-provider"
+        ]);
+        Assert.True(budgetMissing.Requested);
+        Assert.False(budgetMissing.IsValid);
+        Assert.Equal("real_provider_budget_missing", budgetMissing.ErrorCode);
+
         var approved = R3DeepSeekValidationOptions.Parse(
         [
             "--stage2-r3-deepseek",
@@ -914,6 +923,86 @@ public sealed class DeepSeekChatModelProviderTests
         Assert.Equal(TimeSpan.FromSeconds(120), approved.Budget.TotalTimeout);
         Assert.True(approved.Budget.NoAutomaticRetry);
         Assert.True(approved.Budget.NoFallback);
+    }
+
+    [Theory]
+    [InlineData("--max-requests=5", "--max-output-tokens=256")]
+    [InlineData("--max-requests=8", "--max-output-tokens=256")]
+    [InlineData("--max-requests=4", "--max-output-tokens=257")]
+    [InlineData("--max-requests=4", "--max-output-tokens=1024")]
+    public void R3ValidationHarnessRejectsBudgetsAboveTheApprovedRealProviderLimits(
+        string requestsArgument,
+        string outputTokensArgument)
+    {
+        var options = R3DeepSeekValidationOptions.Parse(
+        [
+            "--stage2-r3-deepseek",
+            "--real-provider",
+            requestsArgument,
+            outputTokensArgument,
+            "--total-timeout-seconds=120",
+            "--no-automatic-retry",
+            "--no-fallback"
+        ]);
+
+        Assert.True(options.Requested);
+        Assert.False(options.IsValid);
+        Assert.Equal("real_provider_budget_out_of_range", options.ErrorCode);
+        Assert.Null(options.Budget);
+    }
+
+    [Theory]
+    [InlineData(5, 256)]
+    [InlineData(8, 256)]
+    [InlineData(4, 257)]
+    [InlineData(4, 1024)]
+    public async Task R3BudgetedProviderRejectsInternalBudgetsAboveTheApprovedLimits(
+        int maxRequests,
+        int maxOutputTokens)
+    {
+        await using var inner = new RecordingChatModelProvider();
+
+        _ = Assert.Throws<ArgumentOutOfRangeException>(() =>
+            new R3BudgetedChatModelProvider(
+                inner,
+                new R3DeepSeekValidationBudget(
+                    maxRequests,
+                    maxOutputTokens,
+                    TimeSpan.FromSeconds(120),
+                    NoAutomaticRetry: true,
+                    NoFallback: true)));
+
+        Assert.Empty(inner.Requests);
+    }
+
+    [Theory]
+    [InlineData(1, 1)]
+    [InlineData(4, 256)]
+    public async Task R3ValidationHarnessAcceptsTheApprovedBudgetBoundaries(
+        int maxRequests,
+        int maxOutputTokens)
+    {
+        var options = R3DeepSeekValidationOptions.Parse(
+        [
+            "--stage2-r3-deepseek",
+            "--real-provider",
+            $"--max-requests={maxRequests}",
+            $"--max-output-tokens={maxOutputTokens}",
+            "--total-timeout-seconds=120",
+            "--no-automatic-retry",
+            "--no-fallback"
+        ]);
+
+        Assert.True(options.IsValid);
+        Assert.Equal(maxRequests, options.Budget!.MaxRequests);
+        Assert.Equal(maxOutputTokens, options.Budget.MaxOutputTokens);
+
+        await using var inner = new RecordingChatModelProvider();
+        await using var provider = new R3BudgetedChatModelProvider(inner, options.Budget);
+        _ = await provider.CompleteAsync(Request(
+            options: new ChatModelOptions(MaxOutputTokens: 999)));
+
+        Assert.Equal(maxOutputTokens, Assert.Single(inner.Requests).Options?.MaxOutputTokens);
     }
 
     [Fact]

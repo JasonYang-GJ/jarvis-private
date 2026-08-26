@@ -2,6 +2,16 @@ using ScreenGuide.AI.Core;
 
 namespace ScreenGuide.DesktopV01.RealAcceptanceRunner;
 
+internal static class R3DeepSeekValidationLimits
+{
+    public const int MinimumRequests = 1;
+    public const int MaximumRequests = 4;
+    public const int MinimumOutputTokens = 1;
+    public const int MaximumOutputTokens = 256;
+    public const int MinimumTimeoutSeconds = 10;
+    public const int MaximumTimeoutSeconds = 600;
+}
+
 public sealed record R3DeepSeekValidationBudget(
     int MaxRequests,
     int MaxOutputTokens,
@@ -41,9 +51,12 @@ public sealed record R3DeepSeekValidationOptions(
             return Invalid(requested: true, "real_provider_budget_missing");
         }
 
-        if (maxRequests is < 4 or > 8
-            || maxOutputTokens is < 1 or > 1_024
-            || timeoutSeconds is < 10 or > 600)
+        if (maxRequests is < R3DeepSeekValidationLimits.MinimumRequests
+                or > R3DeepSeekValidationLimits.MaximumRequests
+            || maxOutputTokens is < R3DeepSeekValidationLimits.MinimumOutputTokens
+                or > R3DeepSeekValidationLimits.MaximumOutputTokens
+            || timeoutSeconds is < R3DeepSeekValidationLimits.MinimumTimeoutSeconds
+                or > R3DeepSeekValidationLimits.MaximumTimeoutSeconds)
         {
             return Invalid(requested: true, "real_provider_budget_out_of_range");
         }
@@ -309,10 +322,14 @@ public sealed class R3BudgetedChatModelProvider : IChatModelProvider
     private static R3DeepSeekValidationBudget ValidateBudget(R3DeepSeekValidationBudget budget)
     {
         ArgumentNullException.ThrowIfNull(budget);
-        if (budget.MaxRequests is < 1 or > 8
-            || budget.MaxOutputTokens is < 1 or > 1_024
-            || budget.TotalTimeout < TimeSpan.FromSeconds(10)
-            || budget.TotalTimeout > TimeSpan.FromMinutes(10)
+        if (budget.MaxRequests is < R3DeepSeekValidationLimits.MinimumRequests
+                or > R3DeepSeekValidationLimits.MaximumRequests
+            || budget.MaxOutputTokens is < R3DeepSeekValidationLimits.MinimumOutputTokens
+                or > R3DeepSeekValidationLimits.MaximumOutputTokens
+            || budget.TotalTimeout < TimeSpan.FromSeconds(
+                R3DeepSeekValidationLimits.MinimumTimeoutSeconds)
+            || budget.TotalTimeout > TimeSpan.FromSeconds(
+                R3DeepSeekValidationLimits.MaximumTimeoutSeconds)
             || !budget.NoAutomaticRetry
             || !budget.NoFallback)
         {
