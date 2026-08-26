@@ -629,9 +629,12 @@ static AiInvocationRecord AssertR3ConversationInvocation(
     else
     {
         matches = matches
-                  && invocation.Usage is null
-                  && string.IsNullOrWhiteSpace(invocation.ProviderRequestId)
-                  && invocation.FailureCode == "cancelled";
+                  && R3DeepSeekCancellationAuditGate.IsSatisfied(new(
+                      invocation.Status.ToString(),
+                      invocation.FailureCode,
+                      HasUsage: invocation.Usage is not null,
+                      HasProviderRequestId: !string.IsNullOrWhiteSpace(
+                          invocation.ProviderRequestId)));
     }
 
     RequireR3(matches, "r3_invocation_mismatch");

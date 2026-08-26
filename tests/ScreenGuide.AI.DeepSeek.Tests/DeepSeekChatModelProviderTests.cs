@@ -1057,6 +1057,30 @@ public sealed class DeepSeekChatModelProviderTests
         Assert.False(observation.ResponseReturned);
     }
 
+    [Theory]
+    [InlineData("Cancelled", "deepseek.cancelled", false, false, true)]
+    [InlineData("Cancelled", "cancelled", false, false, false)]
+    [InlineData("Cancelled", "unrelated.cancelled", false, false, false)]
+    [InlineData("Succeeded", "deepseek.cancelled", false, false, false)]
+    [InlineData("Failed", "deepseek.cancelled", false, false, false)]
+    [InlineData("Cancelled", "deepseek.cancelled", true, false, false)]
+    [InlineData("Cancelled", "deepseek.cancelled", false, true, false)]
+    public void R3CancellationAuditGateKeepsBusinessTerminalAndProviderDiagnosticSeparate(
+        string terminalState,
+        string diagnosticCode,
+        bool hasUsage,
+        bool hasProviderRequestId,
+        bool expected)
+    {
+        var evidence = new R3DeepSeekCancellationAuditEvidence(
+            terminalState,
+            diagnosticCode,
+            hasUsage,
+            hasProviderRequestId);
+
+        Assert.Equal(expected, R3DeepSeekCancellationAuditGate.IsSatisfied(evidence));
+    }
+
     private static ChatModelRequest Request(
         string modelId = DeepSeekChatModelProvider.FlashModelId,
         IReadOnlyList<ChatMessage>? messages = null,

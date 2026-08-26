@@ -134,6 +134,29 @@ public sealed record R3DeepSeekValidationResult(
     long ElapsedMilliseconds,
     string? ErrorCode);
 
+internal sealed record R3DeepSeekCancellationAuditEvidence(
+    string TerminalState,
+    string? DiagnosticCode,
+    bool HasUsage,
+    bool HasProviderRequestId);
+
+internal static class R3DeepSeekCancellationAuditGate
+{
+    private const string ExpectedDiagnosticCode = "deepseek.cancelled";
+
+    public static bool IsSatisfied(R3DeepSeekCancellationAuditEvidence evidence)
+    {
+        ArgumentNullException.ThrowIfNull(evidence);
+        return string.Equals(evidence.TerminalState, "Cancelled", StringComparison.Ordinal)
+               && string.Equals(
+                   evidence.DiagnosticCode,
+                   ExpectedDiagnosticCode,
+                   StringComparison.Ordinal)
+               && !evidence.HasUsage
+               && !evidence.HasProviderRequestId;
+    }
+}
+
 public sealed class R3ValidationCallObservation
 {
     private readonly TaskCompletionSource _atLeastTwoDeltas =
