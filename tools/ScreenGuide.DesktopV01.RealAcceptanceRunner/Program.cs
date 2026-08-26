@@ -6,6 +6,8 @@ using ScreenGuide.Agent.Codex;
 using ScreenGuide.AI.Core;
 using ScreenGuide.AI.DeepSeek;
 using ScreenGuide.Core.Ai;
+using ScreenGuide.Core.Conversations;
+using ScreenGuide.Core.Sessions;
 using ScreenGuide.DesktopHost.Configuration;
 using ScreenGuide.DesktopProtocol;
 using ScreenGuide.DesktopV01.RealAcceptanceRunner;
@@ -172,6 +174,7 @@ try
                 Stage = "failed",
                 Passed = false,
                 ErrorCode = SafeR3ErrorCode(exception),
+                DiagnosticCode = SafeR3DiagnosticCode(exception),
                 ExceptionType = exception.GetType().Name,
                 RealProvider = true
             }));
@@ -472,6 +475,8 @@ static async Task<R3DeepSeekValidationResult> RunStage2R3DeepSeekPreparationAsyn
     RequireR3(healthPassed, "r3_health_failed");
 
     var invocations = host.Services.GetRequiredService<IAiInvocationStore>();
+    var sessions = host.Services.GetRequiredService<ISessionStore>();
+    var conversations = host.Services.GetRequiredService<IConversationStore>();
     var session = await api.StartNewSessionAsync("R3 DeepSeek 隔离验收")
         .WaitAsync(cancellationToken);
 
@@ -535,10 +540,56 @@ static async Task<R3DeepSeekValidationResult> RunStage2R3DeepSeekPreparationAsyn
             $"r3-cancel-{Guid.NewGuid():N}",
             session.SessionId))
         .WaitAsync(cancellationToken);
-    await cancellationObservation.AtLeastTwoDeltas.WaitAsync(cancellationToken);
-    var cancelledSnapshot = await api.CancelSessionTurnAsync(session.SessionId, cancelling.TurnId)
+    var earlyTerminal = WaitForR3CancellationTerminalEvidenceAsync(
+        api,
+        sessions,
+        conversations,
+        invocations,
+        cancellationObservation.Terminal,
+        cancelling.TurnId,
+        budget.TotalTimeout,
+        cancellationToken);
+    var precondition = await R3CancellationPreconditionCoordinator.WaitAsync(
+        cancellationObservation.AtLeastTwoDeltas,
+        earlyTerminal,
+        Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken),
+        async () =>
+        {
+            _ = await api.CancelSessionTurnAsync(session.SessionId, cancelling.TurnId)
+                .WaitAsync(cancellationToken);
+        });
+    if (precondition.Disposition == R3CancellationPreconditionDisposition.TerminalFailed)
+    {
+        throw new R3ValidationFailureException(
+            precondition.TerminalEvidence?.PublicFailureCode
+            ?? "r3_cancellation_provider_failed",
+            precondition.TerminalEvidence?.ProviderDiagnosticCode);
+    }
+
+    if (precondition.Disposition == R3CancellationPreconditionDisposition.TerminalSucceeded)
+    {
+        throw new R3ValidationFailureException("r3_cancellation_precondition_succeeded");
+    }
+
+    if (precondition.Disposition == R3CancellationPreconditionDisposition.TerminalInterrupted)
+    {
+        throw new R3ValidationFailureException(
+            "r3_cancellation_precondition_interrupted",
+            precondition.TerminalEvidence?.ProviderDiagnosticCode);
+    }
+
+    if (precondition.Disposition == R3CancellationPreconditionDisposition.TimedOut)
+    {
+        throw new R3ValidationFailureException("r3_cancellation_precondition_timeout");
+    }
+
+    _ = precondition.TerminalEvidence ?? await earlyTerminal.WaitAsync(cancellationToken);
+    var cancelledSnapshot = await WaitForSessionTurnAsync(
+            api,
+            cancelling.TurnId,
+            ["Cancelled"],
+            budget.TotalTimeout)
         .WaitAsync(cancellationToken);
-    await cancellationObservation.Terminal.WaitAsync(cancellationToken);
     var cancelledTurn = cancelledSnapshot.Turns.Single(item => item.Id == cancelling.TurnId);
     _ = AssertR3ConversationInvocation(
         await invocations.GetForSessionTurnAsync(cancelling.TurnId, cancellationToken),
@@ -641,6 +692,43 @@ static AiInvocationRecord AssertR3ConversationInvocation(
     return invocation;
 }
 
+static async Task<R3CancellationTerminalEvidence> WaitForR3CancellationTerminalEvidenceAsync(
+    IDesktopApiClient api,
+    ISessionStore sessions,
+    IConversationStore conversations,
+    IAiInvocationStore invocations,
+    Task providerTerminal,
+    Guid sessionTurnId,
+    TimeSpan timeout,
+    CancellationToken cancellationToken)
+{
+    var snapshot = await WaitForSessionTurnAsync(
+            api,
+            sessionTurnId,
+            ["Failed", "Cancelled", "Completed", "Interrupted"],
+            timeout)
+        .WaitAsync(cancellationToken);
+    await providerTerminal.WaitAsync(cancellationToken);
+    var sessionTurn = snapshot.Turns.Single(item => item.Id == sessionTurnId);
+    var persistedSessionTurn = await sessions.GetTurnAsync(sessionTurnId, cancellationToken)
+                               ?? throw new R3ValidationFailureException(
+                                   "r3_cancellation_session_turn_missing");
+    var conversationTurn = sessionTurn.ConversationTurnId is { } conversationTurnId
+        ? (await conversations.GetTurnsAsync(snapshot.ConversationId, cancellationToken))
+            .SingleOrDefault(item => item.Id == conversationTurnId)
+        : null;
+    var invocation = (await invocations.GetForSessionTurnAsync(
+            sessionTurnId,
+            cancellationToken))
+        .SingleOrDefault(item => item.Purpose == AiInvocationPurpose.Conversation);
+    return new R3CancellationTerminalEvidence(
+        sessionTurn.Phase,
+        conversationTurn?.Status.ToString() ?? "Missing",
+        invocation?.Status.ToString() ?? "Missing",
+        persistedSessionTurn.FailureCode ?? conversationTurn?.FailureCode,
+        invocation?.FailureCode);
+}
+
 static async Task<AiSettingsDto> WaitForDeepSeekConfigurationOnlyAsync(
     IDesktopApiClient api,
     CancellationToken cancellationToken)
@@ -679,6 +767,11 @@ static string SafeR3ErrorCode(Exception exception) => exception switch
     ChatModelException chat => chat.Error.Code,
     _ => "r3_validation_failed"
 };
+
+static string? SafeR3DiagnosticCode(Exception exception) =>
+    exception is R3ValidationFailureException failure
+        ? failure.DiagnosticCode
+        : null;
 
 static async Task RunStage2LiveProviderAcceptanceAsync(
     IDesktopApiClient api,

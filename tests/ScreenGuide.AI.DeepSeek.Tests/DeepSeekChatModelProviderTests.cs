@@ -1081,6 +1081,127 @@ public sealed class DeepSeekChatModelProviderTests
         Assert.Equal(expected, R3DeepSeekCancellationAuditGate.IsSatisfied(evidence));
     }
 
+    [Fact]
+    public async Task R3CancellationPreconditionCancelsExactlyOnceWhenTwoDeltasArriveFirst()
+    {
+        var terminal = new TaskCompletionSource<R3CancellationTerminalEvidence>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var timeout = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var cancelCount = 0;
+
+        var result = await R3CancellationPreconditionCoordinator.WaitAsync(
+            Task.CompletedTask,
+            terminal.Task,
+            timeout.Task,
+            () =>
+            {
+                cancelCount++;
+                return Task.CompletedTask;
+            });
+
+        Assert.Equal(R3CancellationPreconditionDisposition.CancelRequested, result.Disposition);
+        Assert.Equal(1, cancelCount);
+        Assert.Null(result.TerminalEvidence);
+    }
+
+    [Fact]
+    public async Task R3CancellationPreconditionReturnsEarlyFailedEvidenceWithoutCancelling()
+    {
+        var result = await RunTerminalFirstAsync(new R3CancellationTerminalEvidence(
+            "Failed",
+            "Failed",
+            "Failed",
+            "invalid_response",
+            "deepseek.stream_empty"));
+
+        Assert.Equal(R3CancellationPreconditionDisposition.TerminalFailed, result.Result.Disposition);
+        Assert.Equal(0, result.CancelCount);
+        Assert.Equal("invalid_response", result.Result.TerminalEvidence?.PublicFailureCode);
+        Assert.Equal("deepseek.stream_empty", result.Result.TerminalEvidence?.ProviderDiagnosticCode);
+    }
+
+    [Fact]
+    public async Task R3CancellationPreconditionRejectsEarlySuccessWithoutCancelling()
+    {
+        var result = await RunTerminalFirstAsync(new R3CancellationTerminalEvidence(
+            "Completed",
+            "Succeeded",
+            "Succeeded",
+            PublicFailureCode: null,
+            ProviderDiagnosticCode: null));
+
+        Assert.Equal(
+            R3CancellationPreconditionDisposition.TerminalSucceeded,
+            result.Result.Disposition);
+        Assert.Equal(0, result.CancelCount);
+    }
+
+    [Fact]
+    public async Task R3CancellationPreconditionAcceptsAnAlreadyCancelledTerminalForVerification()
+    {
+        var result = await RunTerminalFirstAsync(new R3CancellationTerminalEvidence(
+            "Cancelled",
+            "Cancelled",
+            "Cancelled",
+            "cancelled",
+            "deepseek.cancelled"));
+
+        Assert.Equal(
+            R3CancellationPreconditionDisposition.TerminalCancelled,
+            result.Result.Disposition);
+        Assert.Equal(0, result.CancelCount);
+    }
+
+    [Fact]
+    public async Task R3CancellationPreconditionTimesOutOnlyWithoutDeltasOrTerminalState()
+    {
+        var deltas = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var terminal = new TaskCompletionSource<R3CancellationTerminalEvidence>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var cancelCount = 0;
+
+        var result = await R3CancellationPreconditionCoordinator.WaitAsync(
+            deltas.Task,
+            terminal.Task,
+            Task.CompletedTask,
+            () =>
+            {
+                cancelCount++;
+                return Task.CompletedTask;
+            });
+
+        Assert.Equal(R3CancellationPreconditionDisposition.TimedOut, result.Disposition);
+        Assert.Equal(0, cancelCount);
+    }
+
+    private static async Task<(
+        R3CancellationPreconditionResult Result,
+        int CancelCount)> RunTerminalFirstAsync(R3CancellationTerminalEvidence evidence)
+    {
+        var deltas = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var terminal = new TaskCompletionSource<R3CancellationTerminalEvidence>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var timeout = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var cancelCount = 0;
+        var completion = R3CancellationPreconditionCoordinator.WaitAsync(
+            deltas.Task,
+            terminal.Task,
+            timeout.Task,
+            () =>
+            {
+                cancelCount++;
+                return Task.CompletedTask;
+            });
+
+        terminal.SetResult(evidence);
+        timeout.SetResult();
+        return (await completion, cancelCount);
+    }
+
     private static ChatModelRequest Request(
         string modelId = DeepSeekChatModelProvider.FlashModelId,
         IReadOnlyList<ChatMessage>? messages = null,

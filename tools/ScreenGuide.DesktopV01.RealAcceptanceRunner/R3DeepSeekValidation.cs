@@ -99,10 +99,23 @@ public sealed class R3ValidationBudgetExceededException(string code) : Exception
     public string Code { get; } = code;
 }
 
-public sealed class R3ValidationFailureException(string code) : Exception(
+public sealed class R3ValidationFailureException(
+    string code,
+    string? diagnosticCode = null) : Exception(
     "R3 真实 Provider 验收未通过安全门禁。")
 {
     public string Code { get; } = code;
+
+    public string? DiagnosticCode { get; } = NormalizeDiagnosticCode(diagnosticCode);
+
+    private static string? NormalizeDiagnosticCode(string? value) =>
+        !string.IsNullOrWhiteSpace(value)
+        && value.Length <= 128
+        && value.All(character =>
+            char.IsAsciiLetterOrDigit(character)
+            || character is '.' or '_' or '-')
+            ? value
+            : null;
 }
 
 public enum R3ValidationCallMode
@@ -154,6 +167,87 @@ internal static class R3DeepSeekCancellationAuditGate
                    StringComparison.Ordinal)
                && !evidence.HasUsage
                && !evidence.HasProviderRequestId;
+    }
+}
+
+internal enum R3CancellationPreconditionDisposition
+{
+    CancelRequested,
+    TerminalFailed,
+    TerminalSucceeded,
+    TerminalCancelled,
+    TerminalInterrupted,
+    TimedOut
+}
+
+internal sealed record R3CancellationTerminalEvidence(
+    string SessionState,
+    string ConversationState,
+    string InvocationState,
+    string? PublicFailureCode,
+    string? ProviderDiagnosticCode);
+
+internal sealed record R3CancellationPreconditionResult(
+    R3CancellationPreconditionDisposition Disposition,
+    R3CancellationTerminalEvidence? TerminalEvidence = null);
+
+internal static class R3CancellationPreconditionCoordinator
+{
+    public static async Task<R3CancellationPreconditionResult> WaitAsync(
+        Task atLeastTwoDeltas,
+        Task<R3CancellationTerminalEvidence> terminalState,
+        Task timeoutSignal,
+        Func<Task> cancel)
+    {
+        ArgumentNullException.ThrowIfNull(atLeastTwoDeltas);
+        ArgumentNullException.ThrowIfNull(terminalState);
+        ArgumentNullException.ThrowIfNull(timeoutSignal);
+        ArgumentNullException.ThrowIfNull(cancel);
+
+        var completed = await Task.WhenAny(atLeastTwoDeltas, terminalState, timeoutSignal)
+            .ConfigureAwait(false);
+        if (completed == terminalState)
+        {
+            var evidence = await terminalState.ConfigureAwait(false);
+            return new R3CancellationPreconditionResult(
+                ClassifyTerminalEvidence(evidence),
+                evidence);
+        }
+
+        if (completed == atLeastTwoDeltas)
+        {
+            await atLeastTwoDeltas.ConfigureAwait(false);
+            await cancel().ConfigureAwait(false);
+            return new R3CancellationPreconditionResult(
+                R3CancellationPreconditionDisposition.CancelRequested);
+        }
+
+        await timeoutSignal.ConfigureAwait(false);
+        return new R3CancellationPreconditionResult(
+            R3CancellationPreconditionDisposition.TimedOut);
+    }
+
+    private static R3CancellationPreconditionDisposition ClassifyTerminalEvidence(
+        R3CancellationTerminalEvidence evidence)
+    {
+        var states = (
+            evidence.SessionState,
+            evidence.ConversationState,
+            evidence.InvocationState);
+        return states switch
+        {
+            ("Failed", "Failed", "Failed") =>
+                R3CancellationPreconditionDisposition.TerminalFailed,
+            ("Completed", "Succeeded", "Succeeded") =>
+                R3CancellationPreconditionDisposition.TerminalSucceeded,
+            ("Cancelled", "Cancelled", "Cancelled") =>
+                R3CancellationPreconditionDisposition.TerminalCancelled,
+            ("Interrupted", "Interrupted", "Interrupted") =>
+                R3CancellationPreconditionDisposition.TerminalInterrupted,
+            _ => throw new R3ValidationFailureException(
+                "r3_cancellation_terminal_mismatch",
+                evidence.ProviderDiagnosticCode)
+        };
     }
 }
 
