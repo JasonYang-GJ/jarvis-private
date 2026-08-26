@@ -1,14 +1,14 @@
 namespace ScreenGuide.Agent.Codex;
 
-public sealed class CodexConnectorOptions
+public sealed class CodexChatOptions
 {
     public const string ExecutableEnvironmentVariable = "SCREEN_GUIDE_CODEX_EXECUTABLE";
 
-    public CodexConnectorOptions(string dataDirectory, string? executablePath = null)
+    public CodexChatOptions(string dataDirectory, string? executablePath = null)
     {
         if (string.IsNullOrWhiteSpace(dataDirectory))
         {
-            throw new ArgumentException("Codex Connector 数据目录不能为空。", nameof(dataDirectory));
+            throw new ArgumentException("Codex 普通聊天数据目录不能为空。", nameof(dataDirectory));
         }
 
         DataDirectory = Path.GetFullPath(dataDirectory.Trim());
@@ -21,11 +21,11 @@ public sealed class CodexConnectorOptions
 
     public string? ExecutablePath { get; }
 
-    public string SandboxMode { get; init; } = "workspace-write";
-
     public string? Model { get; init; }
 
-    public static CodexConnectorOptions FromDataDirectory(string dataDirectory) =>
+    public TimeSpan ChatRequestTimeout { get; init; } = TimeSpan.FromMinutes(2);
+
+    public static CodexChatOptions FromDataDirectory(string dataDirectory) =>
         new(
             dataDirectory,
             Environment.GetEnvironmentVariable(ExecutableEnvironmentVariable));

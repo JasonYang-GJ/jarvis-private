@@ -98,10 +98,19 @@ public static class DesktopHostFactory
                     hostOptions.CodexDataDirectory,
                     hostOptions.CodexExecutablePath);
         });
+        builder.Services.AddSingleton(services =>
+        {
+            var hostOptions = services.GetRequiredService<DesktopHostOptions>();
+            return hostOptions.CodexExecutablePath is null
+                ? CodexChatOptions.FromDataDirectory(hostOptions.CodexDataDirectory)
+                : new CodexChatOptions(
+                    hostOptions.CodexDataDirectory,
+                    hostOptions.CodexExecutablePath);
+        });
         builder.Services.AddSingleton<CodexConnector>();
         builder.Services.AddSingleton<CodexConversationProvider>();
         builder.Services.AddSingleton(services => new CodexChatModelProvider(
-            services.GetRequiredService<CodexConnectorOptions>()));
+            services.GetRequiredService<CodexChatOptions>()));
         builder.Services.AddSingleton<DeepSeekChatModelProvider>();
         builder.Services.AddSingleton<IChatModelProvider>(services =>
             services.GetRequiredService<CodexChatModelProvider>());

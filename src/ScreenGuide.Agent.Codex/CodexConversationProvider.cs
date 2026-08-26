@@ -8,17 +8,17 @@ namespace ScreenGuide.Agent.Codex;
 
 public sealed class CodexConversationProvider : IConversationProvider
 {
-    private readonly CodexConnectorOptions _options;
+    private readonly CodexChatOptions _options;
     private readonly CodexCapabilityProbe _capabilityProbe;
     private readonly SemaphoreSlim _capabilityGate = new(1, 1);
     private readonly ConcurrentDictionary<Guid, ActiveConversation> _active = new();
     private CodexCapability? _capability;
     private bool _disposed;
 
-    public CodexConversationProvider(CodexConnectorOptions options)
+    public CodexConversationProvider(CodexChatOptions options)
     {
         _options = options ?? throw new ArgumentNullException(nameof(options));
-        _capabilityProbe = new CodexCapabilityProbe(new CodexExecutableLocator(options));
+        _capabilityProbe = new CodexCapabilityProbe(new CodexExecutableLocator(options.ExecutablePath));
     }
 
     public string ProviderId => "codex-conversation";

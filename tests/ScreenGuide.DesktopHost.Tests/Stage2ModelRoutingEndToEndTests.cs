@@ -4,6 +4,7 @@ using ScreenGuide.Agent.Abstractions;
 using ScreenGuide.Agent.Codex;
 using ScreenGuide.AI.Core;
 using ScreenGuide.Core.Ai;
+using ScreenGuide.Core.Conversations;
 using ScreenGuide.Core.Tasking;
 using ScreenGuide.DesktopHost.Runtime;
 using ScreenGuide.DesktopProtocol;
@@ -14,12 +15,33 @@ namespace ScreenGuide.DesktopHost.Tests;
 public sealed class Stage2ModelRoutingEndToEndTests
 {
     [Fact]
+    public async Task ProductionFactoryCreatesIndependentCodexOptionsAndKeepsRoutedConversationProvider()
+    {
+        await using var environment = DesktopHostTestEnvironment.Create();
+        using var host = environment.BuildHost();
+
+        var chatOptions = host.Services.GetRequiredService<CodexChatOptions>();
+        var programmingOptions = host.Services.GetRequiredService<CodexConnectorOptions>();
+        var productionConversation = host.Services.GetRequiredService<IConversationProvider>();
+        var isolatedLegacyConversation = host.Services.GetRequiredService<CodexConversationProvider>();
+
+        Assert.NotSame((object)programmingOptions, chatOptions);
+        Assert.Same(chatOptions, host.Services.GetRequiredService<CodexChatOptions>());
+        Assert.Same(programmingOptions, host.Services.GetRequiredService<CodexConnectorOptions>());
+        Assert.Equal(programmingOptions.DataDirectory, chatOptions.DataDirectory);
+        Assert.Equal(programmingOptions.ExecutablePath, chatOptions.ExecutablePath);
+        Assert.Equal(programmingOptions.Model, chatOptions.Model);
+        Assert.IsType<RoutedConversationProvider>(productionConversation);
+        Assert.NotSame(productionConversation, isolatedLegacyConversation);
+    }
+
+    [Fact]
     public async Task ProductionFactoryCannotBeReplacedWithPubliclyEnabledCodexChatProvider()
     {
         await using var environment = DesktopHostTestEnvironment.Create();
         var publiclyEnabledProvider = TryCreatePubliclyEnabledCodexChatProvider(environment.Options);
         var replacement = publiclyEnabledProvider ?? new CodexChatModelProvider(
-            new CodexConnectorOptions(
+            new CodexChatOptions(
                 environment.Options.CodexDataDirectory,
                 environment.Options.CodexExecutablePath));
         using var host = environment.BuildHost(services => services.AddSingleton(replacement));
@@ -41,7 +63,7 @@ public sealed class Stage2ModelRoutingEndToEndTests
         Assert.Null(publiclyEnabledProvider);
         var publicConstructor = Assert.Single(typeof(CodexChatModelProvider).GetConstructors());
         var publicParameter = Assert.Single(publicConstructor.GetParameters());
-        Assert.Equal(typeof(CodexConnectorOptions), publicParameter.ParameterType);
+        Assert.Equal(typeof(CodexChatOptions), publicParameter.ParameterType);
     }
 
     [Fact]
@@ -283,12 +305,12 @@ public sealed class Stage2ModelRoutingEndToEndTests
         }
 
         var testPolicy = Enum.Parse(policyType, "TestOnlyAllowLocalCodexCli");
-        var connectorOptions = options.CodexExecutablePath is null
-            ? CodexConnectorOptions.FromDataDirectory(options.CodexDataDirectory)
-            : new CodexConnectorOptions(options.CodexDataDirectory, options.CodexExecutablePath);
+        var chatOptions = options.CodexExecutablePath is null
+            ? CodexChatOptions.FromDataDirectory(options.CodexDataDirectory)
+            : new CodexChatOptions(options.CodexDataDirectory, options.CodexExecutablePath);
         return Activator.CreateInstance(
             typeof(CodexChatModelProvider),
-            [connectorOptions, testPolicy]) as CodexChatModelProvider;
+            [chatOptions, testPolicy]) as CodexChatModelProvider;
     }
 
     private static Task<AiSettingsDto> SetRouteAsync(

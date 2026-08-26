@@ -22,7 +22,7 @@ public sealed class CodexConnector : IAgentConnector, IAsyncDisposable
     {
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _timeProvider = timeProvider ?? TimeProvider.System;
-        _capabilityProbe = new CodexCapabilityProbe(new CodexExecutableLocator(options));
+        _capabilityProbe = new CodexCapabilityProbe(new CodexExecutableLocator(options.ExecutablePath));
     }
 
     public string ConnectorId => "codex";

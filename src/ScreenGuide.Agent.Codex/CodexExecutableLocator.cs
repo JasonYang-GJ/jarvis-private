@@ -1,10 +1,12 @@
 namespace ScreenGuide.Agent.Codex;
 
-internal sealed class CodexExecutableLocator(CodexConnectorOptions options)
+internal sealed class CodexExecutableLocator(string? executablePath)
 {
+    private const string ExecutableEnvironmentVariable = "SCREEN_GUIDE_CODEX_EXECUTABLE";
+
     public string Resolve()
     {
-        if (options.ExecutablePath is { } configured)
+        if (executablePath is { } configured)
         {
             return RequireExistingFile(configured);
         }
@@ -18,7 +20,7 @@ internal sealed class CodexExecutableLocator(CodexConnectorOptions options)
         }
 
         throw new FileNotFoundException(
-            $"未找到可调用的 Codex CLI。可通过 {CodexConnectorOptions.ExecutableEnvironmentVariable} 指定 codex.exe。 ");
+            $"未找到可调用的 Codex CLI。可通过 {ExecutableEnvironmentVariable} 指定 codex.exe。 ");
     }
 
     private static IEnumerable<string> EnumerateCandidates()

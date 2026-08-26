@@ -7,6 +7,26 @@ namespace ScreenGuide.Agent.Codex.Tests;
 public sealed class CodexConnectorTests
 {
     [Fact]
+    public async Task ProgrammingSandboxModeIsPassedToTheCodexAgentProcess()
+    {
+        await using var environment = ConnectorTestEnvironment.Create();
+        await using var connector = new CodexConnector(new CodexConnectorOptions(
+            Path.Combine(environment.RootDirectory, "data"),
+            Path.ChangeExtension(typeof(FakeCodexMarker).Assembly.Location, ".exe"))
+        {
+            SandboxMode = "read-only"
+        });
+
+        var (start, _) = await StartAndCollectAsync(
+            connector,
+            environment,
+            "TEST_REPORT_SANDBOX");
+        var final = await connector.GetFinalResultAsync(start.Run);
+
+        Assert.Equal("sandbox:read-only", final?.Summary);
+    }
+
+    [Fact]
     public void VersionGateAcceptsOnlyVerifiedV01Version()
     {
         var verified = CodexVersionCompatibility.Evaluate("0.147.0");

@@ -131,7 +131,7 @@ public sealed class CodexConversationProviderTests
         }
 
         public CodexConversationProvider CreateProvider(string? executable = null) => new(
-            new CodexConnectorOptions(
+            new CodexChatOptions(
                 DataDirectory,
                 executable ?? Path.ChangeExtension(typeof(FakeCodexMarker).Assembly.Location, ".exe")));
 

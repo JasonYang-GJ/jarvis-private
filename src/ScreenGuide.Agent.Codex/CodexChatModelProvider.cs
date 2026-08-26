@@ -40,7 +40,7 @@ public sealed class CodexChatModelProvider : IChatModelProvider
                 ChatModelCapabilities.None)
         ]);
 
-    private readonly CodexConnectorOptions _options;
+    private readonly CodexChatOptions _options;
     private readonly ExecutionPolicy _executionPolicy;
     private readonly CodexCapabilityProbe _capabilityProbe;
     private readonly SemaphoreSlim _capabilityGate = new(1, 1);
@@ -49,13 +49,13 @@ public sealed class CodexChatModelProvider : IChatModelProvider
     private CodexCapability? _capability;
     private bool _disposed;
 
-    public CodexChatModelProvider(CodexConnectorOptions options)
+    public CodexChatModelProvider(CodexChatOptions options)
         : this(options, ExecutionPolicy.ProductionDisabled)
     {
     }
 
     private CodexChatModelProvider(
-        CodexConnectorOptions options,
+        CodexChatOptions options,
         ExecutionPolicy executionPolicy)
     {
         _options = options ?? throw new ArgumentNullException(nameof(options));
@@ -68,7 +68,7 @@ public sealed class CodexChatModelProvider : IChatModelProvider
                 "Codex 普通聊天整体超时必须大于零且不超过十分钟。");
         }
 
-        _capabilityProbe = new CodexCapabilityProbe(new CodexExecutableLocator(options));
+        _capabilityProbe = new CodexCapabilityProbe(new CodexExecutableLocator(options.ExecutablePath));
     }
 
     public ChatProviderDescriptor Descriptor => ProviderDescriptor;

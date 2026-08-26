@@ -16,7 +16,7 @@ public sealed class CodexDiagnosticsService(CodexConnectorOptions options)
         string executable;
         try
         {
-            executable = new CodexExecutableLocator(options).Resolve();
+            executable = new CodexExecutableLocator(options.ExecutablePath).Resolve();
         }
         catch (FileNotFoundException)
         {

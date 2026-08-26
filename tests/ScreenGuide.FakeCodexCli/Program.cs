@@ -43,6 +43,19 @@ public static class Program
         Write(new { type = "thread.started", thread_id = threadId });
         Write(new { type = "turn.started" });
 
+        if (prompt.Contains("TEST_REPORT_SANDBOX", StringComparison.Ordinal))
+        {
+            var sandboxIndex = Array.FindIndex(
+                args,
+                argument => string.Equals(argument, "--sandbox", StringComparison.Ordinal));
+            var sandboxMode = sandboxIndex >= 0 && sandboxIndex + 1 < args.Length
+                ? args[sandboxIndex + 1]
+                : "missing";
+            WriteAgentMessage("completed", $"sandbox:{sandboxMode}", null, []);
+            Write(new { type = "turn.completed", usage = Usage() });
+            return 0;
+        }
+
         if (AppContext.BaseDirectory.Contains("conversation-no-terminal", StringComparison.OrdinalIgnoreCase))
         {
             Write(new

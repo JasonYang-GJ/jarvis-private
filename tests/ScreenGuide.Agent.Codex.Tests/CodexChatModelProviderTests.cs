@@ -17,7 +17,7 @@ public sealed class CodexChatModelProviderTests
         var dataDirectory = Path.Combine(root, "must-not-create");
         var privateProject = Path.Combine(root, "private-user-project");
         const string privateRequest = "PRIVATE_CHAT_SENTINEL 请读取用户项目并调用工具";
-        await using var provider = new CodexChatModelProvider(new CodexConnectorOptions(
+        await using var provider = new CodexChatModelProvider(new CodexChatOptions(
             dataDirectory,
             Path.Combine(root, "missing-codex.exe")));
 
@@ -52,7 +52,7 @@ public sealed class CodexChatModelProviderTests
     public async Task ProductionHealthDoesNotProbeOrAdvertiseCodexCliAvailability()
     {
         await using var environment = ChatProviderEnvironment.Create();
-        await using var provider = new CodexChatModelProvider(new CodexConnectorOptions(
+        await using var provider = new CodexChatModelProvider(new CodexChatOptions(
             environment.DataDirectory,
             Path.ChangeExtension(typeof(FakeCodexMarker).Assembly.Location, ".exe")));
 
@@ -446,7 +446,7 @@ public sealed class CodexChatModelProviderTests
 
         public CodexChatModelProvider CreateProvider(TimeSpan? requestTimeout = null)
         {
-            var options = new CodexConnectorOptions(
+            var options = new CodexChatOptions(
                 DataDirectory,
                 Path.ChangeExtension(typeof(FakeCodexMarker).Assembly.Location, ".exe"))
             {
@@ -458,7 +458,7 @@ public sealed class CodexChatModelProviderTests
                 {
                     var parameters = candidate.GetParameters();
                     return parameters.Length == 2
-                        && parameters[0].ParameterType == typeof(CodexConnectorOptions)
+                        && parameters[0].ParameterType == typeof(CodexChatOptions)
                         && parameters[1].ParameterType.IsEnum;
                 });
             var policyType = constructor.GetParameters()[1].ParameterType;
