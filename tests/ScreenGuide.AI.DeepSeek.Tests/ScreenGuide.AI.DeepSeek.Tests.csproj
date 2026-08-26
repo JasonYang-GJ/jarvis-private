@@ -13,4 +13,8 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\ScreenGuide.AI.DeepSeek\ScreenGuide.AI.DeepSeek.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <Compile Include="..\..\tools\ScreenGuide.DesktopV01.RealAcceptanceRunner\R3DeepSeekValidation.cs"
+             Link="R3DeepSeekValidation.cs" />
+  </ItemGroup>
 </Project>

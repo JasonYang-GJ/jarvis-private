@@ -7,7 +7,21 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup>
+    <ProjectReference Include="..\..\src\ScreenGuide.Agent.Codex\ScreenGuide.Agent.Codex.csproj" />
+    <ProjectReference Include="..\..\src\ScreenGuide.AI.Core\ScreenGuide.AI.Core.csproj" />
+    <ProjectReference Include="..\..\src\ScreenGuide.AI.DeepSeek\ScreenGuide.AI.DeepSeek.csproj" />
+    <ProjectReference Include="..\..\src\ScreenGuide.Core\ScreenGuide.Core.csproj" />
+    <ProjectReference Include="..\..\src\ScreenGuide.DesktopHost\ScreenGuide.DesktopHost.csproj" />
     <ProjectReference Include="..\..\src\ScreenGuide.DesktopProtocol\ScreenGuide.DesktopProtocol.csproj" />
     <ProjectReference Include="..\..\src\ScreenGuide.Skills.Windows\ScreenGuide.Skills.Windows.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+  <ItemGroup>
+    <Content Include="..\..\prompts\runtime\**\*"
+             Link="prompts\runtime\%(RecursiveDir)%(Filename)%(Extension)"
+             CopyToOutputDirectory="PreserveNewest"
+             CopyToPublishDirectory="Never" />
   </ItemGroup>
 </Project>

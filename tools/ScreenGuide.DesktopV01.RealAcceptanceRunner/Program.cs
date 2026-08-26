@@ -1,8 +1,31 @@
 using System.Diagnostics;
 using System.Text.Json;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using ScreenGuide.Agent.Codex;
+using ScreenGuide.AI.Core;
+using ScreenGuide.AI.DeepSeek;
+using ScreenGuide.Core.Ai;
+using ScreenGuide.DesktopHost.Configuration;
 using ScreenGuide.DesktopProtocol;
+using ScreenGuide.DesktopV01.RealAcceptanceRunner;
 using ScreenGuide.Skills.Windows;
 
+const string R3ResultPrefix = "YUANSHU_R3_DEEPSEEK_RESULT ";
+var r3Validation = R3DeepSeekValidationOptions.Parse(args);
+if (r3Validation.Requested && !r3Validation.IsValid)
+{
+    Console.WriteLine(R3ResultPrefix + JsonSerializer.Serialize(new
+    {
+        Stage = "guard",
+        Passed = false,
+        ErrorCode = r3Validation.ErrorCode,
+        RealProvider = false
+    }));
+    return 2;
+}
+
+var stage2R3DeepSeek = r3Validation.IsValid;
 var smokeOnly = args.Any(argument =>
     string.Equals(argument, "--smoke", StringComparison.OrdinalIgnoreCase));
 var desktopActionSmoke = args.Any(argument =>
@@ -57,7 +80,33 @@ if (!File.Exists(clientPath) || !File.Exists(hostPath))
 
 var pipeName = $"ScreenGuide.DesktopV01.Real.{Guid.NewGuid():N}";
 Process? trackedHost = null;
-if (trackHost)
+IHost? r3Host = null;
+R3BudgetedChatModelProvider? r3Provider = null;
+if (stage2R3DeepSeek)
+{
+    var r3Budget = r3Validation.Budget!;
+    r3Host = DesktopHostFactory.Build(
+        [],
+        new DesktopHostOptions(dataRoot, pipeName: pipeName),
+        services =>
+        {
+            services.AddSingleton(serviceProvider =>
+                new R3BudgetedChatModelProvider(
+                    new DeepSeekChatModelProvider(
+                        serviceProvider.GetRequiredService<IProviderCredentialStore>()),
+                    r3Budget));
+            services.AddSingleton(serviceProvider => new ChatProviderRegistry(
+            [
+                serviceProvider.GetRequiredService<CodexChatModelProvider>(),
+                serviceProvider.GetRequiredService<R3BudgetedChatModelProvider>()
+            ]));
+        });
+    using var startupTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+    await r3Host.StartAsync(startupTimeout.Token);
+    r3Provider = r3Host.Services.GetRequiredService<R3BudgetedChatModelProvider>();
+}
+
+if (trackHost && !stage2R3DeepSeek)
 {
     var hostStartInfo = new ProcessStartInfo
     {
@@ -97,13 +146,39 @@ try
         },
         TimeSpan.FromSeconds(15));
     var status = await api.GetSystemStatusAsync();
-    if (!status.Codex.IsCompatible || status.Codex.Version != "0.147.0")
+    if (!stage2R3DeepSeek
+        && (!status.Codex.IsCompatible || status.Codex.Version != "0.147.0"))
     {
         throw new InvalidOperationException(
             $"Codex 兼容门禁未通过：{status.Codex.Version ?? "not-found"}。 ");
     }
 
-    if (stage2LiveProviders)
+    if (stage2R3DeepSeek)
+    {
+        try
+        {
+            var result = await RunStage2R3DeepSeekPreparationAsync(
+                api,
+                r3Host!,
+                r3Provider!,
+                r3Validation.Budget!);
+            Console.WriteLine(R3ResultPrefix + JsonSerializer.Serialize(result));
+            return result.Passed ? 0 : 1;
+        }
+        catch (Exception exception)
+        {
+            Console.WriteLine(R3ResultPrefix + JsonSerializer.Serialize(new
+            {
+                Stage = "failed",
+                Passed = false,
+                ErrorCode = SafeR3ErrorCode(exception),
+                ExceptionType = exception.GetType().Name,
+                RealProvider = true
+            }));
+            return 1;
+        }
+    }
+    else if (stage2LiveProviders)
     {
         await RunStage2LiveProviderAcceptanceAsync(api, projectRoot, results);
     }
@@ -322,13 +397,16 @@ try
 }
 finally
 {
-    if (stage2LiveProviders)
+    if (stage2LiveProviders || stage2R3DeepSeek)
     {
         try
         {
             await api.SetChatRouteAsync(new SetChatRouteRequestDto("codex", "codex-default"));
             _ = await api.DeleteProviderCredentialAsync(new ProviderIdRequestDto("deepseek"));
-            Console.WriteLine("[stage2 cleanup] isolated DeepSeek credential deleted, chat route restored to Codex");
+            if (!stage2R3DeepSeek)
+            {
+                Console.WriteLine("[stage2 cleanup] isolated DeepSeek credential deleted, chat route restored to Codex");
+            }
         }
         catch (Exception exception)
         {
@@ -345,6 +423,13 @@ finally
     if (await api.PingAsync())
     {
         await api.ShutdownHostAsync();
+    }
+
+    if (r3Host is not null)
+    {
+        using var shutdownTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        await r3Host.StopAsync(shutdownTimeout.Token);
+        r3Host.Dispose();
     }
 
     if (trackedHost is not null)
@@ -365,6 +450,232 @@ finally
 }
 
 return 0;
+
+static async Task<R3DeepSeekValidationResult> RunStage2R3DeepSeekPreparationAsync(
+    IDesktopApiClient api,
+    IHost host,
+    R3BudgetedChatModelProvider provider,
+    R3DeepSeekValidationBudget budget)
+{
+    using var totalTimeout = new CancellationTokenSource(budget.TotalTimeout);
+    var cancellationToken = totalTimeout.Token;
+    var stopwatch = Stopwatch.StartNew();
+    Console.WriteLine(
+        "[r3] 请只在可见的元枢设置页保存 DeepSeek Key，并选择要验收的 V4 模型；不要把 Key 输入命令行，也不要手动点击健康检查。");
+    Console.Out.Flush();
+
+    var settings = await WaitForDeepSeekConfigurationOnlyAsync(api, cancellationToken);
+    var modelId = settings.CurrentChatRoute.ModelId;
+    var health = await api.CheckAiProviderHealthAsync(new ProviderIdRequestDto("deepseek"))
+        .WaitAsync(cancellationToken);
+    var healthPassed = health.State == "Healthy";
+    RequireR3(healthPassed, "r3_health_failed");
+
+    var invocations = host.Services.GetRequiredService<IAiInvocationStore>();
+    var session = await api.StartNewSessionAsync("R3 DeepSeek 隔离验收")
+        .WaitAsync(cancellationToken);
+
+    var ordinary = await api.SubmitSessionInputAsync(new SessionInputRequestDto(
+            "R3 ordinary chat canary. Reply only with R3-CHAT-OK.",
+            "Text",
+            $"r3-chat-{Guid.NewGuid():N}",
+            session.SessionId))
+        .WaitAsync(cancellationToken);
+    var ordinarySnapshot = await WaitForSessionTurnAsync(
+            api,
+            ordinary.TurnId,
+            ["Completed"],
+            budget.TotalTimeout)
+        .WaitAsync(cancellationToken);
+    var ordinaryTurn = ordinarySnapshot.Turns.Single(item => item.Id == ordinary.TurnId);
+    var ordinaryInvocation = AssertR3ConversationInvocation(
+        await invocations.GetForSessionTurnAsync(ordinary.TurnId, cancellationToken),
+        provider,
+        ordinaryTurn,
+        modelId,
+        AiInvocationStatus.Succeeded,
+        requireProviderMetadata: true);
+    var ordinaryChatPassed = ordinaryTurn.Phase == "Completed"
+                             && ordinaryInvocation.Status == AiInvocationStatus.Succeeded;
+    RequireR3(ordinaryChatPassed, "r3_ordinary_chat_failed");
+
+    var streamingObservation = provider.PrepareNextCall(R3ValidationCallMode.Streaming);
+    var streaming = await api.SubmitSessionInputAsync(new SessionInputRequestDto(
+            "R3 streaming canary. Write the numbers 1 through 20, one per line.",
+            "Text",
+            $"r3-stream-{Guid.NewGuid():N}",
+            session.SessionId))
+        .WaitAsync(cancellationToken);
+    var streamingSnapshot = await WaitForSessionTurnAsync(
+            api,
+            streaming.TurnId,
+            ["Completed"],
+            budget.TotalTimeout)
+        .WaitAsync(cancellationToken);
+    await streamingObservation.Terminal.WaitAsync(cancellationToken);
+    var streamingTurn = streamingSnapshot.Turns.Single(item => item.Id == streaming.TurnId);
+    _ = AssertR3ConversationInvocation(
+        await invocations.GetForSessionTurnAsync(streaming.TurnId, cancellationToken),
+        provider,
+        streamingTurn,
+        modelId,
+        AiInvocationStatus.Succeeded,
+        requireProviderMetadata: true);
+    var streamingPassed = streamingObservation.DeltaCount >= 2
+                          && streamingObservation.FinalUpdateObserved
+                          && streamingObservation.ResponseReturned;
+    RequireR3(streamingPassed, "r3_streaming_failed");
+
+    const string cancellationCanary = "R3-CANCEL-LATE-CANARY";
+    var cancellationObservation = provider.PrepareNextCall(
+        R3ValidationCallMode.StreamingCancellation);
+    var cancelling = await api.SubmitSessionInputAsync(new SessionInputRequestDto(
+            $"{cancellationCanary}: write 100 numbered short lines and do not summarize.",
+            "Text",
+            $"r3-cancel-{Guid.NewGuid():N}",
+            session.SessionId))
+        .WaitAsync(cancellationToken);
+    await cancellationObservation.AtLeastTwoDeltas.WaitAsync(cancellationToken);
+    var cancelledSnapshot = await api.CancelSessionTurnAsync(session.SessionId, cancelling.TurnId)
+        .WaitAsync(cancellationToken);
+    await cancellationObservation.Terminal.WaitAsync(cancellationToken);
+    var cancelledTurn = cancelledSnapshot.Turns.Single(item => item.Id == cancelling.TurnId);
+    _ = AssertR3ConversationInvocation(
+        await invocations.GetForSessionTurnAsync(cancelling.TurnId, cancellationToken),
+        provider,
+        cancelledTurn,
+        modelId,
+        AiInvocationStatus.Cancelled,
+        requireProviderMetadata: false);
+    var lateDeltaRejected = cancellationObservation.DeltaCountWhenCancellationCompleted
+                            == cancellationObservation.DeltaCount;
+    var lateFinalRejected = !cancellationObservation.FinalUpdateObserved;
+    var lateSuccessRejected = !cancellationObservation.ResponseReturned
+                              && cancelledTurn.Phase == "Cancelled"
+                              && !cancelledSnapshot.Messages.Any(message =>
+                                  message.Role == "Assistant"
+                                  && message.Content.Contains(
+                                      cancellationCanary,
+                                      StringComparison.Ordinal));
+    var cancellationPassed = lateDeltaRejected && lateFinalRejected && lateSuccessRejected;
+    RequireR3(cancellationPassed, "r3_cancellation_failed");
+
+    var auditPassed = ordinaryInvocation.ProviderId == DeepSeekChatModelProvider.ProviderId
+                      && ordinaryInvocation.ModelId == modelId
+                      && ordinaryInvocation.DataDestination == DeepSeekChatModelProvider.DataDestination
+                      && !string.IsNullOrWhiteSpace(ordinaryInvocation.PromptId)
+                      && !string.IsNullOrWhiteSpace(ordinaryInvocation.PromptVersion)
+                      && !string.IsNullOrWhiteSpace(ordinaryInvocation.PromptContentHash)
+                      && ordinaryInvocation.SessionTurnId == ordinary.TurnId
+                      && ordinaryInvocation.ConversationTurnId == ordinaryTurn.ConversationTurnId
+                      && ordinaryInvocation.Usage is not null
+                      && !string.IsNullOrWhiteSpace(ordinaryInvocation.ProviderRequestId)
+                      && ordinaryInvocation.CompletedAtUtc is not null;
+    RequireR3(auditPassed, "r3_audit_failed");
+    RequireR3(provider.RequestCount == 4, "r3_request_count_mismatch");
+
+    stopwatch.Stop();
+    return new R3DeepSeekValidationResult(
+        Stage: "complete",
+        Passed: true,
+        DeepSeekChatModelProvider.ProviderId,
+        modelId,
+        provider.RequestCount,
+        healthPassed,
+        ordinaryChatPassed,
+        streamingPassed,
+        streamingObservation.DeltaCount,
+        cancellationPassed,
+        cancellationObservation.DeltaCount,
+        lateDeltaRejected,
+        lateFinalRejected,
+        lateSuccessRejected,
+        auditPassed,
+        budget.NoAutomaticRetry,
+        budget.NoFallback,
+        stopwatch.ElapsedMilliseconds,
+        ErrorCode: null);
+}
+
+static AiInvocationRecord AssertR3ConversationInvocation(
+    IReadOnlyList<AiInvocationRecord> records,
+    R3BudgetedChatModelProvider provider,
+    UnifiedSessionTurnDto turn,
+    string modelId,
+    AiInvocationStatus expectedStatus,
+    bool requireProviderMetadata)
+{
+    var invocation = records.Single(record => record.Purpose == AiInvocationPurpose.Conversation);
+    var identity = provider.RequestIdentities.Single(item => item.TurnId == turn.Id);
+    var matches = invocation.Id == identity.RequestId
+                  && invocation.SessionTurnId == turn.Id
+                  && invocation.ConversationTurnId == turn.ConversationTurnId
+                  && invocation.ProviderId == DeepSeekChatModelProvider.ProviderId
+                  && invocation.ModelId == modelId
+                  && invocation.DataDestination == DeepSeekChatModelProvider.DataDestination
+                  && invocation.Status == expectedStatus
+                  && !string.IsNullOrWhiteSpace(invocation.PromptId)
+                  && !string.IsNullOrWhiteSpace(invocation.PromptVersion)
+                  && !string.IsNullOrWhiteSpace(invocation.PromptContentHash)
+                  && invocation.StartedAtUtc != default
+                  && invocation.CompletedAtUtc is not null;
+    if (requireProviderMetadata)
+    {
+        matches = matches
+                  && invocation.Usage is not null
+                  && !string.IsNullOrWhiteSpace(invocation.ProviderRequestId)
+                  && string.IsNullOrWhiteSpace(invocation.FailureCode);
+    }
+    else
+    {
+        matches = matches
+                  && invocation.Usage is null
+                  && string.IsNullOrWhiteSpace(invocation.ProviderRequestId)
+                  && invocation.FailureCode == "cancelled";
+    }
+
+    RequireR3(matches, "r3_invocation_mismatch");
+    return invocation;
+}
+
+static async Task<AiSettingsDto> WaitForDeepSeekConfigurationOnlyAsync(
+    IDesktopApiClient api,
+    CancellationToken cancellationToken)
+{
+    while (true)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var settings = await api.GetAiSettingsAsync(cancellationToken);
+        var provider = settings.Providers.Single(item => item.ProviderId == "deepseek");
+        var modelId = settings.CurrentChatRoute.ModelId;
+        if (provider.ConfigurationState == "Configured"
+            && settings.CurrentChatRoute.ProviderId == "deepseek"
+            && modelId is DeepSeekChatModelProvider.FlashModelId
+                or DeepSeekChatModelProvider.ProModelId)
+        {
+            return settings;
+        }
+
+        await Task.Delay(TimeSpan.FromMilliseconds(500), cancellationToken);
+    }
+}
+
+static void RequireR3(bool condition, string errorCode)
+{
+    if (!condition)
+    {
+        throw new R3ValidationFailureException(errorCode);
+    }
+}
+
+static string SafeR3ErrorCode(Exception exception) => exception switch
+{
+    R3ValidationFailureException failure => failure.Code,
+    R3ValidationBudgetExceededException budget => budget.Code,
+    OperationCanceledException => "r3_total_timeout",
+    ChatModelException chat => chat.Error.Code,
+    _ => "r3_validation_failed"
+};
 
 static async Task RunStage2LiveProviderAcceptanceAsync(
     IDesktopApiClient api,

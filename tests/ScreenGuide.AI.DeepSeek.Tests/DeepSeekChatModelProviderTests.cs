@@ -2,6 +2,7 @@ using System.Net;
 using System.Text;
 using System.Text.Json;
 using ScreenGuide.AI.Core;
+using ScreenGuide.DesktopV01.RealAcceptanceRunner;
 using Xunit;
 
 namespace ScreenGuide.AI.DeepSeek.Tests;
@@ -881,18 +882,214 @@ public sealed class DeepSeekChatModelProviderTests
         throw new TimeoutException("The expected test condition was not reached.");
     }
 
+    [Fact]
+    public void R3ValidationHarnessRequiresExplicitRealProviderAndEveryBudgetControl()
+    {
+        var disabled = R3DeepSeekValidationOptions.Parse([]);
+        Assert.False(disabled.Requested);
+        Assert.False(disabled.IsValid);
+        Assert.Equal("real_provider_disabled", disabled.ErrorCode);
+
+        var unbudgeted = R3DeepSeekValidationOptions.Parse(["--stage2-r3-deepseek"]);
+        Assert.True(unbudgeted.Requested);
+        Assert.False(unbudgeted.IsValid);
+        Assert.Equal("real_provider_approval_missing", unbudgeted.ErrorCode);
+
+        var approved = R3DeepSeekValidationOptions.Parse(
+        [
+            "--stage2-r3-deepseek",
+            "--real-provider",
+            "--max-requests=4",
+            "--max-output-tokens=64",
+            "--total-timeout-seconds=120",
+            "--no-automatic-retry",
+            "--no-fallback"
+        ]);
+
+        Assert.True(approved.Requested);
+        Assert.True(approved.IsValid);
+        Assert.Null(approved.ErrorCode);
+        Assert.Equal(4, approved.Budget!.MaxRequests);
+        Assert.Equal(64, approved.Budget.MaxOutputTokens);
+        Assert.Equal(TimeSpan.FromSeconds(120), approved.Budget.TotalTimeout);
+        Assert.True(approved.Budget.NoAutomaticRetry);
+        Assert.True(approved.Budget.NoFallback);
+    }
+
+    [Fact]
+    public async Task R3ValidationHarnessCapsOutputTokensAndRejectsRequestsBeyondTheApprovedBudget()
+    {
+        await using var inner = new RecordingChatModelProvider();
+        await using var provider = new R3BudgetedChatModelProvider(
+            inner,
+            new R3DeepSeekValidationBudget(
+                MaxRequests: 1,
+                MaxOutputTokens: 17,
+                TotalTimeout: TimeSpan.FromSeconds(30),
+                NoAutomaticRetry: true,
+                NoFallback: true));
+
+        _ = await provider.CompleteAsync(Request(
+            options: new ChatModelOptions(MaxOutputTokens: 999)));
+
+        Assert.Equal(17, Assert.Single(inner.Requests).Options?.MaxOutputTokens);
+        var exception = await Assert.ThrowsAsync<R3ValidationBudgetExceededException>(() =>
+            provider.CompleteAsync(Request(turnId: Guid.NewGuid())));
+        Assert.Equal("r3_request_budget_exhausted", exception.Code);
+        Assert.Single(inner.Requests);
+        Assert.Equal(1, provider.RequestCount);
+    }
+
+    [Fact]
+    public async Task R3ValidationHarnessObservesStreamingCancellationWithoutPublishingALateFinal()
+    {
+        await using var inner = new CancellableStreamingChatModelProvider();
+        await using var provider = new R3BudgetedChatModelProvider(
+            inner,
+            new R3DeepSeekValidationBudget(
+                MaxRequests: 1,
+                MaxOutputTokens: 32,
+                TotalTimeout: TimeSpan.FromSeconds(30),
+                NoAutomaticRetry: true,
+                NoFallback: true));
+        var turnId = Guid.NewGuid();
+        var observation = provider.PrepareNextCall(R3ValidationCallMode.StreamingCancellation);
+
+        var completion = provider.CompleteAsync(Request(turnId: turnId));
+        await observation.AtLeastTwoDeltas.WaitAsync(TimeSpan.FromSeconds(2));
+        await provider.CancelAsync(turnId);
+        var exception = await Assert.ThrowsAsync<ChatModelException>(() => completion);
+        await observation.Terminal.WaitAsync(TimeSpan.FromSeconds(2));
+
+        Assert.Equal(ChatModelErrorKind.Cancelled, exception.Error.Kind);
+        Assert.Equal(2, observation.DeltaCount);
+        Assert.Equal(2, observation.DeltaCountWhenCancellationCompleted);
+        Assert.False(observation.FinalUpdateObserved);
+        Assert.False(observation.ResponseReturned);
+    }
+
     private static ChatModelRequest Request(
         string modelId = DeepSeekChatModelProvider.FlashModelId,
         IReadOnlyList<ChatMessage>? messages = null,
         ChatResponseFormat? responseFormat = null,
-        Guid? turnId = null) =>
+        Guid? turnId = null,
+        ChatModelOptions? options = null) =>
         new(
             Guid.NewGuid(),
             turnId ?? Guid.NewGuid(),
             modelId,
             string.Empty,
             messages ?? [new ChatMessage(ChatMessageRole.User, "你好")],
+            Options: options,
             ResponseFormat: responseFormat);
+
+    private sealed class RecordingChatModelProvider : IChatModelProvider
+    {
+        public List<ChatModelRequest> Requests { get; } = [];
+
+        public ChatProviderDescriptor Descriptor { get; } = new(
+            DeepSeekChatModelProvider.ProviderId,
+            "DeepSeek",
+            DeepSeekChatModelProvider.DataDestination,
+            SendsDataOffDevice: true,
+            [new ChatModelDescriptor(
+                DeepSeekChatModelProvider.FlashModelId,
+                "DeepSeek V4 Flash",
+                ChatModelCapabilities.Streaming)]);
+
+        public Task<ChatModelResponse> CompleteAsync(
+            ChatModelRequest request,
+            ChatModelStreamCallback? streamCallback = null,
+            CancellationToken cancellationToken = default)
+        {
+            Requests.Add(request);
+            return Task.FromResult(new ChatModelResponse(
+                "ok",
+                ChatFinishReason.Stop,
+                new ChatModelUsage(1, 1, 2),
+                new ChatProviderMetadata(
+                    Descriptor.ProviderId,
+                    request.ModelId,
+                    "request-id",
+                    Descriptor.DataDestination)));
+        }
+
+        public Task<ChatProviderHealth> CheckHealthAsync(
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(new ChatProviderHealth(
+                Descriptor.ProviderId,
+                ChatProviderHealthState.Healthy,
+                IsConfigured: true,
+                "ok",
+                DateTimeOffset.UtcNow));
+
+        public Task CancelAsync(Guid turnId, CancellationToken cancellationToken = default) =>
+            Task.CompletedTask;
+
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+
+    private sealed class CancellableStreamingChatModelProvider : IChatModelProvider
+    {
+        private readonly CancellationTokenSource _cancellation = new();
+        private readonly TaskCompletionSource _completed =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public ChatProviderDescriptor Descriptor { get; } = new(
+            DeepSeekChatModelProvider.ProviderId,
+            "DeepSeek",
+            DeepSeekChatModelProvider.DataDestination,
+            SendsDataOffDevice: true,
+            [new ChatModelDescriptor(
+                DeepSeekChatModelProvider.FlashModelId,
+                "DeepSeek V4 Flash",
+                ChatModelCapabilities.Streaming)]);
+
+        public async Task<ChatModelResponse> CompleteAsync(
+            ChatModelRequest request,
+            ChatModelStreamCallback? streamCallback = null,
+            CancellationToken cancellationToken = default)
+        {
+            Assert.NotNull(streamCallback);
+            try
+            {
+                await streamCallback(new ChatStreamUpdate(1, "一"), _cancellation.Token);
+                await streamCallback(new ChatStreamUpdate(2, "二"), _cancellation.Token);
+                await Task.Delay(Timeout.InfiniteTimeSpan, _cancellation.Token);
+                throw new InvalidOperationException("Cancellation was not observed.");
+            }
+            catch (OperationCanceledException)
+            {
+                throw new ChatModelException(
+                    Descriptor.ProviderId,
+                    request.ModelId,
+                    new ChatModelError(
+                        ChatModelErrorKind.Cancelled,
+                        "deepseek.cancelled",
+                        "cancelled"));
+            }
+            finally
+            {
+                _completed.TrySetResult();
+            }
+        }
+
+        public Task<ChatProviderHealth> CheckHealthAsync(
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public async Task CancelAsync(Guid turnId, CancellationToken cancellationToken = default)
+        {
+            _cancellation.Cancel();
+            await _completed.Task.WaitAsync(cancellationToken);
+        }
+
+        public ValueTask DisposeAsync()
+        {
+            _cancellation.Dispose();
+            return ValueTask.CompletedTask;
+        }
+    }
 
     private static HttpResponseMessage JsonResponse(string json) => new(HttpStatusCode.OK)
     {

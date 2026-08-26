@@ -2,8 +2,110 @@
   "version": 1,
   "dependencies": {
     "net10.0-windows10.0.19041": {
+      "Microsoft.Data.Sqlite": {
+        "type": "Transitive",
+        "resolved": "10.0.11",
+        "contentHash": "7je7UELzm131GiLYc4PpZvfKXIgIyzPM+v+tjcd/nbnuWRfgcONYKzDTqJlURxwVCFsVnlpmq6y6yn4qvR8QXQ==",
+        "dependencies": {
+          "Microsoft.Data.Sqlite.Core": "10.0.11",
+          "SQLitePCLRaw.bundle_e_sqlite3": "2.1.12",
+          "SQLitePCLRaw.core": "2.1.12"
+        }
+      },
+      "Microsoft.Data.Sqlite.Core": {
+        "type": "Transitive",
+        "resolved": "10.0.11",
+        "contentHash": "hubA20AGenQ4Sx0ElWaPpB8DISjXpdx463+1zOGRslsT0e/t/06ITv+pHsop8CcJ0d8PZLfgnT7juCDVD79Dkw==",
+        "dependencies": {
+          "SQLitePCLRaw.core": "2.1.12"
+        }
+      },
+      "SQLitePCLRaw.bundle_e_sqlite3": {
+        "type": "Transitive",
+        "resolved": "2.1.12",
+        "contentHash": "mAgscpQMLw5/nfA1Q5oJVAT29yROUo1ifZGbbTpx/lwZpSxMUGoYbKfmvdm8oXER+RzxqBmmQzeBEVKfeHv2nw==",
+        "dependencies": {
+          "SQLitePCLRaw.lib.e_sqlite3": "2.1.12",
+          "SQLitePCLRaw.provider.e_sqlite3": "2.1.12"
+        }
+      },
+      "SQLitePCLRaw.core": {
+        "type": "Transitive",
+        "resolved": "2.1.12",
+        "contentHash": "ETpNw9DY3ckWLgRRAeCHj+GKOuPi61aeczkXhgHexUvqoZBAYg8RYESE2J7O1M7+o6QbdSEZwrw9bfqztUVWXg=="
+      },
+      "SQLitePCLRaw.lib.e_sqlite3": {
+        "type": "Transitive",
+        "resolved": "2.1.12",
+        "contentHash": "fWi8Dbknuhgg72fWinIdjXVaqO1hHL4YBBwVLnr7e1c9TAZwJ0QE38j9syW1hwx6HaqEVTwI+O07WPdZn8Rp0w=="
+      },
+      "SQLitePCLRaw.provider.e_sqlite3": {
+        "type": "Transitive",
+        "resolved": "2.1.12",
+        "contentHash": "W3oH4XIfCzFrgUSDKHhN6N+dgzA5YHOR2VxX8GB6Qy7CyrJJgxPEG8NirgYWlPQC5P2jz2knSsexWu4tDUL33g==",
+        "dependencies": {
+          "SQLitePCLRaw.core": "2.1.12"
+        }
+      },
+      "screenguide.agent.abstractions": {
+        "type": "Project"
+      },
+      "screenguide.agent.codex": {
+        "type": "Project",
+        "dependencies": {
+          "ScreenGuide.AI.Core": "[0.3.0, )",
+          "ScreenGuide.Agent.Abstractions": "[0.3.0, )",
+          "ScreenGuide.Core": "[0.3.0, )",
+          "ScreenGuide.Skills.Abstractions": "[0.3.0, )"
+        }
+      },
+      "screenguide.ai.core": {
+        "type": "Project"
+      },
+      "screenguide.ai.deepseek": {
+        "type": "Project",
+        "dependencies": {
+          "ScreenGuide.AI.Core": "[0.3.0, )"
+        }
+      },
+      "screenguide.core": {
+        "type": "Project",
+        "dependencies": {
+          "ScreenGuide.Skills.Abstractions": "[0.3.0, )"
+        }
+      },
+      "screenguide.desktophost": {
+        "type": "Project",
+        "dependencies": {
+          "ScreenGuide.AI.Core": "[0.3.0, )",
+          "ScreenGuide.AI.DeepSeek": "[0.3.0, )",
+          "ScreenGuide.Agent.Abstractions": "[0.3.0, )",
+          "ScreenGuide.Agent.Codex": "[0.3.0, )",
+          "ScreenGuide.Core": "[0.3.0, )",
+          "ScreenGuide.DesktopProtocol": "[0.3.0, )",
+          "ScreenGuide.Evidence": "[0.3.0, )",
+          "ScreenGuide.Persistence": "[0.3.0, )",
+          "ScreenGuide.Skills.Abstractions": "[0.3.0, )",
+          "ScreenGuide.Skills.Windows": "[0.3.0, )",
+          "ScreenGuide.Vision.Abstractions": "[0.3.0, )",
+          "ScreenGuide.Vision.Windows": "[0.3.0, )"
+        }
+      },
       "screenguide.desktopprotocol": {
         "type": "Project"
+      },
+      "screenguide.evidence": {
+        "type": "Project",
+        "dependencies": {
+          "ScreenGuide.Core": "[0.3.0, )"
+        }
+      },
+      "screenguide.persistence": {
+        "type": "Project",
+        "dependencies": {
+          "Microsoft.Data.Sqlite": "[10.0.11, )",
+          "ScreenGuide.Core": "[0.3.0, )"
+        }
       },
       "screenguide.skills.abstractions": {
         "type": "Project"
@@ -12,6 +114,15 @@
         "type": "Project",
         "dependencies": {
           "ScreenGuide.Skills.Abstractions": "[0.3.0, )"
+        }
+      },
+      "screenguide.vision.abstractions": {
+        "type": "Project"
+      },
+      "screenguide.vision.windows": {
+        "type": "Project",
+        "dependencies": {
+          "ScreenGuide.Vision.Abstractions": "[0.3.0, )"
         }
       }
     }
