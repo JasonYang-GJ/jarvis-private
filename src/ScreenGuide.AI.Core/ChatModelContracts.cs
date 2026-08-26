@@ -144,7 +144,8 @@ public enum ChatProviderHealthState
     NotConfigured,
     Healthy,
     Degraded,
-    Unavailable
+    Unavailable,
+    PolicyDisabled
 }
 
 public sealed record ChatProviderHealth(
@@ -166,15 +167,76 @@ public enum ChatModelErrorKind
     ModelNotFound,
     InvalidResponse,
     Cancelled,
-    Unknown
+    Unknown,
+    Configuration,
+    Authorization,
+    PolicyDisabled
 }
 
-public sealed record ChatModelError(
-    ChatModelErrorKind Kind,
-    string Code,
-    string UserMessage,
-    bool IsRetryable,
-    TimeSpan? RetryAfter = null);
+public sealed record ChatModelError
+{
+    public ChatModelError(
+        ChatModelErrorKind kind,
+        string code,
+        string userMessage,
+        TimeSpan? RetryAfter = null)
+    {
+        Kind = kind;
+        Code = NormalizeDiagnosticCode(code);
+        UserMessage = userMessage;
+        IsRetryable = kind is
+            ChatModelErrorKind.RateLimited or
+            ChatModelErrorKind.Timeout or
+            ChatModelErrorKind.Network or
+            ChatModelErrorKind.Unavailable;
+        this.RetryAfter = kind is ChatModelErrorKind.RateLimited or ChatModelErrorKind.Unavailable
+            && RetryAfter is { } delay
+            && delay > TimeSpan.Zero
+            && delay <= TimeSpan.FromHours(24)
+                ? delay
+                : null;
+    }
+
+    public ChatModelError(
+        ChatModelErrorKind kind,
+        string code,
+        string userMessage,
+        bool IsRetryable,
+        TimeSpan? RetryAfter = null)
+        : this(kind, code, userMessage, RetryAfter)
+    {
+    }
+
+    public ChatModelErrorKind Kind { get; }
+
+    public string Code { get; }
+
+    public string UserMessage { get; }
+
+    public bool IsRetryable { get; }
+
+    public TimeSpan? RetryAfter { get; }
+
+    private static string NormalizeDiagnosticCode(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value) || value.Length > 80)
+        {
+            return "component.invalid_diagnostic_code";
+        }
+
+        foreach (var character in value)
+        {
+            var isAsciiLetter = character is >= 'A' and <= 'Z' or >= 'a' and <= 'z';
+            var isAsciiDigit = character is >= '0' and <= '9';
+            if (!isAsciiLetter && !isAsciiDigit && character is not ('.' or '_' or '-'))
+            {
+                return "component.invalid_diagnostic_code";
+            }
+        }
+
+        return value;
+    }
+}
 
 public sealed class ChatModelException : Exception
 {

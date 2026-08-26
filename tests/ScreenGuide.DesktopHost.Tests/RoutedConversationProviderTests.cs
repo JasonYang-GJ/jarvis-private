@@ -239,9 +239,71 @@ public sealed class RoutedConversationProviderTests
 
         Assert.Equal(ConversationProviderOutcome.Failed, result.Outcome);
         Assert.Equal("rate_limited", result.FailureCode);
-        Assert.Equal("服务繁忙，请稍后再试。", result.FailureMessage);
+        Assert.Equal("这个 AI 服务当前请求过多，请稍后再试。", result.FailureMessage);
         Assert.DoesNotContain("RAW_SECRET", result.FailureMessage, StringComparison.Ordinal);
-        Assert.Equal("rate_limited", Assert.Single(invocations.Failed).FailureCode);
+        Assert.Equal("provider-a.rate_limited", Assert.Single(invocations.Failed).FailureCode);
+    }
+
+    [Fact]
+    public async Task MaliciousProviderErrorCannotCrossTheSensitiveOuterBoundary()
+    {
+        const string canaries = "Bearer fake-token API_KEY=sk-abcdefghijklmnop C:\\Users\\person\\private.txt "
+                                + "PROMPT_CANARY CONVERSATION_CANARY RAW_RESPONSE_CANARY at Secret.Stack()";
+        var conversationId = Guid.NewGuid();
+        var history = new HistoryStore(conversationId);
+        history.Add(ConversationMessageRole.User, "你好");
+        var provider = new FailingChatProvider(new ChatModelError(
+            ChatModelErrorKind.Authorization,
+            canaries,
+            canaries));
+        var invocations = new RecordingInvocationStore();
+        var routed = new RoutedConversationProvider(
+            history,
+            new ModelRouter(
+                new ChatProviderRegistry([provider]),
+                new MutableAiSettingsStore("provider-a", "model-a")),
+            await LoadRepositoryPromptsAsync(),
+            invocations,
+            TimeProvider.System);
+
+        var result = await routed.SendAsync(Request(conversationId, "你好", provider));
+
+        Assert.Equal(ConversationProviderOutcome.Failed, result.Outcome);
+        Assert.Equal("authorization", result.FailureCode);
+        Assert.Equal("这个 AI 服务拒绝了当前账户的访问权限，请检查账户授权。", result.FailureMessage);
+        var exposed = $"{result}|{Assert.Single(invocations.Failed).FailureCode}";
+        Assert.DoesNotContain("fake-token", exposed, StringComparison.Ordinal);
+        Assert.DoesNotContain("sk-abcdefghijklmnop", exposed, StringComparison.Ordinal);
+        Assert.DoesNotContain("person", exposed, StringComparison.Ordinal);
+        Assert.DoesNotContain("PROMPT_CANARY", exposed, StringComparison.Ordinal);
+        Assert.DoesNotContain("CONVERSATION_CANARY", exposed, StringComparison.Ordinal);
+        Assert.DoesNotContain("RAW_RESPONSE_CANARY", exposed, StringComparison.Ordinal);
+        Assert.DoesNotContain("Secret.Stack", exposed, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ProviderFailureNeverFallsBackOrResendsToAnotherProvider()
+    {
+        var conversationId = Guid.NewGuid();
+        var history = new HistoryStore(conversationId);
+        history.Add(ConversationMessageRole.User, "NO_FALLBACK_CANARY");
+        var selected = new FailingChatProvider();
+        var other = new RecordingChatProvider("provider-b", "model-b");
+        var routed = new RoutedConversationProvider(
+            history,
+            new ModelRouter(
+                new ChatProviderRegistry([selected, other]),
+                new MutableAiSettingsStore("provider-b", "model-b")),
+            await LoadRepositoryPromptsAsync(),
+            new RecordingInvocationStore(),
+            TimeProvider.System);
+
+        var result = await routed.SendAsync(
+            Request(conversationId, "NO_FALLBACK_CANARY", selected));
+
+        Assert.Equal(ConversationProviderOutcome.Failed, result.Outcome);
+        Assert.Equal(1, selected.CompleteCalls);
+        Assert.Empty(other.Requests);
     }
 
     [Fact]
@@ -532,7 +594,7 @@ public sealed class RoutedConversationProviderTests
         }
     }
 
-    private sealed class FailingChatProvider : IChatModelProvider
+    private sealed class FailingChatProvider(ChatModelError? error = null) : IChatModelProvider
     {
         public ChatProviderDescriptor Descriptor { get; } = new(
             "provider-a",
@@ -541,18 +603,22 @@ public sealed class RoutedConversationProviderTests
             true,
             [new ChatModelDescriptor("model-a", "Model A", ChatModelCapabilities.None)]);
 
+        public int CompleteCalls { get; private set; }
+
         public Task<ChatModelResponse> CompleteAsync(
             ChatModelRequest request,
             ChatModelStreamCallback? streamCallback = null,
-            CancellationToken cancellationToken = default) =>
+            CancellationToken cancellationToken = default)
+        {
+            CompleteCalls++;
             throw new ChatModelException(
                 "provider-a",
                 request.ModelId,
-                new ChatModelError(
+                error ?? new ChatModelError(
                     ChatModelErrorKind.RateLimited,
-                    "rate_limited",
-                    "服务繁忙，请稍后再试。",
-                    true));
+                    "provider-a.rate_limited",
+                    "RAW_SECRET"));
+        }
 
         public Task<ChatProviderHealth> CheckHealthAsync(CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();

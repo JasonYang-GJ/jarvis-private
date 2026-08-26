@@ -36,8 +36,8 @@ public sealed class CodexChatModelProviderTests
 
         Assert.Equal("codex", exception.ProviderId);
         Assert.Equal("codex-default", exception.ModelId);
-        Assert.Equal(ChatModelErrorKind.Unavailable, exception.Error.Kind);
-        Assert.Equal("disabled_by_security_policy", exception.Error.Code);
+        Assert.Equal(ChatModelErrorKind.PolicyDisabled, exception.Error.Kind);
+        Assert.Equal("codex.policy_disabled", exception.Error.Code);
         Assert.False(exception.Error.IsRetryable);
         Assert.Equal(
             "出于安全原因，当前版本暂不提供 Codex 普通聊天。你可以改用其他已配置的聊天服务；编程任务不受影响。",
@@ -59,8 +59,8 @@ public sealed class CodexChatModelProviderTests
         var health = await provider.CheckHealthAsync();
 
         Assert.Equal("codex", health.ProviderId);
-        Assert.Equal(ChatProviderHealthState.Unavailable, health.State);
-        Assert.False(health.IsConfigured);
+        Assert.Equal(ChatProviderHealthState.PolicyDisabled, health.State);
+        Assert.True(health.IsConfigured);
         Assert.Equal(
             "出于安全原因，Codex 普通聊天当前已停用；编程任务不受影响。",
             health.Message);
@@ -142,7 +142,7 @@ public sealed class CodexChatModelProviderTests
         await Task.Delay(TimeSpan.FromSeconds(5));
 
         Assert.Equal(ChatModelErrorKind.Cancelled, exception.Error.Kind);
-        Assert.Equal("cancelled", exception.Error.Code);
+        Assert.Equal("codex.cancelled", exception.Error.Code);
         Assert.False(File.Exists(marker));
     }
 
@@ -164,7 +164,7 @@ public sealed class CodexChatModelProviderTests
         await Task.Delay(TimeSpan.FromSeconds(5));
 
         Assert.Equal(ChatModelErrorKind.Timeout, exception.Error.Kind);
-        Assert.Equal("timeout", exception.Error.Code);
+        Assert.Equal("codex.timeout", exception.Error.Code);
         Assert.False(File.Exists(marker));
     }
 
@@ -310,7 +310,7 @@ public sealed class CodexChatModelProviderTests
                     () => running.WaitAsync(TimeSpan.FromSeconds(3)));
 
                 Assert.Equal(ChatModelErrorKind.InvalidResponse, exception.Error.Kind);
-                Assert.Equal("invalid_response", exception.Error.Code);
+                Assert.Equal("codex.invalid_response", exception.Error.Code);
             }
             finally
             {
@@ -393,9 +393,9 @@ public sealed class CodexChatModelProviderTests
                 new ChatMessage(ChatMessageRole.Tool, "tool output"))));
 
         Assert.Equal(ChatModelErrorKind.InvalidRequest, oversized.Error.Kind);
-        Assert.Equal("input_too_large", oversized.Error.Code);
+        Assert.Equal("codex.input_too_large", oversized.Error.Code);
         Assert.Equal(ChatModelErrorKind.InvalidRequest, toolMessage.Error.Kind);
-        Assert.Equal("tool_messages_not_supported", toolMessage.Error.Code);
+        Assert.Equal("codex.tool_messages_not_supported", toolMessage.Error.Code);
     }
 
     private static ChatModelRequest Request(

@@ -65,17 +65,26 @@ DesktopHost
 
 | Provider | 注册模型 | 代码声明能力 | 凭据与数据去向 | 当前验收状态 |
 |---|---|---|---|---|
-| Codex | `codex-default` | 当前不声明增量流式或结构化输出；最终回调一次 | 使用本机 Codex CLI 与当前登录账号；内容发送到 OpenAI Codex 云端服务 | 实现和开发期自动化已覆盖；阶段 2 真实连续对话/切换/取消待总控验收 |
+| Codex | `codex-default` | `None`，不声明增量流式、结构化输出或 Tool Calling | 普通聊天生产策略安全停用；编程 Agent 继续使用独立的 Codex 连接器 | `PolicyDisabled` 失败关闭，不探测或启动 CLI；编程任务不受影响 |
 | DeepSeek | `deepseek-v4-flash`、`deepseek-v4-pro` | Streaming、JSON Object、Reasoning；不声明 JSON Schema/Tool Calling/Vision | API Key；固定发送到 `https://api.deepseek.com` | 实现和开发期网络边界自动化已覆盖；真实 Key、真实联网和计费验收待总控确认 |
 
 这里的“注册模型”只表示当前代码允许选择的 Model ID，不等于已经完成真实账户可用性验证。
+
+### 3.1 R2 健康、错误与重试合同
+
+- 核心健康状态为 `NotChecked`、`NotConfigured`、`Healthy`、`Degraded`、`Unavailable`、`PolicyDisabled`。配置状态与健康状态分离：凭据仓库是“是否已配置”的真值，连接失败不能把已保存凭据误报为缺失；无凭据型 Provider 的配置状态为 `NotRequired`。
+- 为兼容现有 protocol v8，Host 只在 DTO 边界把 `PolicyDisabled` 投影为 `Unavailable`，同时保留安全策略说明和 `IsConfigured=true`；核心层不丢失 `PolicyDisabled` 语义。
+- 稳定错误种类包括 `Configuration`、`Unauthorized`、`Authorization`、`PolicyDisabled`、`InsufficientBalance`、`RateLimited`、`Timeout`、`Network`、`Unavailable` 等。DeepSeek 缺 Key 属于 `Configuration`，401 属于 `Unauthorized`，403 属于 `Authorization`，402 属于 `InsufficientBalance`，429 属于 `RateLimited`，5xx 属于 `Unavailable`。
+- `ChatModelError.Code` 只用于安全诊断和审计。新代码使用不超过 80 个 ASCII 字符的 `owner.reason` 形式；旧下划线代码仍可读取，不要求迁移。用户可见 `FailureCode` 只由稳定错误种类产生，不依赖 Provider 诊断码。
+- `IsRetryable` 由 AI Core 统一计算：只有 `RateLimited`、`Timeout`、`Network`、`Unavailable` 可重试。`RetryAfter` 仅接受限流或可信服务不可用响应，且必须大于 0、不超过 24 小时；这只是诊断事实，不会触发自动重试或 fallback。
+- Provider 错误消息、请求 ID 和诊断码进入 Host 前必须经过固定边界；API Key、Bearer、用户路径、Prompt、Conversation、原始响应和内部堆栈不得进入用户可见错误。普通聊天失败后不会把同一正文改发到另一个 Provider。
 
 ## 4. Provider Registry
 
 `ChatProviderRegistry` 负责：
 
 - 注册多个普通聊天 Provider；
-- 拒绝空 Provider、重复 Provider ID、重复 Model ID 和没有普通聊天能力的 Provider；
+- 拒绝空 Provider、重复 Provider ID、重复 Model ID、未知工作负载位、未知能力位、无效描述元数据和没有普通聊天能力的 Provider；
 - 按 Provider ID + Model ID 解析具体实现；
 - 向 Host/UI 提供统一描述。
 
@@ -157,7 +166,7 @@ DPAPI 解决“密钥明文落盘”问题，但不是对已取得同一 Windows
 - Codex 普通聊天把进程加入 Windows Job Object，取消时终止进程树。
 - DeepSeek 使用与 Turn 绑定的取消令牌取消真实 HTTP/SSE 读取，并在取消后拒绝迟到成功。
 - `RoutedConversationProvider` 继续依赖阶段 1 的 Conversation/Session 唯一终态，取消后的回答不能重新插入消息或覆盖新状态。
-- DeepSeek 把未配置、401、402、400/422、404/模型错误、429、5xx、超时、网络错误、非法响应和不安全重定向映射为安全、可读错误；响应体和 SSE 有大小上限。
+- DeepSeek 把未配置、401、403、402、400/422、404/模型错误、429、5xx、超时、网络错误、非法响应和不安全重定向映射为稳定种类与安全大白话；响应体和 SSE 有大小上限。
 - 不自动付费重试，不静默改发其他 Provider。
 
 ## 11. UI 与 IPC

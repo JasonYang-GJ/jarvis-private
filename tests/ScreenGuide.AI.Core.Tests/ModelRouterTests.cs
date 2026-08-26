@@ -235,22 +235,14 @@ public sealed class ModelRouterTests
     }
 
     [Fact]
-    public async Task ResolveInvalidRegistryMetadataReturnsStableUnavailableWithoutCallingAProvider()
+    public void InvalidRegistryMetadataIsRejectedBeforeRouterCanObserveProvider()
     {
         var provider = new RecordingProvider("provider-a", "model-a", " ");
-        var router = new ModelRouter(
-            new ChatProviderRegistry([provider]),
-            new MutableSettingsStore(new AiSettings(
-                new ChatModelRoute("provider-a", "model-a"))));
 
-        var route = await router.ResolveDefaultChatRouteAsync();
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            new ChatProviderRegistry([provider]));
 
-        Assert.Equal(ChatRouteResolutionStatus.Unavailable, route.Status);
-        Assert.Equal("provider-a", route.ProviderId);
-        Assert.Equal("model-a", route.ModelId);
-        Assert.Null(route.DataDestination);
-        Assert.Null(route.SendsDataOffDevice);
-        Assert.Equal("configured_chat_route_invalid", route.FailureCode);
+        Assert.Contains("描述信息无效", exception.Message, StringComparison.Ordinal);
         Assert.Equal(0, provider.CompleteCount);
     }
 

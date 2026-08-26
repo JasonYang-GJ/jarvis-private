@@ -109,6 +109,83 @@ public sealed class AiSettingsServiceTests
         Assert.DoesNotContain("must-not-store", credentialError.Message, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task PolicyDisabledRemainsStructuredInCoreButProjectsToLegacyUnavailableDto()
+    {
+        var codex = new SettingsProvider(
+            "codex",
+            "codex-default",
+            ChatProviderCredentialKind.None,
+            "Codex",
+            ChatProviderHealthState.PolicyDisabled,
+            healthIsConfigured: true,
+            "安全策略已停用 Codex 普通聊天；编程任务不受影响。");
+        var service = Service(codex);
+
+        var health = await service.CheckProviderHealthAsync(new ProviderIdRequestDto("codex"));
+        var settings = await service.GetAsync();
+        var provider = Assert.Single(settings.Providers);
+
+        Assert.Equal("Unavailable", health.State);
+        Assert.True(health.IsConfigured);
+        Assert.Contains("安全策略", health.SafeMessage, StringComparison.Ordinal);
+        Assert.Contains("编程任务不受影响", health.SafeMessage, StringComparison.Ordinal);
+        Assert.Equal("NotRequired", provider.ConfigurationState);
+        Assert.Equal("Unavailable", provider.Health.State);
+    }
+
+    [Fact]
+    public async Task MissingCredentialShortCircuitsExplicitHealthWithoutCallingProvider()
+    {
+        var deepseek = new SettingsProvider(
+            "deepseek",
+            "deepseek-v4-flash",
+            ChatProviderCredentialKind.ApiKey,
+            "DeepSeek");
+        var service = Service(
+            new MemorySettingsStore(new AiSettings(
+                new ChatModelRoute("deepseek", "deepseek-v4-flash"))),
+            new MemoryCredentialStore(),
+            deepseek);
+
+        var health = await service.CheckProviderHealthAsync(
+            new ProviderIdRequestDto("deepseek"));
+
+        Assert.Equal("NotConfigured", health.State);
+        Assert.False(health.IsConfigured);
+        Assert.Equal(0, deepseek.HealthChecks);
+    }
+
+    [Fact]
+    public async Task CredentialStoreIsConfigurationTruthWhenProviderReportsUnavailable()
+    {
+        var deepseek = new SettingsProvider(
+            "deepseek",
+            "deepseek-v4-flash",
+            ChatProviderCredentialKind.ApiKey,
+            "DeepSeek",
+            ChatProviderHealthState.Unavailable,
+            healthIsConfigured: false,
+            "连接失败。");
+        var service = Service(
+            new MemorySettingsStore(new AiSettings(
+                new ChatModelRoute("deepseek", "deepseek-v4-flash"))),
+            new MemoryCredentialStore(),
+            deepseek);
+        _ = await service.SetProviderCredentialAsync(
+            new SetProviderCredentialRequestDto("deepseek", "fake-configured-key"));
+
+        var health = await service.CheckProviderHealthAsync(
+            new ProviderIdRequestDto("deepseek"));
+        var settings = await service.GetAsync();
+
+        Assert.Equal("Unavailable", health.State);
+        Assert.True(health.IsConfigured);
+        Assert.Equal("Configured", settings.Providers.Single().ConfigurationState);
+        Assert.True(settings.Providers.Single().Health.IsConfigured);
+        Assert.Equal(1, deepseek.HealthChecks);
+    }
+
     private static AiSettingsService Service(params SettingsProvider[] providers) =>
         Service(
             new MemorySettingsStore(new AiSettings(
@@ -126,7 +203,10 @@ public sealed class AiSettingsServiceTests
         string providerId,
         string modelId,
         ChatProviderCredentialKind credentialKind,
-        string destination) : IChatModelProvider
+        string destination,
+        ChatProviderHealthState healthState = ChatProviderHealthState.Healthy,
+        bool healthIsConfigured = true,
+        string healthMessage = "连接正常。") : IChatModelProvider
     {
         public ChatProviderDescriptor Descriptor { get; } = new(
             providerId,
@@ -146,9 +226,9 @@ public sealed class AiSettingsServiceTests
             HealthChecks++;
             return Task.FromResult(new ChatProviderHealth(
                 providerId,
-                ChatProviderHealthState.Healthy,
-                IsConfigured: true,
-                "连接正常。",
+                healthState,
+                healthIsConfigured,
+                healthMessage,
                 DateTimeOffset.UtcNow));
         }
 

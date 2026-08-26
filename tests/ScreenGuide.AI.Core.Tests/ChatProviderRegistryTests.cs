@@ -67,6 +67,59 @@ public sealed class ChatProviderRegistryTests
         Assert.Contains("至少一个", exception.Message, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void RejectsUnknownProviderWorkloadBits()
+    {
+        var provider = new StubProvider(new ChatProviderDescriptor(
+            "provider-a",
+            "Provider A",
+            "api.provider-a.example",
+            true,
+            [new ChatModelDescriptor("model-a", "Model A", ChatModelCapabilities.None)],
+            SupportedWorkloads: ChatProviderWorkloads.OrdinaryChat | (ChatProviderWorkloads)(1 << 10)));
+
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            new ChatProviderRegistry([provider]));
+
+        Assert.Contains("Workload", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RejectsUnknownModelCapabilityBits()
+    {
+        var provider = new StubProvider(new ChatProviderDescriptor(
+            "provider-a",
+            "Provider A",
+            "api.provider-a.example",
+            true,
+            [new ChatModelDescriptor("model-a", "Model A", (ChatModelCapabilities)(1 << 20))]));
+
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            new ChatProviderRegistry([provider]));
+
+        Assert.Contains("Capability", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RejectsInvalidProviderAndModelDescriptors()
+    {
+        ChatProviderDescriptor[] invalidDescriptors =
+        [
+            Descriptor(displayName: " "),
+            Descriptor(dataDestination: " "),
+            Descriptor(credentialKind: (ChatProviderCredentialKind)99),
+            Descriptor(modelDisplayName: " "),
+            Descriptor(contextWindowTokens: 0)
+        ];
+
+        foreach (var descriptor in invalidDescriptors)
+        {
+            var exception = Assert.Throws<InvalidOperationException>(() =>
+                new ChatProviderRegistry([new StubProvider(descriptor)]));
+            Assert.Contains("无效", exception.Message, StringComparison.Ordinal);
+        }
+    }
+
     private static StubProvider Provider(string providerId, string modelId) => new(
         new ChatProviderDescriptor(
             providerId,
@@ -74,6 +127,25 @@ public sealed class ChatProviderRegistryTests
             $"api.{providerId}.example",
             true,
             [new ChatModelDescriptor(modelId, modelId, ChatModelCapabilities.None)]));
+
+    private static ChatProviderDescriptor Descriptor(
+        string displayName = "Provider A",
+        string dataDestination = "api.provider-a.example",
+        ChatProviderCredentialKind credentialKind = ChatProviderCredentialKind.None,
+        string modelDisplayName = "Model A",
+        int? contextWindowTokens = null) => new(
+            "provider-a",
+            displayName,
+            dataDestination,
+            true,
+            [
+                new ChatModelDescriptor(
+                    "model-a",
+                    modelDisplayName,
+                    ChatModelCapabilities.None,
+                    contextWindowTokens)
+            ],
+            credentialKind);
 
     private sealed class StubProvider(ChatProviderDescriptor descriptor) : IChatModelProvider
     {

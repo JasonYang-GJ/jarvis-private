@@ -47,7 +47,7 @@ public sealed class AiSettingsIpcIntegrationTests
             var afterHealth = await client.GetAiSettingsAsync();
             var codex = afterHealth.Providers.Single(item => item.ProviderId == "codex");
             Assert.Equal("Unavailable", codexHealth.State);
-            Assert.False(codexHealth.IsConfigured);
+            Assert.True(codexHealth.IsConfigured);
             Assert.Contains("安全原因", codexHealth.SafeMessage, StringComparison.Ordinal);
             Assert.Contains("Codex 普通聊天", codexHealth.SafeMessage, StringComparison.Ordinal);
             Assert.Contains("停用", codexHealth.SafeMessage, StringComparison.Ordinal);

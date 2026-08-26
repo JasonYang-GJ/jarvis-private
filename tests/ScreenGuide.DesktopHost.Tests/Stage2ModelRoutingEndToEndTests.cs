@@ -56,8 +56,8 @@ public sealed class Stage2ModelRoutingEndToEndTests
         var exception = await Assert.ThrowsAsync<ChatModelException>(() =>
             provider.CompleteAsync(request));
 
-        Assert.Equal(ChatModelErrorKind.Unavailable, exception.Error.Kind);
-        Assert.Equal("disabled_by_security_policy", exception.Error.Code);
+        Assert.Equal(ChatModelErrorKind.PolicyDisabled, exception.Error.Kind);
+        Assert.Equal("codex.policy_disabled", exception.Error.Code);
         Assert.False(exception.Error.IsRetryable);
         Assert.False(Directory.Exists(environment.Options.CodexDataDirectory));
         Assert.Null(publiclyEnabledProvider);

@@ -6,6 +6,99 @@ namespace ScreenGuide.AI.Core.Tests;
 public sealed class ChatModelContractsTests
 {
     [Fact]
+    public void HealthAndErrorContractsRepresentPolicyConfigurationAndAuthorization()
+    {
+        Assert.Equal("PolicyDisabled", ChatProviderHealthState.PolicyDisabled.ToString());
+        Assert.Equal("Configuration", ChatModelErrorKind.Configuration.ToString());
+        Assert.Equal("Authorization", ChatModelErrorKind.Authorization.ToString());
+        Assert.Equal("PolicyDisabled", ChatModelErrorKind.PolicyDisabled.ToString());
+    }
+
+    [Theory]
+    [InlineData(ChatModelErrorKind.RateLimited, true)]
+    [InlineData(ChatModelErrorKind.Timeout, true)]
+    [InlineData(ChatModelErrorKind.Network, true)]
+    [InlineData(ChatModelErrorKind.Unavailable, true)]
+    [InlineData(ChatModelErrorKind.Configuration, false)]
+    [InlineData(ChatModelErrorKind.Unauthorized, false)]
+    [InlineData(ChatModelErrorKind.Authorization, false)]
+    [InlineData(ChatModelErrorKind.InsufficientBalance, false)]
+    [InlineData(ChatModelErrorKind.InvalidRequest, false)]
+    [InlineData(ChatModelErrorKind.ModelNotFound, false)]
+    [InlineData(ChatModelErrorKind.InvalidResponse, false)]
+    [InlineData(ChatModelErrorKind.Cancelled, false)]
+    [InlineData(ChatModelErrorKind.PolicyDisabled, false)]
+    [InlineData(ChatModelErrorKind.Unknown, false)]
+    public void CoreOwnsTheRetryableMatrix(ChatModelErrorKind kind, bool expectedRetryable)
+    {
+        var error = new ChatModelError(kind, "provider.reason", "安全错误信息。");
+
+        Assert.Equal(expectedRetryable, error.IsRetryable);
+    }
+
+    [Fact]
+    public void CoreAcceptsOnlyBoundedTrustedRetryAfterFacts()
+    {
+        var validRateLimit = new ChatModelError(
+            ChatModelErrorKind.RateLimited,
+            "provider.rate_limited",
+            "安全错误信息。",
+            TimeSpan.FromSeconds(30));
+        var validUnavailable = new ChatModelError(
+            ChatModelErrorKind.Unavailable,
+            "provider.unavailable",
+            "安全错误信息。",
+            TimeSpan.FromHours(24));
+        var zero = new ChatModelError(
+            ChatModelErrorKind.RateLimited,
+            "provider.rate_limited",
+            "安全错误信息。",
+            TimeSpan.Zero);
+        var tooLong = new ChatModelError(
+            ChatModelErrorKind.RateLimited,
+            "provider.rate_limited",
+            "安全错误信息。",
+            TimeSpan.FromHours(24) + TimeSpan.FromTicks(1));
+        var unsupportedKind = new ChatModelError(
+            ChatModelErrorKind.Timeout,
+            "provider.timeout",
+            "安全错误信息。",
+            TimeSpan.FromSeconds(30));
+
+        Assert.Equal(TimeSpan.FromSeconds(30), validRateLimit.RetryAfter);
+        Assert.Equal(TimeSpan.FromHours(24), validUnavailable.RetryAfter);
+        Assert.Null(zero.RetryAfter);
+        Assert.Null(tooLong.RetryAfter);
+        Assert.Null(unsupportedKind.RetryAfter);
+    }
+
+    [Fact]
+    public void DiagnosticCodesAcceptNewAndLegacySafeFormsButRejectSensitivePayloads()
+    {
+        var current = new ChatModelError(
+            ChatModelErrorKind.RateLimited,
+            "deepseek.rate_limited",
+            "安全错误信息。");
+        var legacy = new ChatModelError(
+            ChatModelErrorKind.RateLimited,
+            "deepseek_rate_limited",
+            "安全错误信息。");
+        var malicious = new ChatModelError(
+            ChatModelErrorKind.Unknown,
+            "Bearer fake-secret\nC:\\Users\\Example\\private.txt",
+            "安全错误信息。");
+        var oversized = new ChatModelError(
+            ChatModelErrorKind.Unknown,
+            new string('a', 81),
+            "安全错误信息。");
+
+        Assert.Equal("deepseek.rate_limited", current.Code);
+        Assert.Equal("deepseek_rate_limited", legacy.Code);
+        Assert.Equal("component.invalid_diagnostic_code", malicious.Code);
+        Assert.Equal("component.invalid_diagnostic_code", oversized.Code);
+    }
+
+    [Fact]
     public async Task ProviderReceivesSupplierNeutralRequestAndCancelsByTurn()
     {
         var provider = new RecordingProvider();

@@ -269,18 +269,18 @@ public sealed class CodexChatModelProvider : IChatModelProvider
         }
         catch (FileNotFoundException)
         {
-            throw ProviderUnavailableError("codex_not_found", "未找到可用的 Codex，请先完成 Codex 安装和登录。");
+            throw ProviderUnavailableError("codex.not_found", "未找到可用的 Codex，请先完成 Codex 安装和登录。");
         }
         catch (CodexVersionCompatibilityException)
         {
             throw ProviderUnavailableError(
-                "codex_version_unsupported",
+                "codex.version_unsupported",
                 "当前 Codex 版本尚未通过元枢兼容性验证。");
         }
         catch (NotSupportedException)
         {
             throw ProviderUnavailableError(
-                "codex_version_unrecognized",
+                "codex.version_unrecognized",
                 "当前 Codex 版本无法识别或尚未通过兼容性验证。");
         }
         catch (Exception)
@@ -330,8 +330,8 @@ public sealed class CodexChatModelProvider : IChatModelProvider
         {
             return new ChatProviderHealth(
                 ProviderId,
-                ChatProviderHealthState.Unavailable,
-                IsConfigured: false,
+                ChatProviderHealthState.PolicyDisabled,
+                IsConfigured: true,
                 "出于安全原因，Codex 普通聊天当前已停用；编程任务不受影响。",
                 DateTimeOffset.UtcNow);
         }
@@ -590,9 +590,8 @@ public sealed class CodexChatModelProvider : IChatModelProvider
                 request.ModelId,
                 new ChatModelError(
                     ChatModelErrorKind.ModelNotFound,
-                    "model_not_found",
-                    "Codex 没有这个聊天模型。",
-                    IsRetryable: false));
+                    "codex.model_not_found",
+                    "Codex 没有这个聊天模型。"));
         }
 
         if (request.RequestId == Guid.Empty
@@ -602,7 +601,7 @@ public sealed class CodexChatModelProvider : IChatModelProvider
             || request.Messages.Count == 0
             || request.Messages.Any(message => message is null || string.IsNullOrWhiteSpace(message.Content)))
         {
-            throw InvalidRequestError("聊天请求缺少必要内容。", "invalid_request");
+            throw InvalidRequestError("聊天请求缺少必要内容。", "codex.invalid_request");
         }
 
         if (request.Messages.Count > MaximumMessageCount
@@ -611,10 +610,10 @@ public sealed class CodexChatModelProvider : IChatModelProvider
             throw request.Messages.Any(message => message.Role == ChatMessageRole.Tool)
                 ? InvalidRequestError(
                     "当前 Codex 普通聊天不支持工具消息。",
-                    "tool_messages_not_supported")
+                    "codex.tool_messages_not_supported")
                 : InvalidRequestError(
                     "聊天历史消息数量超过安全上限。",
-                    "input_too_large");
+                    "codex.input_too_large");
         }
 
         long inputCharacters = request.SystemPrompt.Length;
@@ -625,7 +624,7 @@ public sealed class CodexChatModelProvider : IChatModelProvider
             {
                 throw InvalidRequestError(
                     "聊天历史内容超过安全上限，请新建一个会话后继续。",
-                    "input_too_large");
+                    "codex.input_too_large");
             }
         }
 
@@ -634,7 +633,7 @@ public sealed class CodexChatModelProvider : IChatModelProvider
         {
             throw InvalidRequestError(
                 "当前 Codex 普通聊天适配器不支持这组模型选项或输出格式。",
-                "unsupported_options");
+                "codex.unsupported_options");
         }
     }
 
@@ -652,18 +651,16 @@ public sealed class CodexChatModelProvider : IChatModelProvider
         DefaultModelId,
         new ChatModelError(
             ChatModelErrorKind.Cancelled,
-            "cancelled",
-            "回答已停止。",
-            IsRetryable: false));
+            "codex.cancelled",
+            "回答已停止。"));
 
     private static ChatModelException TimeoutError() => new(
         ProviderId,
         DefaultModelId,
         new ChatModelError(
             ChatModelErrorKind.Timeout,
-            "timeout",
-            "Codex 回答超时，已停止。",
-            IsRetryable: true));
+            "codex.timeout",
+            "Codex 回答超时，已停止。"));
 
     private static ChatModelException InvalidRequestError(string message, string code) => new(
         ProviderId,
@@ -671,37 +668,33 @@ public sealed class CodexChatModelProvider : IChatModelProvider
         new ChatModelError(
             ChatModelErrorKind.InvalidRequest,
             code,
-            message,
-            IsRetryable: false));
+            message));
 
     private static ChatModelException InvalidResponseError(string message) => new(
         ProviderId,
         DefaultModelId,
         new ChatModelError(
             ChatModelErrorKind.InvalidResponse,
-            "invalid_response",
-            message,
-            IsRetryable: true));
+            "codex.invalid_response",
+            message));
 
     private static ChatModelException ProviderUnavailableError(
-        string code = "codex_unavailable",
+        string code = "codex.unavailable",
         string message = "Codex 当前无法完成回答，请稍后重试或检查登录状态。") => new(
         ProviderId,
         DefaultModelId,
         new ChatModelError(
             ChatModelErrorKind.Unavailable,
             code,
-            message,
-            IsRetryable: true));
+            message));
 
     private static ChatModelException DisabledBySecurityPolicyError() => new(
         ProviderId,
         DefaultModelId,
         new ChatModelError(
-            ChatModelErrorKind.Unavailable,
-            "disabled_by_security_policy",
-            "出于安全原因，当前版本暂不提供 Codex 普通聊天。你可以改用其他已配置的聊天服务；编程任务不受影响。",
-            IsRetryable: false));
+            ChatModelErrorKind.PolicyDisabled,
+            "codex.policy_disabled",
+            "出于安全原因，当前版本暂不提供 Codex 普通聊天。你可以改用其他已配置的聊天服务；编程任务不受影响。"));
 
     private sealed class BoundedProtocolLineReader(
         TextReader reader,

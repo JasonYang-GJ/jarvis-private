@@ -68,10 +68,11 @@ public sealed class RoutedConversationProvider(
                 request.FrozenRoute.DataDestination,
                 request.FrozenRoute.SendsDataOffDevice.Value);
         }
-        catch (ChatModelException exception) when (
-            string.Equals(exception.Error.Code, "frozen_chat_route_invalid", StringComparison.Ordinal))
+        catch (ChatModelException)
         {
-            return Failed(exception.Error.Code, SafeProviderMessage(exception.Error.UserMessage));
+            return Failed(
+                "frozen_chat_route_invalid",
+                "这条消息保存的 AI 路由与当前注册信息不一致，因此没有发送。请重新发送一条新消息。");
         }
 
         var prompt = prompts.GetRequired(ChatPromptId, ChatPromptVersion, route.ProviderId);
@@ -187,16 +188,19 @@ public sealed class RoutedConversationProvider(
         }
         catch (ChatModelException exception)
         {
-            var code = SensitiveDataSanitizer.DiagnosticCode(
+            var diagnosticCode = SensitiveDataSanitizer.DiagnosticCode(
                 exception.Error.Code,
                 "chat_provider_error");
             var status = exception.Error.Kind == ChatModelErrorKind.Cancelled
                 ? AiInvocationStatus.Cancelled
                 : AiInvocationStatus.Failed;
-            var terminal = await MarkFailedAsync(invocationId, status, code).ConfigureAwait(false);
+            var terminal = await MarkFailedAsync(invocationId, status, diagnosticCode)
+                .ConfigureAwait(false);
             var requestedResult = status == AiInvocationStatus.Cancelled
                 ? Cancelled()
-                : Failed(code, SafeProviderMessage(exception.Error.UserMessage));
+                : Failed(
+                    StableFailureCode(exception.Error.Kind),
+                    StableFailureMessage(exception.Error.Kind));
             return ResolveTerminal(terminal, requestedResult);
         }
         catch (Exception exception) when (
@@ -348,9 +352,7 @@ public sealed class RoutedConversationProvider(
             AiInvocationStatus.Cancelled => Cancelled(),
             AiInvocationStatus.Interrupted => Interrupted(transition.Current.FailureCode),
             AiInvocationStatus.Failed => Failed(
-                SensitiveDataSanitizer.DiagnosticCode(
-                    transition.Current.FailureCode,
-                    "chat_provider_error"),
+                "chat_provider_error",
                 "这次回答没有成功，请稍后再试。"),
             AiInvocationStatus.Succeeded => requestedResult,
             _ => Failed(
@@ -359,16 +361,52 @@ public sealed class RoutedConversationProvider(
         };
     }
 
-    private static string SafeProviderMessage(string? message)
+    private static string StableFailureCode(ChatModelErrorKind kind) => kind switch
     {
-        var redacted = SensitiveDataSanitizer.Redact(message);
-        if (string.IsNullOrWhiteSpace(redacted))
-        {
-            return "这次回答没有成功，请稍后再试。";
-        }
+        ChatModelErrorKind.InvalidRequest => "invalid_request",
+        ChatModelErrorKind.Configuration => "configuration",
+        ChatModelErrorKind.Unauthorized => "unauthorized",
+        ChatModelErrorKind.Authorization => "authorization",
+        ChatModelErrorKind.PolicyDisabled => "disabled_by_security_policy",
+        ChatModelErrorKind.ModelNotFound => "model_not_found",
+        ChatModelErrorKind.RateLimited => "rate_limited",
+        ChatModelErrorKind.InsufficientBalance => "insufficient_balance",
+        ChatModelErrorKind.Timeout => "timeout",
+        ChatModelErrorKind.Cancelled => "cancelled",
+        ChatModelErrorKind.Network => "network",
+        ChatModelErrorKind.InvalidResponse => "invalid_response",
+        ChatModelErrorKind.Unavailable => "unavailable",
+        _ => "chat_provider_error"
+    };
 
-        return redacted.Length <= 300 ? redacted : redacted[..300];
-    }
+    private static string StableFailureMessage(ChatModelErrorKind kind) => kind switch
+    {
+        ChatModelErrorKind.Configuration =>
+            "这个 AI 服务尚未配置，请先在设置中完成配置。",
+        ChatModelErrorKind.Unauthorized =>
+            "这个 AI 服务的凭据无效或已失效，请在设置中重新填写。",
+        ChatModelErrorKind.Authorization =>
+            "这个 AI 服务拒绝了当前账户的访问权限，请检查账户授权。",
+        ChatModelErrorKind.PolicyDisabled =>
+            "出于安全原因，当前版本暂不提供 Codex 普通聊天。你可以改用其他已配置的聊天服务；编程任务不受影响。",
+        ChatModelErrorKind.ModelNotFound =>
+            "所选 AI 模型当前不可用，请在设置中重新选择。",
+        ChatModelErrorKind.RateLimited =>
+            "这个 AI 服务当前请求过多，请稍后再试。",
+        ChatModelErrorKind.InsufficientBalance =>
+            "这个 AI 服务的账户余额或计费状态不可用，请检查账户。",
+        ChatModelErrorKind.Timeout =>
+            "这个 AI 服务回答超时，请稍后重新发送。",
+        ChatModelErrorKind.Network =>
+            "现在无法连接这个 AI 服务，请检查网络后重试。",
+        ChatModelErrorKind.InvalidRequest =>
+            "这个 AI 服务无法处理本次请求，请检查输入和模型设置。",
+        ChatModelErrorKind.InvalidResponse =>
+            "这个 AI 服务没有返回可用回答，请稍后再试。",
+        ChatModelErrorKind.Unavailable =>
+            "这个 AI 服务暂时不可用，请稍后再试。",
+        _ => "这次回答没有成功，请稍后再试。"
+    };
 
     private sealed record ActiveRoute(Guid TurnId, CancellationTokenSource Cancellation);
 }

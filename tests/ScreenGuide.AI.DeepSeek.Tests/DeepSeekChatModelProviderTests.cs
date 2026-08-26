@@ -26,10 +26,11 @@ public sealed class DeepSeekChatModelProviderTests
         Assert.All(provider.Descriptor.Models, model =>
         {
             Assert.Equal(1_000_000, model.ContextWindowTokens);
-            Assert.True(model.Capabilities.HasFlag(ChatModelCapabilities.Streaming));
-            Assert.True(model.Capabilities.HasFlag(ChatModelCapabilities.JsonObjectOutput));
-            Assert.False(model.Capabilities.HasFlag(ChatModelCapabilities.JsonSchemaOutput));
-            Assert.False(model.Capabilities.HasFlag(ChatModelCapabilities.ToolCalling));
+            Assert.Equal(
+                ChatModelCapabilities.Streaming
+                | ChatModelCapabilities.JsonObjectOutput
+                | ChatModelCapabilities.Reasoning,
+                model.Capabilities);
         });
     }
 
@@ -122,7 +123,7 @@ public sealed class DeepSeekChatModelProviderTests
                     "{\"type\":\"object\"}"))));
 
         Assert.Equal(ChatModelErrorKind.InvalidRequest, exception.Error.Kind);
-        Assert.Equal("deepseek_json_schema_not_supported", exception.Error.Code);
+        Assert.Equal("deepseek.json_schema_not_supported", exception.Error.Code);
         Assert.Equal(0, credentials.OpenLeaseCount);
         Assert.Equal(0, handler.SendCount);
     }
@@ -139,8 +140,8 @@ public sealed class DeepSeekChatModelProviderTests
         var unknown = await Assert.ThrowsAsync<ChatModelException>(() =>
             provider.CompleteAsync(Request(modelId: "deepseek-unknown")));
 
-        Assert.Equal(ChatModelErrorKind.Unauthorized, missing.Error.Kind);
-        Assert.Equal("deepseek_not_configured", missing.Error.Code);
+        Assert.Equal(ChatModelErrorKind.Configuration, missing.Error.Kind);
+        Assert.Equal("deepseek.not_configured", missing.Error.Code);
         Assert.Equal(ChatModelErrorKind.ModelNotFound, unknown.Error.Kind);
         Assert.Equal(0, handler.SendCount);
     }
@@ -166,7 +167,7 @@ public sealed class DeepSeekChatModelProviderTests
                 [new ChatMessage(ChatMessageRole.User, "12345678901")])));
 
         Assert.Equal(ChatModelErrorKind.InvalidRequest, exception.Error.Kind);
-        Assert.Equal("deepseek_input_too_large", exception.Error.Code);
+        Assert.Equal("deepseek.input_too_large", exception.Error.Code);
         Assert.Equal(0, credentials.OpenLeaseCount);
         Assert.Equal(0, handler.SendCount);
     }
@@ -256,7 +257,7 @@ public sealed class DeepSeekChatModelProviderTests
         var exception = await Assert.ThrowsAsync<ChatModelException>(() => completion);
 
         Assert.Equal(ChatModelErrorKind.Cancelled, exception.Error.Kind);
-        Assert.Equal("deepseek_cancelled", exception.Error.Code);
+        Assert.Equal("deepseek.cancelled", exception.Error.Code);
         Assert.DoesNotContain("ds-cancel-test", exception.ToString(), StringComparison.Ordinal);
         Assert.DoesNotContain("不应出现", exception.ToString(), StringComparison.Ordinal);
     }
@@ -286,18 +287,19 @@ public sealed class DeepSeekChatModelProviderTests
 
         await cancellationObserved.Task.WaitAsync(TimeSpan.FromSeconds(2));
         Assert.Equal(ChatModelErrorKind.Timeout, exception.Error.Kind);
-        Assert.Equal("deepseek_timeout", exception.Error.Code);
+        Assert.Equal("deepseek.timeout", exception.Error.Code);
         Assert.True(exception.Error.IsRetryable);
     }
 
     [Theory]
-    [InlineData(400, ChatModelErrorKind.InvalidRequest, "deepseek_bad_request", false)]
-    [InlineData(401, ChatModelErrorKind.Unauthorized, "deepseek_unauthorized", false)]
-    [InlineData(402, ChatModelErrorKind.InsufficientBalance, "deepseek_insufficient_balance", false)]
-    [InlineData(422, ChatModelErrorKind.InvalidRequest, "deepseek_unprocessable_request", false)]
-    [InlineData(429, ChatModelErrorKind.RateLimited, "deepseek_rate_limited", true)]
-    [InlineData(500, ChatModelErrorKind.Unavailable, "deepseek_server_error", true)]
-    [InlineData(503, ChatModelErrorKind.Unavailable, "deepseek_unavailable", true)]
+    [InlineData(400, ChatModelErrorKind.InvalidRequest, "deepseek.bad_request", false)]
+    [InlineData(401, ChatModelErrorKind.Unauthorized, "deepseek.unauthorized", false)]
+    [InlineData(402, ChatModelErrorKind.InsufficientBalance, "deepseek.insufficient_balance", false)]
+    [InlineData(403, ChatModelErrorKind.Authorization, "deepseek.authorization_denied", false)]
+    [InlineData(422, ChatModelErrorKind.InvalidRequest, "deepseek.unprocessable_request", false)]
+    [InlineData(429, ChatModelErrorKind.RateLimited, "deepseek.rate_limited", true)]
+    [InlineData(500, ChatModelErrorKind.Unavailable, "deepseek.server_error", true)]
+    [InlineData(503, ChatModelErrorKind.Unavailable, "deepseek.unavailable", true)]
     public async Task HttpFailuresMapToStableSafeErrors(
         int statusCode,
         ChatModelErrorKind expectedKind,
@@ -315,7 +317,7 @@ public sealed class DeepSeekChatModelProviderTests
             {
                 Content = new StringContent(rawBody, Encoding.UTF8, "application/json")
             };
-            if (statusCode == 429)
+            if (statusCode is 429 or 503)
             {
                 response.Headers.RetryAfter = new System.Net.Http.Headers.RetryConditionHeaderValue(
                     TimeSpan.FromSeconds(3));
@@ -339,10 +341,51 @@ public sealed class DeepSeekChatModelProviderTests
         Assert.Equal(expectedKind, exception.Error.Kind);
         Assert.Equal(expectedCode, exception.Error.Code);
         Assert.Equal(retryable, exception.Error.IsRetryable);
-        Assert.Equal(statusCode == 429 ? TimeSpan.FromSeconds(3) : null, exception.Error.RetryAfter);
+        Assert.Equal(statusCode is 429 or 503 ? TimeSpan.FromSeconds(3) : null, exception.Error.RetryAfter);
         Assert.DoesNotContain(secret, exception.ToString(), StringComparison.Ordinal);
         Assert.DoesNotContain("provider_error", exception.ToString(), StringComparison.Ordinal);
         Assert.True(exception.ToString().Length < 2_000);
+    }
+
+    [Theory]
+    [InlineData(400, "3")]
+    [InlineData(429, "0")]
+    [InlineData(429, "86401")]
+    [InlineData(503, "0")]
+    [InlineData(503, "86401")]
+    public async Task InvalidOrUntrustedRetryAfterIsDiscarded(int statusCode, string retryAfter)
+    {
+        var handler = new StubHttpMessageHandler(_ =>
+        {
+            var response = new HttpResponseMessage((HttpStatusCode)statusCode);
+            Assert.True(response.Headers.TryAddWithoutValidation("Retry-After", retryAfter));
+            return response;
+        });
+        await using var provider = new DeepSeekChatModelProvider(
+            new TestCredentialStore("ds-retry-after-test"),
+            handler);
+
+        var exception = await Assert.ThrowsAsync<ChatModelException>(() =>
+            provider.CompleteAsync(Request()));
+
+        Assert.Null(exception.Error.RetryAfter);
+    }
+
+    [Fact]
+    public async Task MaliciousProviderRequestIdIsNotReturnedAsMetadata()
+    {
+        const string maliciousId = "Bearer fake-key C:\\\\Users\\\\person\\\\tasking.db prompt stack trace";
+        var handler = new StubHttpMessageHandler(_ => JsonResponse($$"""
+            {"id":"{{maliciousId}}","choices":[{"message":{"content":"安全回答"},"finish_reason":"stop"}]}
+            """));
+        await using var provider = new DeepSeekChatModelProvider(
+            new TestCredentialStore("ds-request-id-test"),
+            handler);
+
+        var response = await provider.CompleteAsync(Request());
+
+        Assert.Null(response.Metadata.ProviderRequestId);
+        Assert.DoesNotContain("fake-key", response.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -374,9 +417,9 @@ public sealed class DeepSeekChatModelProviderTests
             redirectProvider.CompleteAsync(Request()));
 
         Assert.Equal(ChatModelErrorKind.ModelNotFound, modelError.Error.Kind);
-        Assert.Equal("deepseek_model_not_found", modelError.Error.Code);
+        Assert.Equal("deepseek.model_not_found", modelError.Error.Code);
         Assert.Equal(ChatModelErrorKind.InvalidResponse, redirectError.Error.Kind);
-        Assert.Equal("deepseek_redirect_rejected", redirectError.Error.Code);
+        Assert.Equal("deepseek.redirect_rejected", redirectError.Error.Code);
         Assert.Equal(1, redirectHandler.SendCount);
     }
 
@@ -448,7 +491,8 @@ public sealed class DeepSeekChatModelProviderTests
     }
 
     [Theory]
-    [InlineData(401, ChatProviderHealthState.Degraded)]
+    [InlineData(401, ChatProviderHealthState.Unavailable)]
+    [InlineData(403, ChatProviderHealthState.Unavailable)]
     [InlineData(402, ChatProviderHealthState.Degraded)]
     [InlineData(429, ChatProviderHealthState.Degraded)]
     [InlineData(500, ChatProviderHealthState.Unavailable)]
@@ -520,7 +564,7 @@ public sealed class DeepSeekChatModelProviderTests
         callerCancellation.Cancel();
         var cancelled = await Assert.ThrowsAsync<ChatModelException>(() => first);
 
-        Assert.Equal("deepseek_turn_already_active", duplicate.Error.Code);
+        Assert.Equal("deepseek.turn_already_active", duplicate.Error.Code);
         Assert.Equal(ChatModelErrorKind.Cancelled, cancelled.Error.Kind);
     }
 
@@ -562,9 +606,9 @@ public sealed class DeepSeekChatModelProviderTests
         var oversized = await Assert.ThrowsAsync<ChatModelException>(() =>
             oversizedProvider.CompleteAsync(Request()));
 
-        Assert.Equal("deepseek_stream_incomplete", incomplete.Error.Code);
+        Assert.Equal("deepseek.stream_incomplete", incomplete.Error.Code);
         Assert.Equal(ChatModelErrorKind.InvalidResponse, invalidJson.Error.Kind);
-        Assert.Equal("deepseek_output_too_large", oversized.Error.Code);
+        Assert.Equal("deepseek.output_too_large", oversized.Error.Code);
     }
 
     [Fact]
@@ -588,7 +632,7 @@ public sealed class DeepSeekChatModelProviderTests
                 }));
 
         Assert.Equal(ChatModelErrorKind.InvalidResponse, exception.Error.Kind);
-        Assert.Equal("deepseek_stream_empty", exception.Error.Code);
+        Assert.Equal("deepseek.stream_empty", exception.Error.Code);
         Assert.DoesNotContain(updates, update => update.IsFinal);
     }
 
@@ -669,7 +713,7 @@ public sealed class DeepSeekChatModelProviderTests
             provider.CompleteAsync(Request()));
 
         Assert.Equal(ChatModelErrorKind.InvalidResponse, exception.Error.Kind);
-        Assert.Equal("deepseek_response_body_too_large", exception.Error.Code);
+        Assert.Equal("deepseek.response_body_too_large", exception.Error.Code);
     }
 
     [Fact]
@@ -694,7 +738,7 @@ public sealed class DeepSeekChatModelProviderTests
             provider.CompleteAsync(Request(), (_, _) => ValueTask.CompletedTask));
 
         Assert.Equal(ChatModelErrorKind.InvalidResponse, exception.Error.Kind);
-        Assert.Equal("deepseek_stream_event_too_large", exception.Error.Code);
+        Assert.Equal("deepseek.stream_event_too_large", exception.Error.Code);
         Assert.True(stream.BytesRead < stream.TotalLength);
     }
 
@@ -721,7 +765,7 @@ public sealed class DeepSeekChatModelProviderTests
             provider.CompleteAsync(Request(), (_, _) => ValueTask.CompletedTask));
 
         Assert.Equal(ChatModelErrorKind.InvalidResponse, exception.Error.Kind);
-        Assert.Equal("deepseek_stream_response_too_large", exception.Error.Code);
+        Assert.Equal("deepseek.stream_response_too_large", exception.Error.Code);
         Assert.True(stream.BytesRead < stream.TotalLength);
     }
 
@@ -746,7 +790,7 @@ public sealed class DeepSeekChatModelProviderTests
             healthHandler);
         var health = await healthProvider.CheckHealthAsync();
 
-        Assert.Equal("deepseek_not_configured", completionError.Error.Code);
+        Assert.Equal("deepseek.not_configured", completionError.Error.Code);
         Assert.True(completionCredentials.LastLeaseDisposed);
         Assert.Equal(ChatProviderHealthState.NotConfigured, health.State);
         Assert.True(healthCredentials.LastLeaseDisposed);

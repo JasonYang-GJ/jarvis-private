@@ -108,6 +108,22 @@ public sealed class AiSettingsService(
     {
         ArgumentNullException.ThrowIfNull(request);
         var descriptor = GetDescriptor(request.ProviderId);
+        var credentialStatus = await GetCredentialStatusAsync(descriptor, cancellationToken)
+            .ConfigureAwait(false);
+        var isConfigured = descriptor.CredentialKind == ChatProviderCredentialKind.None
+                           || credentialStatus.State == ProviderCredentialState.Configured;
+        if (!isConfigured)
+        {
+            var notConfigured = new ChatProviderHealth(
+                descriptor.ProviderId,
+                ChatProviderHealthState.NotConfigured,
+                IsConfigured: false,
+                "尚未配置 API Key。",
+                DateTimeOffset.UtcNow);
+            _health[descriptor.ProviderId] = notConfigured;
+            return MapHealth(notConfigured);
+        }
+
         var provider = providers.GetProviderRequired(descriptor.ProviderId);
         ChatProviderHealth health;
         try
@@ -123,12 +139,17 @@ public sealed class AiSettingsService(
             health = new ChatProviderHealth(
                 descriptor.ProviderId,
                 ChatProviderHealthState.Unavailable,
-                IsConfigured: descriptor.CredentialKind == ChatProviderCredentialKind.None,
+                IsConfigured: true,
                 "连接检查没有成功，请稍后再试。",
                 DateTimeOffset.UtcNow);
         }
 
-        var safeHealth = health with { Message = SafeMessage(health.Message) };
+        var safeHealth = health with
+        {
+            ProviderId = descriptor.ProviderId,
+            IsConfigured = true,
+            Message = SafeMessage(health.Message)
+        };
         _health[descriptor.ProviderId] = safeHealth;
         return MapHealth(safeHealth);
     }
@@ -213,7 +234,9 @@ public sealed class AiSettingsService(
 
     private static AiProviderHealthDto MapHealth(ChatProviderHealth health) => new(
         health.ProviderId,
-        health.State.ToString(),
+        health.State == ChatProviderHealthState.PolicyDisabled
+            ? ChatProviderHealthState.Unavailable.ToString()
+            : health.State.ToString(),
         health.IsConfigured,
         SafeMessage(health.Message),
         health.CheckedAtUtc == DateTimeOffset.MinValue ? null : health.CheckedAtUtc);

@@ -20,6 +20,22 @@ public sealed class ChatProviderRegistry
             var descriptor = provider.Descriptor
                 ?? throw new InvalidOperationException("Chat Provider 必须提供描述信息。");
             var providerId = RequireId(descriptor.ProviderId, "Provider ID");
+            if (string.IsNullOrWhiteSpace(descriptor.DisplayName)
+                || string.IsNullOrWhiteSpace(descriptor.DataDestination)
+                || !Enum.IsDefined(descriptor.CredentialKind))
+            {
+                throw new InvalidOperationException(
+                    $"Provider“{providerId}”的描述信息无效。");
+            }
+
+            const ChatProviderWorkloads knownWorkloads =
+                ChatProviderWorkloads.OrdinaryChat | ChatProviderWorkloads.ProgrammingAgent;
+            if ((descriptor.SupportedWorkloads & ~knownWorkloads) != ChatProviderWorkloads.None)
+            {
+                throw new InvalidOperationException(
+                    $"Provider“{providerId}”声明了未知的 Workload。");
+            }
+
             if (!descriptor.SupportedWorkloads.HasFlag(ChatProviderWorkloads.OrdinaryChat))
             {
                 throw new InvalidOperationException(
@@ -30,6 +46,26 @@ public sealed class ChatProviderRegistry
             foreach (var model in descriptor.Models ?? [])
             {
                 var modelId = RequireId(model.ModelId, "Model ID");
+                if (string.IsNullOrWhiteSpace(model.DisplayName)
+                    || model.ContextWindowTokens is <= 0)
+                {
+                    throw new InvalidOperationException(
+                        $"Provider“{providerId}”中的模型“{modelId}”描述信息无效。");
+                }
+
+                const ChatModelCapabilities knownCapabilities =
+                    ChatModelCapabilities.Streaming |
+                    ChatModelCapabilities.ToolCalling |
+                    ChatModelCapabilities.Vision |
+                    ChatModelCapabilities.JsonObjectOutput |
+                    ChatModelCapabilities.Reasoning |
+                    ChatModelCapabilities.JsonSchemaOutput;
+                if ((model.Capabilities & ~knownCapabilities) != ChatModelCapabilities.None)
+                {
+                    throw new InvalidOperationException(
+                        $"Provider“{providerId}”中的模型“{modelId}”声明了未知的 Capability。");
+                }
+
                 if (!models.TryAdd(modelId, model))
                 {
                     throw new InvalidOperationException(

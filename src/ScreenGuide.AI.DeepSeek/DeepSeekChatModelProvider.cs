@@ -183,13 +183,16 @@ public sealed class DeepSeekChatModelProvider : IChatModelProvider
                 var status = (int)response.StatusCode;
                 return new ChatProviderHealth(
                     ProviderId,
-                    status is 401 or 402 or 429
-                        ? ChatProviderHealthState.Degraded
-                        : ChatProviderHealthState.Unavailable,
+                    status switch
+                    {
+                        402 or 429 => ChatProviderHealthState.Degraded,
+                        _ => ChatProviderHealthState.Unavailable
+                    },
                     IsConfigured: true,
                     status switch
                     {
                         401 => "DeepSeek API Key 无效或已失效。",
+                        403 => "DeepSeek API Key 没有访问所选能力的权限。",
                         402 => "DeepSeek 账户余额不足或计费状态不可用。",
                         429 => "DeepSeek 当前请求过多，请稍后再检查。",
                         >= 500 => "DeepSeek 服务暂时不可用。",
@@ -237,9 +240,8 @@ public sealed class DeepSeekChatModelProvider : IChatModelProvider
             throw Error(
                 request.ModelId,
                 ChatModelErrorKind.InvalidRequest,
-                "deepseek_turn_already_active",
-                "这条请求仍在处理中，请等待或先停止回答。",
-                retryable: false);
+                "deepseek.turn_already_active",
+                "这条请求仍在处理中，请等待或先停止回答。");
         }
 
         using var timeout = new CancellationTokenSource(_options.RequestTimeout);
@@ -260,27 +262,24 @@ public sealed class DeepSeekChatModelProvider : IChatModelProvider
             throw Error(
                 request.ModelId,
                 ChatModelErrorKind.Cancelled,
-                "deepseek_cancelled",
-                "DeepSeek 回答已停止。",
-                retryable: false);
+                "deepseek.cancelled",
+                "DeepSeek 回答已停止。");
         }
         catch (OperationCanceledException) when (timeout.IsCancellationRequested)
         {
             throw Error(
                 request.ModelId,
                 ChatModelErrorKind.Timeout,
-                "deepseek_timeout",
-                "DeepSeek 回答超时，这次请求已经安全结束，可以重新发送。",
-                retryable: true);
+                "deepseek.timeout",
+                "DeepSeek 回答超时，这次请求已经安全结束，可以重新发送。");
         }
         catch (Exception exception) when (exception is HttpRequestException or IOException)
         {
             throw Error(
                 request.ModelId,
                 ChatModelErrorKind.Network,
-                "deepseek_network_error",
-                "现在无法连接 DeepSeek，请检查网络后重试。",
-                retryable: true);
+                "deepseek.network_error",
+                "现在无法连接 DeepSeek，请检查网络后重试。");
         }
         finally
         {
@@ -302,10 +301,9 @@ public sealed class DeepSeekChatModelProvider : IChatModelProvider
             lease?.Dispose();
             throw Error(
                 request.ModelId,
-                ChatModelErrorKind.Unauthorized,
-                "deepseek_not_configured",
-                "DeepSeek 尚未配置 API Key，请先在设置中完成配置。",
-                retryable: false);
+                ChatModelErrorKind.Configuration,
+                "deepseek.not_configured",
+                "DeepSeek 尚未配置 API Key，请先在设置中完成配置。");
         }
 
         using var httpRequest = new HttpRequestMessage(HttpMethod.Post, ChatCompletionsEndpoint);
@@ -345,9 +343,8 @@ public sealed class DeepSeekChatModelProvider : IChatModelProvider
                 throw Error(
                     request.ModelId,
                     ChatModelErrorKind.InvalidResponse,
-                    "deepseek_redirect_rejected",
-                    "DeepSeek 返回了不安全的跳转，本次请求已停止。",
-                    retryable: false);
+                    "deepseek.redirect_rejected",
+                    "DeepSeek 返回了不安全的跳转，本次请求已停止。");
             }
 
             var numericStatus = (int)response.StatusCode;
@@ -356,9 +353,8 @@ public sealed class DeepSeekChatModelProvider : IChatModelProvider
                 throw Error(
                     request.ModelId,
                     ChatModelErrorKind.InvalidResponse,
-                    "deepseek_redirect_rejected",
-                    "DeepSeek 返回了不安全的跳转，本次请求已停止。",
-                    retryable: false);
+                    "deepseek.redirect_rejected",
+                    "DeepSeek 返回了不安全的跳转，本次请求已停止。");
             }
 
             if (!response.IsSuccessStatusCode)
@@ -417,9 +413,8 @@ public sealed class DeepSeekChatModelProvider : IChatModelProvider
                 throw Error(
                     modelId,
                     ChatModelErrorKind.InvalidResponse,
-                    "deepseek_response_body_too_large",
-                    "DeepSeek 返回的数据过大，已停止读取。",
-                    retryable: false);
+                    "deepseek.response_body_too_large",
+                    "DeepSeek 返回的数据过大，已停止读取。");
             }
 
             result.Append(buffer, 0, read);
@@ -495,9 +490,8 @@ public sealed class DeepSeekChatModelProvider : IChatModelProvider
             return Error(
                 modelId,
                 ChatModelErrorKind.ModelNotFound,
-                "deepseek_model_not_found",
-                "所选 DeepSeek 模型当前不可用，请在设置中重新选择。",
-                retryable: false);
+                "deepseek.model_not_found",
+                "所选 DeepSeek 模型当前不可用，请在设置中重新选择。");
         }
 
         return status switch
@@ -505,58 +499,55 @@ public sealed class DeepSeekChatModelProvider : IChatModelProvider
             400 => Error(
                 modelId,
                 ChatModelErrorKind.InvalidRequest,
-                "deepseek_bad_request",
-                "DeepSeek 无法处理这次请求，请检查输入和模型设置。",
-                retryable: false),
+                "deepseek.bad_request",
+                "DeepSeek 无法处理这次请求，请检查输入和模型设置。"),
             401 => Error(
                 modelId,
                 ChatModelErrorKind.Unauthorized,
-                "deepseek_unauthorized",
-                "DeepSeek 的 API Key 无效或已失效，请在设置中重新填写。",
-                retryable: false),
+                "deepseek.unauthorized",
+                "DeepSeek 的 API Key 无效或已失效，请在设置中重新填写。"),
             402 => Error(
                 modelId,
                 ChatModelErrorKind.InsufficientBalance,
-                "deepseek_insufficient_balance",
-                "DeepSeek 账户余额不足或计费状态不可用，请检查账户。",
-                retryable: false),
+                "deepseek.insufficient_balance",
+                "DeepSeek 账户余额不足或计费状态不可用，请检查账户。"),
+            403 => Error(
+                modelId,
+                ChatModelErrorKind.Authorization,
+                "deepseek.authorization_denied",
+                "DeepSeek 的 API Key 没有访问所选能力的权限，请检查账户授权。"),
             408 => Error(
                 modelId,
                 ChatModelErrorKind.Timeout,
-                "deepseek_request_timeout",
-                "DeepSeek 回答超时，这次请求已经安全结束，可以重新发送。",
-                retryable: true),
+                "deepseek.request_timeout",
+                "DeepSeek 回答超时，这次请求已经安全结束，可以重新发送。"),
             422 => Error(
                 modelId,
                 ChatModelErrorKind.InvalidRequest,
-                "deepseek_unprocessable_request",
-                "DeepSeek 无法理解这次请求，请调整输入后重试。",
-                retryable: false),
+                "deepseek.unprocessable_request",
+                "DeepSeek 无法理解这次请求，请调整输入后重试。"),
             429 => Error(
                 modelId,
                 ChatModelErrorKind.RateLimited,
-                "deepseek_rate_limited",
+                "deepseek.rate_limited",
                 "DeepSeek 当前请求过多，请稍后重试并检查账户状态。",
-                retryable: true,
                 retryAfter: ReadRetryAfter(response)),
             503 => Error(
                 modelId,
                 ChatModelErrorKind.Unavailable,
-                "deepseek_unavailable",
+                "deepseek.unavailable",
                 "DeepSeek 服务暂时不可用，请稍后重试。",
-                retryable: true),
+                retryAfter: ReadRetryAfter(response)),
             >= 500 => Error(
                 modelId,
                 ChatModelErrorKind.Unavailable,
-                "deepseek_server_error",
-                "DeepSeek 服务暂时异常，请稍后重试。",
-                retryable: true),
+                "deepseek.server_error",
+                "DeepSeek 服务暂时异常，请稍后重试。"),
             _ => Error(
                 modelId,
                 ChatModelErrorKind.Unknown,
-                "deepseek_http_error",
-                "DeepSeek 没有完成这次回答，请稍后重试。",
-                retryable: false)
+                "deepseek.http_error",
+                "DeepSeek 没有完成这次回答，请稍后重试。")
         };
     }
 
@@ -603,9 +594,8 @@ public sealed class DeepSeekChatModelProvider : IChatModelProvider
                 throw Error(
                     request.ModelId,
                     ChatModelErrorKind.InvalidRequest,
-                    "deepseek_tool_messages_not_supported",
-                    "当前 DeepSeek 普通聊天不支持工具消息。",
-                    retryable: false);
+                    "deepseek.tool_messages_not_supported",
+                    "当前 DeepSeek 普通聊天不支持工具消息。");
             }
 
             messages.Add(new JsonObject
@@ -658,9 +648,8 @@ public sealed class DeepSeekChatModelProvider : IChatModelProvider
             throw Error(
                 request.ModelId,
                 ChatModelErrorKind.InvalidRequest,
-                "deepseek_json_schema_not_supported",
-                "DeepSeek 当前不支持 JSON Schema 输出，请改用 JSON Object。",
-                retryable: false);
+                "deepseek.json_schema_not_supported",
+                "DeepSeek 当前不支持 JSON Schema 输出，请改用 JSON Object。");
         }
 
         if (responseFormat.Kind == ChatResponseFormatKind.JsonObject)
@@ -691,9 +680,8 @@ public sealed class DeepSeekChatModelProvider : IChatModelProvider
                 throw Error(
                     request.ModelId,
                     ChatModelErrorKind.InvalidResponse,
-                    "deepseek_output_too_large",
-                    "DeepSeek 返回的内容过长，已停止读取。",
-                    retryable: false);
+                    "deepseek.output_too_large",
+                    "DeepSeek 返回的内容过长，已停止读取。");
             }
 
             string? structuredJson = null;
@@ -718,7 +706,9 @@ public sealed class DeepSeekChatModelProvider : IChatModelProvider
                 new ChatProviderMetadata(
                     ProviderId,
                     request.ModelId,
-                    root.TryGetProperty("id", out var id) ? id.GetString() : null,
+                    root.TryGetProperty("id", out var id)
+                        ? NormalizeProviderRequestId(id.GetString())
+                        : null,
                     DataDestination),
                 structuredJson);
         }
@@ -731,9 +721,8 @@ public sealed class DeepSeekChatModelProvider : IChatModelProvider
             throw Error(
                 request.ModelId,
                 ChatModelErrorKind.InvalidResponse,
-                "deepseek_invalid_response",
-                "DeepSeek 返回了无法读取的结果，请稍后重试。",
-                retryable: true);
+                "deepseek.invalid_response",
+                "DeepSeek 返回了无法读取的结果，请稍后重试。");
         }
     }
 
@@ -790,7 +779,7 @@ public sealed class DeepSeekChatModelProvider : IChatModelProvider
                 var root = document.RootElement;
                 if (root.TryGetProperty("id", out var id) && !string.IsNullOrWhiteSpace(id.GetString()))
                 {
-                    providerRequestId ??= id.GetString();
+                    providerRequestId ??= NormalizeProviderRequestId(id.GetString());
                 }
 
                 usage = TryReadUsage(root) ?? usage;
@@ -826,9 +815,8 @@ public sealed class DeepSeekChatModelProvider : IChatModelProvider
                     throw Error(
                         request.ModelId,
                         ChatModelErrorKind.InvalidResponse,
-                        "deepseek_output_too_large",
-                        "DeepSeek 返回的内容过长，已停止读取。",
-                        retryable: false);
+                        "deepseek.output_too_large",
+                        "DeepSeek 返回的内容过长，已停止读取。");
                 }
 
                 text.Append(deltaText);
@@ -846,9 +834,8 @@ public sealed class DeepSeekChatModelProvider : IChatModelProvider
                 throw Error(
                     request.ModelId,
                     ChatModelErrorKind.InvalidResponse,
-                    "deepseek_invalid_stream_event",
-                    "DeepSeek 返回了无法读取的流式结果，请稍后重试。",
-                    retryable: true);
+                    "deepseek.invalid_stream_event",
+                    "DeepSeek 返回了无法读取的流式结果，请稍后重试。");
             }
         }
 
@@ -857,9 +844,8 @@ public sealed class DeepSeekChatModelProvider : IChatModelProvider
             throw Error(
                 request.ModelId,
                 ChatModelErrorKind.InvalidResponse,
-                "deepseek_stream_incomplete",
-                "DeepSeek 的流式回答意外中断，请重新发送。",
-                retryable: true);
+                "deepseek.stream_incomplete",
+                "DeepSeek 的流式回答意外中断，请重新发送。");
         }
 
         cancellationToken.ThrowIfCancellationRequested();
@@ -869,9 +855,8 @@ public sealed class DeepSeekChatModelProvider : IChatModelProvider
             throw Error(
                 request.ModelId,
                 ChatModelErrorKind.InvalidResponse,
-                "deepseek_stream_empty",
-                "DeepSeek 没有返回回答内容，请重新发送。",
-                retryable: true);
+                "deepseek.stream_empty",
+                "DeepSeek 没有返回回答内容，请重新发送。");
         }
 
         string? structuredJson = null;
@@ -892,9 +877,8 @@ public sealed class DeepSeekChatModelProvider : IChatModelProvider
                 throw Error(
                     request.ModelId,
                     ChatModelErrorKind.InvalidResponse,
-                    "deepseek_invalid_json_object",
-                    "DeepSeek 没有返回有效的 JSON Object，请重试。",
-                retryable: true);
+                    "deepseek.invalid_json_object",
+                    "DeepSeek 没有返回有效的 JSON Object，请重试。");
             }
         }
 
@@ -948,6 +932,25 @@ public sealed class DeepSeekChatModelProvider : IChatModelProvider
         _ => ChatFinishReason.Unknown
     };
 
+    private static string? NormalizeProviderRequestId(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value) || value.Length > 80)
+        {
+            return null;
+        }
+
+        foreach (var character in value)
+        {
+            if (character > 0x7f
+                || !(char.IsAsciiLetterOrDigit(character) || character is '.' or '_' or '-'))
+            {
+                return null;
+            }
+        }
+
+        return value;
+    }
+
     private static void ValidateModel(string modelId)
     {
         if (!string.Equals(modelId, FlashModelId, StringComparison.Ordinal)
@@ -956,9 +959,8 @@ public sealed class DeepSeekChatModelProvider : IChatModelProvider
             throw Error(
                 modelId,
                 ChatModelErrorKind.ModelNotFound,
-                "deepseek_model_not_registered",
-                "所选 DeepSeek 模型不可用，请在设置中重新选择。",
-                retryable: false);
+                "deepseek.model_not_registered",
+                "所选 DeepSeek 模型不可用，请在设置中重新选择。");
         }
     }
 
@@ -970,9 +972,8 @@ public sealed class DeepSeekChatModelProvider : IChatModelProvider
             throw Error(
                 request.ModelId,
                 ChatModelErrorKind.InvalidRequest,
-                "deepseek_request_identity_invalid",
-                "这次聊天请求无效，请重新发送。",
-                retryable: false);
+                "deepseek.request_identity_invalid",
+                "这次聊天请求无效，请重新发送。");
         }
 
         if (request.Messages is null || request.Messages.Count == 0)
@@ -980,9 +981,8 @@ public sealed class DeepSeekChatModelProvider : IChatModelProvider
             throw Error(
                 request.ModelId,
                 ChatModelErrorKind.InvalidRequest,
-                "deepseek_messages_missing",
-                "聊天内容不能为空。",
-                retryable: false);
+                "deepseek.messages_missing",
+                "聊天内容不能为空。");
         }
 
         if (request.Messages.Count > _options.MaxMessageCount)
@@ -990,9 +990,8 @@ public sealed class DeepSeekChatModelProvider : IChatModelProvider
             throw Error(
                 request.ModelId,
                 ChatModelErrorKind.InvalidRequest,
-                "deepseek_message_count_exceeded",
-                "这次对话包含的消息过多，请新建话题后重试。",
-                retryable: false);
+                "deepseek.message_count_exceeded",
+                "这次对话包含的消息过多，请新建话题后重试。");
         }
 
         long characters = request.SystemPrompt?.Length ?? 0;
@@ -1003,9 +1002,8 @@ public sealed class DeepSeekChatModelProvider : IChatModelProvider
                 throw Error(
                     request.ModelId,
                     ChatModelErrorKind.InvalidRequest,
-                    "deepseek_message_invalid",
-                    "聊天内容无效，请重新发送。",
-                    retryable: false);
+                    "deepseek.message_invalid",
+                    "聊天内容无效，请重新发送。");
             }
 
             if (message.Role == ChatMessageRole.Tool)
@@ -1013,9 +1011,8 @@ public sealed class DeepSeekChatModelProvider : IChatModelProvider
                 throw Error(
                     request.ModelId,
                     ChatModelErrorKind.InvalidRequest,
-                    "deepseek_tool_messages_not_supported",
-                    "当前 DeepSeek 普通聊天不支持工具消息。",
-                    retryable: false);
+                    "deepseek.tool_messages_not_supported",
+                    "当前 DeepSeek 普通聊天不支持工具消息。");
             }
 
             characters += message.Content.Length + (message.Name?.Length ?? 0);
@@ -1024,9 +1021,8 @@ public sealed class DeepSeekChatModelProvider : IChatModelProvider
                 throw Error(
                     request.ModelId,
                     ChatModelErrorKind.InvalidRequest,
-                    "deepseek_input_too_large",
-                    "这次发送的内容过长，请缩短后重试。",
-                    retryable: false);
+                    "deepseek.input_too_large",
+                    "这次发送的内容过长，请缩短后重试。");
             }
         }
 
@@ -1035,9 +1031,8 @@ public sealed class DeepSeekChatModelProvider : IChatModelProvider
             throw Error(
                 request.ModelId,
                 ChatModelErrorKind.InvalidRequest,
-                "deepseek_json_schema_not_supported",
-                "DeepSeek 当前不支持 JSON Schema 输出，请改用 JSON Object。",
-                retryable: false);
+                "deepseek.json_schema_not_supported",
+                "DeepSeek 当前不支持 JSON Schema 输出，请改用 JSON Object。");
         }
 
         if (request.Options?.Temperature is { } temperature && (temperature < 0 || temperature > 2)
@@ -1047,9 +1042,8 @@ public sealed class DeepSeekChatModelProvider : IChatModelProvider
             throw Error(
                 request.ModelId,
                 ChatModelErrorKind.InvalidRequest,
-                "deepseek_options_invalid",
-                "聊天模型参数无效，请恢复默认设置后重试。",
-                retryable: false);
+                "deepseek.options_invalid",
+                "聊天模型参数无效，请恢复默认设置后重试。");
         }
     }
 
@@ -1083,9 +1077,8 @@ public sealed class DeepSeekChatModelProvider : IChatModelProvider
         ChatModelErrorKind kind,
         string code,
         string message,
-        bool retryable,
         TimeSpan? retryAfter = null) =>
-        new(ProviderId, modelId, new ChatModelError(kind, code, message, retryable, retryAfter));
+        new(ProviderId, modelId, new ChatModelError(kind, code, message, retryAfter));
 
     private sealed class ActiveCall : IDisposable
     {
@@ -1153,9 +1146,8 @@ public sealed class DeepSeekChatModelProvider : IChatModelProvider
                         throw Error(
                             modelId,
                             ChatModelErrorKind.InvalidResponse,
-                            "deepseek_stream_response_too_large",
-                            "DeepSeek 返回的流式数据总量过大，已停止读取。",
-                            retryable: false);
+                            "deepseek.stream_response_too_large",
+                            "DeepSeek 返回的流式数据总量过大，已停止读取。");
                     }
                 }
 
@@ -1172,9 +1164,8 @@ public sealed class DeepSeekChatModelProvider : IChatModelProvider
                     throw Error(
                         modelId,
                         ChatModelErrorKind.InvalidResponse,
-                        "deepseek_stream_event_too_large",
-                        "DeepSeek 返回的单段流式数据过大，已停止读取。",
-                        retryable: false);
+                        "deepseek.stream_event_too_large",
+                        "DeepSeek 返回的单段流式数据过大，已停止读取。");
                 }
 
                 if (line is null && newline >= 0)
