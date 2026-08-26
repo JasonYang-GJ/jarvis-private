@@ -348,6 +348,47 @@ public sealed class DeepSeekChatModelProviderTests
     }
 
     [Theory]
+    [InlineData(401, "model_not_found", "model not found", ChatModelErrorKind.Unauthorized, "deepseek.unauthorized")]
+    [InlineData(403, "invalid_model", "model does not exist", ChatModelErrorKind.Authorization, "deepseek.authorization_denied")]
+    [InlineData(402, "model_not_found", "model not found", ChatModelErrorKind.InsufficientBalance, "deepseek.insufficient_balance")]
+    [InlineData(429, "invalid_model", "model does not exist", ChatModelErrorKind.RateLimited, "deepseek.rate_limited")]
+    [InlineData(500, "model_not_found", "model not found", ChatModelErrorKind.Unavailable, "deepseek.server_error")]
+    [InlineData(503, "invalid_model", "model does not exist", ChatModelErrorKind.Unavailable, "deepseek.unavailable")]
+    [InlineData(404, "model_not_found", "model not found", ChatModelErrorKind.ModelNotFound, "deepseek.model_not_found")]
+    [InlineData(400, "invalid_model", "model does not exist", ChatModelErrorKind.ModelNotFound, "deepseek.model_not_found")]
+    [InlineData(422, "model_not_found", "model not found", ChatModelErrorKind.ModelNotFound, "deepseek.model_not_found")]
+    [InlineData(400, "invalid_request", "bad payload", ChatModelErrorKind.InvalidRequest, "deepseek.bad_request")]
+    [InlineData(422, "invalid_request", "bad payload", ChatModelErrorKind.InvalidRequest, "deepseek.unprocessable_request")]
+    public async Task AuthoritativeHttpStatusWinsWhenProviderBodySuggestsAConflictingModelError(
+        int statusCode,
+        string providerCode,
+        string providerMessage,
+        ChatModelErrorKind expectedKind,
+        string expectedDiagnosticCode)
+    {
+        var handler = new StubHttpMessageHandler(_ => new HttpResponseMessage(
+            (HttpStatusCode)statusCode)
+        {
+            Content = new StringContent(
+                JsonSerializer.Serialize(new
+                {
+                    error = new { code = providerCode, message = providerMessage }
+                }),
+                Encoding.UTF8,
+                "application/json")
+        });
+        await using var provider = new DeepSeekChatModelProvider(
+            new TestCredentialStore("ds-status-precedence-test"),
+            handler);
+
+        var exception = await Assert.ThrowsAsync<ChatModelException>(() =>
+            provider.CompleteAsync(Request()));
+
+        Assert.Equal(expectedKind, exception.Error.Kind);
+        Assert.Equal(expectedDiagnosticCode, exception.Error.Code);
+    }
+
+    [Theory]
     [InlineData(400, "3")]
     [InlineData(429, "0")]
     [InlineData(429, "86401")]

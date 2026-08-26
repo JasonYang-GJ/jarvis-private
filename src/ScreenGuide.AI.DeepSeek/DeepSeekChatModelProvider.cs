@@ -485,7 +485,7 @@ public sealed class DeepSeekChatModelProvider : IChatModelProvider
         ProviderErrorDetails details)
     {
         var status = (int)response.StatusCode;
-        if (status == 404 || IsModelError(details))
+        if (status == 404 || (status is 400 or 422 && IsModelError(details)))
         {
             return Error(
                 modelId,
