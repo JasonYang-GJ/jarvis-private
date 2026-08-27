@@ -1,4 +1,5 @@
 using ScreenGuide.AI.Core;
+using ScreenGuide.AI.DeepSeek;
 
 namespace ScreenGuide.DesktopV01.RealAcceptanceRunner;
 
@@ -52,6 +53,8 @@ public sealed record R3DeepSeekValidationOptions(
 
     public bool CancellationOnly { get; init; }
 
+    public string? ExpectedModelId { get; init; }
+
     public R3DeepSeekExecutionPlan ExecutionPlan => CancellationOnly
         ? R3DeepSeekExecutionPlan.CancellationOnly
         : R3DeepSeekExecutionPlan.Full;
@@ -80,6 +83,36 @@ public sealed record R3DeepSeekValidationOptions(
             return Invalid(
                 requested: true,
                 "real_provider_approval_missing",
+                cancellationOnly);
+        }
+
+        var expectedModelArguments = arguments
+            .Where(argument => argument.StartsWith(
+                "--expected-model=",
+                StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+        if (expectedModelArguments.Length == 0)
+        {
+            return Invalid(
+                requested: true,
+                "real_provider_expected_model_missing",
+                cancellationOnly);
+        }
+
+        if (expectedModelArguments.Length != 1)
+        {
+            return Invalid(
+                requested: true,
+                "real_provider_expected_model_repeated",
+                cancellationOnly);
+        }
+
+        var expectedModelId = expectedModelArguments[0]["--expected-model=".Length..];
+        if (!R3ExpectedModelGate.IsSupported(expectedModelId))
+        {
+            return Invalid(
+                requested: true,
+                "real_provider_expected_model_invalid",
                 cancellationOnly);
         }
 
@@ -120,7 +153,8 @@ public sealed record R3DeepSeekValidationOptions(
                 NoAutomaticRetry: true,
                 NoFallback: true))
         {
-            CancellationOnly = cancellationOnly
+            CancellationOnly = cancellationOnly,
+            ExpectedModelId = expectedModelId
         };
     }
 
@@ -158,12 +192,24 @@ public sealed class R3ValidationBudgetExceededException(string code) : Exception
 
 public sealed class R3ValidationFailureException(
     string code,
-    string? diagnosticCode = null) : Exception(
+    string? diagnosticCode = null,
+    string? expectedModelId = null,
+    string? actualModelId = null,
+    string? modelEvidenceLayer = null) : Exception(
     "R3 真实 Provider 验收未通过安全门禁。")
 {
     public string Code { get; } = code;
 
     public string? DiagnosticCode { get; } = NormalizeDiagnosticCode(diagnosticCode);
+
+    public string? ExpectedModelId { get; } = NormalizeModelId(expectedModelId);
+
+    public string? ActualModelId { get; } = NormalizeModelId(actualModelId);
+
+    public string? ModelEvidenceLayer { get; } = modelEvidenceLayer is
+        "settings" or "frozen_route" or "invocation"
+        ? modelEvidenceLayer
+        : null;
 
     private static string? NormalizeDiagnosticCode(string? value) =>
         !string.IsNullOrWhiteSpace(value)
@@ -173,6 +219,63 @@ public sealed class R3ValidationFailureException(
             || character is '.' or '_' or '-')
             ? value
             : null;
+
+    private static string? NormalizeModelId(string? value) =>
+        R3ExpectedModelGate.IsSupported(value)
+            ? value
+            : value is null
+                ? null
+                : "unsupported";
+}
+
+public static class R3ExpectedModelGate
+{
+    public const string MismatchErrorCode = "r3_expected_model_mismatch";
+
+    public static bool IsSupported(string? modelId) =>
+        string.Equals(
+            modelId,
+            DeepSeekChatModelProvider.FlashModelId,
+            StringComparison.Ordinal)
+        || string.Equals(
+            modelId,
+            DeepSeekChatModelProvider.ProModelId,
+            StringComparison.Ordinal);
+
+    public static void RequireMatch(
+        string expectedModelId,
+        string? actualModelId,
+        string? evidenceLayer = null)
+    {
+        if (!IsSupported(expectedModelId))
+        {
+            throw new ArgumentOutOfRangeException(nameof(expectedModelId));
+        }
+
+        if (!string.Equals(expectedModelId, actualModelId, StringComparison.Ordinal))
+        {
+            throw new R3ValidationFailureException(
+                MismatchErrorCode,
+                expectedModelId: expectedModelId,
+                actualModelId: actualModelId,
+                modelEvidenceLayer: evidenceLayer);
+        }
+    }
+
+    public static void RequireSettingsMatch(
+        string expectedModelId,
+        string? settingsModelId) =>
+        RequireMatch(expectedModelId, settingsModelId, "settings");
+
+    public static void RequireFrozenRouteMatch(
+        string expectedModelId,
+        string? frozenRouteModelId) =>
+        RequireMatch(expectedModelId, frozenRouteModelId, "frozen_route");
+
+    public static void RequireInvocationMatch(
+        string expectedModelId,
+        string? invocationModelId) =>
+        RequireMatch(expectedModelId, invocationModelId, "invocation");
 }
 
 public enum R3ValidationCallMode
@@ -181,7 +284,27 @@ public enum R3ValidationCallMode
     StreamingCancellation
 }
 
-public sealed record R3ProviderRequestIdentity(Guid RequestId, Guid TurnId);
+public sealed record R3ProviderRequestIdentity(
+    Guid RequestId,
+    Guid TurnId,
+    string ModelId);
+
+public sealed record R3ExpectedModelEvidence(
+    string ExpectedModelId,
+    string SettingsModelId,
+    IReadOnlyList<string> FrozenRouteModelIds,
+    IReadOnlyList<string> InvocationModelIds)
+{
+    public bool IsCompleteMatch =>
+        R3ExpectedModelGate.IsSupported(ExpectedModelId)
+        && string.Equals(ExpectedModelId, SettingsModelId, StringComparison.Ordinal)
+        && FrozenRouteModelIds.Count > 0
+        && FrozenRouteModelIds.All(modelId =>
+            string.Equals(ExpectedModelId, modelId, StringComparison.Ordinal))
+        && InvocationModelIds.Count > 0
+        && InvocationModelIds.All(modelId =>
+            string.Equals(ExpectedModelId, modelId, StringComparison.Ordinal));
+}
 
 public sealed record R3DeepSeekValidationResult(
     string Stage,
@@ -213,6 +336,8 @@ public sealed record R3DeepSeekValidationResult(
     public bool StreamingSuccessExecuted { get; init; } = true;
 
     public bool StreamingCancellationExecuted { get; init; } = true;
+
+    public R3ExpectedModelEvidence? ModelEvidence { get; init; }
 }
 
 internal sealed record R3DeepSeekCancellationAuditEvidence(
@@ -374,6 +499,7 @@ public sealed class R3ValidationCallObservation
 public sealed class R3BudgetedChatModelProvider : IChatModelProvider
 {
     private readonly IChatModelProvider _inner;
+    private readonly string _expectedModelId;
     private readonly R3DeepSeekValidationBudget _budget;
     private readonly System.Collections.Concurrent.ConcurrentDictionary<Guid, R3ValidationCallObservation>
         _activeObservations = new();
@@ -384,9 +510,16 @@ public sealed class R3BudgetedChatModelProvider : IChatModelProvider
 
     public R3BudgetedChatModelProvider(
         IChatModelProvider inner,
+        string expectedModelId,
         R3DeepSeekValidationBudget budget)
     {
         _inner = inner ?? throw new ArgumentNullException(nameof(inner));
+        if (!R3ExpectedModelGate.IsSupported(expectedModelId))
+        {
+            throw new ArgumentOutOfRangeException(nameof(expectedModelId));
+        }
+
+        _expectedModelId = expectedModelId;
         _budget = ValidateBudget(budget);
     }
 
@@ -419,8 +552,12 @@ public sealed class R3BudgetedChatModelProvider : IChatModelProvider
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
+        R3ExpectedModelGate.RequireFrozenRouteMatch(_expectedModelId, request.ModelId);
         ReserveRequest();
-        _requestIdentities.Enqueue(new R3ProviderRequestIdentity(request.RequestId, request.TurnId));
+        _requestIdentities.Enqueue(new R3ProviderRequestIdentity(
+            request.RequestId,
+            request.TurnId,
+            request.ModelId));
         var requestedLimit = request.Options?.MaxOutputTokens;
         var maximumOutputTokens = requestedLimit is null
             ? _budget.MaxOutputTokens

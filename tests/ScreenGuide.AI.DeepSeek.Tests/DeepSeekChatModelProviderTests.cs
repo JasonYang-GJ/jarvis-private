@@ -899,7 +899,8 @@ public sealed class DeepSeekChatModelProviderTests
         var budgetMissing = R3DeepSeekValidationOptions.Parse(
         [
             "--stage2-r3-deepseek",
-            "--real-provider"
+            "--real-provider",
+            "--expected-model=deepseek-v4-flash"
         ]);
         Assert.True(budgetMissing.Requested);
         Assert.False(budgetMissing.IsValid);
@@ -909,6 +910,7 @@ public sealed class DeepSeekChatModelProviderTests
         [
             "--stage2-r3-deepseek",
             "--real-provider",
+            "--expected-model=deepseek-v4-pro",
             "--max-requests=4",
             "--max-output-tokens=64",
             "--total-timeout-seconds=120",
@@ -919,6 +921,7 @@ public sealed class DeepSeekChatModelProviderTests
         Assert.True(approved.Requested);
         Assert.True(approved.IsValid);
         Assert.False(approved.CancellationOnly);
+        Assert.Equal(DeepSeekChatModelProvider.ProModelId, approved.ExpectedModelId);
         Assert.Null(approved.ErrorCode);
         Assert.Equal(4, approved.Budget!.MaxRequests);
         Assert.Equal(64, approved.Budget.MaxOutputTokens);
@@ -940,6 +943,7 @@ public sealed class DeepSeekChatModelProviderTests
             "--stage2-r3-deepseek",
             "--cancellation-only",
             "--real-provider",
+            "--expected-model=deepseek-v4-flash",
             "--max-requests=1",
             "--max-output-tokens=256",
             "--total-timeout-seconds=600",
@@ -950,12 +954,167 @@ public sealed class DeepSeekChatModelProviderTests
         Assert.True(options.Requested);
         Assert.True(options.IsValid);
         Assert.True(options.CancellationOnly);
+        Assert.Equal(DeepSeekChatModelProvider.FlashModelId, options.ExpectedModelId);
         Assert.Null(options.ErrorCode);
         Assert.Equal(1, options.Budget!.MaxRequests);
         Assert.Equal(256, options.Budget.MaxOutputTokens);
         Assert.Equal(TimeSpan.FromSeconds(600), options.Budget.TotalTimeout);
         Assert.True(options.Budget.NoAutomaticRetry);
         Assert.True(options.Budget.NoFallback);
+    }
+
+    [Fact]
+    public void R3ValidationHarnessRejectsMissingExpectedModelAtTheArgumentGate()
+    {
+        var options = R3DeepSeekValidationOptions.Parse(
+        [
+            "--stage2-r3-deepseek",
+            "--real-provider",
+            "--max-requests=4",
+            "--max-output-tokens=64",
+            "--total-timeout-seconds=120",
+            "--no-automatic-retry",
+            "--no-fallback"
+        ]);
+
+        Assert.True(options.Requested);
+        Assert.False(options.IsValid);
+        Assert.Equal("real_provider_expected_model_missing", options.ErrorCode);
+        Assert.Null(options.ExpectedModelId);
+        Assert.Null(options.Budget);
+    }
+
+    [Fact]
+    public void R3ValidationHarnessRejectsRepeatedExpectedModelAtTheArgumentGate()
+    {
+        var options = R3DeepSeekValidationOptions.Parse(
+        [
+            "--stage2-r3-deepseek",
+            "--real-provider",
+            "--expected-model=deepseek-v4-pro",
+            "--expected-model=deepseek-v4-flash",
+            "--max-requests=4",
+            "--max-output-tokens=64",
+            "--total-timeout-seconds=120",
+            "--no-automatic-retry",
+            "--no-fallback"
+        ]);
+
+        Assert.True(options.Requested);
+        Assert.False(options.IsValid);
+        Assert.Equal("real_provider_expected_model_repeated", options.ErrorCode);
+        Assert.Null(options.ExpectedModelId);
+        Assert.Null(options.Budget);
+    }
+
+    [Fact]
+    public void R3ValidationHarnessRejectsUnsupportedExpectedModelAtTheArgumentGate()
+    {
+        var options = R3DeepSeekValidationOptions.Parse(
+        [
+            "--stage2-r3-deepseek",
+            "--real-provider",
+            "--expected-model=deepseek-v3",
+            "--max-requests=4",
+            "--max-output-tokens=64",
+            "--total-timeout-seconds=120",
+            "--no-automatic-retry",
+            "--no-fallback"
+        ]);
+
+        Assert.True(options.Requested);
+        Assert.False(options.IsValid);
+        Assert.Equal("real_provider_expected_model_invalid", options.ErrorCode);
+        Assert.Null(options.ExpectedModelId);
+        Assert.Null(options.Budget);
+    }
+
+    [Fact]
+    public void R3SettingsModelMismatchFailsBeforeHealthChatOrProviderExecution()
+    {
+        var healthCalls = 0;
+        var chatCalls = 0;
+        var providerCalls = 0;
+
+        var exception = Assert.Throws<R3ValidationFailureException>(() =>
+        {
+            R3ExpectedModelGate.RequireSettingsMatch(
+                DeepSeekChatModelProvider.ProModelId,
+                DeepSeekChatModelProvider.FlashModelId);
+            healthCalls++;
+            chatCalls++;
+            providerCalls++;
+        });
+
+        Assert.Equal("r3_expected_model_mismatch", exception.Code);
+        Assert.Equal(DeepSeekChatModelProvider.ProModelId, exception.ExpectedModelId);
+        Assert.Equal(DeepSeekChatModelProvider.FlashModelId, exception.ActualModelId);
+        Assert.Equal("settings", exception.ModelEvidenceLayer);
+        Assert.Equal(0, healthCalls);
+        Assert.Equal(0, chatCalls);
+        Assert.Equal(0, providerCalls);
+    }
+
+    [Theory]
+    [InlineData(DeepSeekChatModelProvider.FlashModelId)]
+    [InlineData(DeepSeekChatModelProvider.ProModelId)]
+    public void R3SettingsModelGateAcceptsAnExactSupportedMatch(string modelId)
+    {
+        R3ExpectedModelGate.RequireMatch(modelId, modelId);
+    }
+
+    [Fact]
+    public void R3InvocationModelMismatchCannotSatisfyTheExpectedModelAuditGate()
+    {
+        var exception = Assert.Throws<R3ValidationFailureException>(() =>
+            R3ExpectedModelGate.RequireInvocationMatch(
+                DeepSeekChatModelProvider.ProModelId,
+                DeepSeekChatModelProvider.FlashModelId));
+
+        Assert.Equal("r3_expected_model_mismatch", exception.Code);
+        Assert.Equal(DeepSeekChatModelProvider.ProModelId, exception.ExpectedModelId);
+        Assert.Equal(DeepSeekChatModelProvider.FlashModelId, exception.ActualModelId);
+        Assert.Equal("invocation", exception.ModelEvidenceLayer);
+    }
+
+    [Theory]
+    [InlineData(DeepSeekChatModelProvider.FlashModelId)]
+    [InlineData(DeepSeekChatModelProvider.ProModelId)]
+    public void R3ExpectedModelGateAcceptsAllThreeMatchingEvidenceLayers(string modelId)
+    {
+        R3ExpectedModelGate.RequireSettingsMatch(modelId, modelId);
+        R3ExpectedModelGate.RequireFrozenRouteMatch(modelId, modelId);
+        R3ExpectedModelGate.RequireInvocationMatch(modelId, modelId);
+    }
+
+    [Theory]
+    [InlineData(DeepSeekChatModelProvider.FlashModelId)]
+    [InlineData(DeepSeekChatModelProvider.ProModelId)]
+    public void R3ExpectedModelEvidenceKeepsAllThreeActualLayersDistinct(string modelId)
+    {
+        var evidence = new R3ExpectedModelEvidence(
+            ExpectedModelId: modelId,
+            SettingsModelId: modelId,
+            FrozenRouteModelIds: [modelId],
+            InvocationModelIds: [modelId]);
+
+        Assert.Equal(modelId, evidence.ExpectedModelId);
+        Assert.Equal(modelId, evidence.SettingsModelId);
+        Assert.Equal([modelId], evidence.FrozenRouteModelIds);
+        Assert.Equal([modelId], evidence.InvocationModelIds);
+        Assert.True(evidence.IsCompleteMatch);
+    }
+
+    [Fact]
+    public void R3ExpectedModelEvidenceCannotReportPassForAnInvocationMismatch()
+    {
+        var evidence = new R3ExpectedModelEvidence(
+            ExpectedModelId: DeepSeekChatModelProvider.ProModelId,
+            SettingsModelId: DeepSeekChatModelProvider.ProModelId,
+            FrozenRouteModelIds: [DeepSeekChatModelProvider.ProModelId],
+            InvocationModelIds: [DeepSeekChatModelProvider.FlashModelId]);
+
+        Assert.False(evidence.IsCompleteMatch);
     }
 
     [Theory]
@@ -969,6 +1128,7 @@ public sealed class DeepSeekChatModelProviderTests
             "--stage2-r3-deepseek",
             "--cancellation-only",
             "--real-provider",
+            "--expected-model=deepseek-v4-flash",
             $"--max-requests={maxRequests}",
             "--max-output-tokens=256",
             "--total-timeout-seconds=600",
@@ -991,6 +1151,7 @@ public sealed class DeepSeekChatModelProviderTests
             "--stage2-r3-deepseek",
             "--cancellation-only",
             "--real-provider",
+            "--expected-model=deepseek-v4-flash",
             "--max-requests=1",
             "--max-output-tokens=128",
             "--total-timeout-seconds=120",
@@ -1020,6 +1181,7 @@ public sealed class DeepSeekChatModelProviderTests
         [
             "--stage2-r3-deepseek",
             "--real-provider",
+            "--expected-model=deepseek-v4-flash",
             requestsArgument,
             outputTokensArgument,
             "--total-timeout-seconds=120",
@@ -1047,6 +1209,7 @@ public sealed class DeepSeekChatModelProviderTests
         _ = Assert.Throws<ArgumentOutOfRangeException>(() =>
             new R3BudgetedChatModelProvider(
                 inner,
+                DeepSeekChatModelProvider.FlashModelId,
                 new R3DeepSeekValidationBudget(
                     maxRequests,
                     maxOutputTokens,
@@ -1054,6 +1217,33 @@ public sealed class DeepSeekChatModelProviderTests
                     NoAutomaticRetry: true,
                     NoFallback: true)));
 
+        Assert.Empty(inner.Requests);
+    }
+
+    [Fact]
+    public async Task R3BudgetedProviderRejectsFrozenRouteModelDriftBeforeReserveOrInnerCall()
+    {
+        await using var inner = new RecordingChatModelProvider();
+        await using var provider = new R3BudgetedChatModelProvider(
+            inner,
+            DeepSeekChatModelProvider.ProModelId,
+            new R3DeepSeekValidationBudget(
+                MaxRequests: 1,
+                MaxOutputTokens: 64,
+                TotalTimeout: TimeSpan.FromSeconds(30),
+                NoAutomaticRetry: true,
+                NoFallback: true));
+
+        var exception = await Assert.ThrowsAsync<R3ValidationFailureException>(() =>
+            provider.CompleteAsync(Request(
+                modelId: DeepSeekChatModelProvider.FlashModelId)));
+
+        Assert.Equal("r3_expected_model_mismatch", exception.Code);
+        Assert.Equal(DeepSeekChatModelProvider.ProModelId, exception.ExpectedModelId);
+        Assert.Equal(DeepSeekChatModelProvider.FlashModelId, exception.ActualModelId);
+        Assert.Equal("frozen_route", exception.ModelEvidenceLayer);
+        Assert.Equal(0, provider.RequestCount);
+        Assert.Empty(provider.RequestIdentities);
         Assert.Empty(inner.Requests);
     }
 
@@ -1068,6 +1258,7 @@ public sealed class DeepSeekChatModelProviderTests
         [
             "--stage2-r3-deepseek",
             "--real-provider",
+            "--expected-model=deepseek-v4-flash",
             $"--max-requests={maxRequests}",
             $"--max-output-tokens={maxOutputTokens}",
             "--total-timeout-seconds=120",
@@ -1080,7 +1271,10 @@ public sealed class DeepSeekChatModelProviderTests
         Assert.Equal(maxOutputTokens, options.Budget.MaxOutputTokens);
 
         await using var inner = new RecordingChatModelProvider();
-        await using var provider = new R3BudgetedChatModelProvider(inner, options.Budget);
+        await using var provider = new R3BudgetedChatModelProvider(
+            inner,
+            options.ExpectedModelId!,
+            options.Budget);
         _ = await provider.CompleteAsync(Request(
             options: new ChatModelOptions(MaxOutputTokens: 999)));
 
@@ -1093,6 +1287,7 @@ public sealed class DeepSeekChatModelProviderTests
         await using var inner = new RecordingChatModelProvider();
         await using var provider = new R3BudgetedChatModelProvider(
             inner,
+            DeepSeekChatModelProvider.FlashModelId,
             new R3DeepSeekValidationBudget(
                 MaxRequests: 1,
                 MaxOutputTokens: 17,
@@ -1119,6 +1314,7 @@ public sealed class DeepSeekChatModelProviderTests
             "--stage2-r3-deepseek",
             "--cancellation-only",
             "--real-provider",
+            "--expected-model=deepseek-v4-flash",
             "--max-requests=1",
             "--max-output-tokens=32",
             "--total-timeout-seconds=30",
@@ -1128,6 +1324,7 @@ public sealed class DeepSeekChatModelProviderTests
         await using var inner = new CancellableStreamingChatModelProvider();
         await using var provider = new R3BudgetedChatModelProvider(
             inner,
+            options.ExpectedModelId!,
             options.Budget!);
         var turnId = Guid.NewGuid();
         var observation = provider.PrepareNextCall(R3ValidationCallMode.StreamingCancellation);

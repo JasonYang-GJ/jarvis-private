@@ -22,6 +22,7 @@ if (r3Validation.Requested && !r3Validation.IsValid)
         Stage = "guard",
         Passed = false,
         ErrorCode = r3Validation.ErrorCode,
+        Requests = 0,
         RealProvider = false
     }));
     return 2;
@@ -96,6 +97,7 @@ if (stage2R3DeepSeek)
                 new R3BudgetedChatModelProvider(
                     new DeepSeekChatModelProvider(
                         serviceProvider.GetRequiredService<IProviderCredentialStore>()),
+                    r3Validation.ExpectedModelId!,
                     r3Budget));
             services.AddSingleton(serviceProvider => new ChatProviderRegistry(
             [
@@ -175,6 +177,10 @@ try
                 Passed = false,
                 ErrorCode = SafeR3ErrorCode(exception),
                 DiagnosticCode = SafeR3DiagnosticCode(exception),
+                ExpectedModelId = r3Validation.ExpectedModelId,
+                ActualModelId = SafeR3ActualModelId(exception),
+                ModelEvidenceLayer = SafeR3ModelEvidenceLayer(exception),
+                Requests = r3Provider?.RequestCount ?? 0,
                 ExceptionType = exception.GetType().Name,
                 RealProvider = true
             }));
@@ -462,6 +468,9 @@ static async Task<R3DeepSeekValidationResult> RunStage2R3DeepSeekPreparationAsyn
 {
     var budget = options.Budget
                  ?? throw new R3ValidationFailureException("real_provider_budget_missing");
+    var expectedModelId = options.ExpectedModelId
+                          ?? throw new R3ValidationFailureException(
+                              "real_provider_expected_model_missing");
     var plan = options.ExecutionPlan;
     using var totalTimeout = new CancellationTokenSource(budget.TotalTimeout);
     var cancellationToken = totalTimeout.Token;
@@ -471,7 +480,8 @@ static async Task<R3DeepSeekValidationResult> RunStage2R3DeepSeekPreparationAsyn
     Console.Out.Flush();
 
     var settings = await WaitForDeepSeekConfigurationOnlyAsync(api, cancellationToken);
-    var modelId = settings.CurrentChatRoute.ModelId;
+    var settingsModelId = settings.CurrentChatRoute.ModelId;
+    R3ExpectedModelGate.RequireSettingsMatch(expectedModelId, settingsModelId);
     var healthPassed = false;
     if (plan.RunHealth)
     {
@@ -484,6 +494,7 @@ static async Task<R3DeepSeekValidationResult> RunStage2R3DeepSeekPreparationAsyn
     var invocations = host.Services.GetRequiredService<IAiInvocationStore>();
     var sessions = host.Services.GetRequiredService<ISessionStore>();
     var conversations = host.Services.GetRequiredService<IConversationStore>();
+    var validatedInvocations = new List<AiInvocationRecord>();
     var session = await api.StartNewSessionAsync("R3 DeepSeek 隔离验收")
         .WaitAsync(cancellationToken);
 
@@ -510,9 +521,10 @@ static async Task<R3DeepSeekValidationResult> RunStage2R3DeepSeekPreparationAsyn
             await invocations.GetForSessionTurnAsync(ordinary.TurnId, cancellationToken),
             provider,
             ordinaryTurn,
-            modelId,
+            expectedModelId,
             AiInvocationStatus.Succeeded,
             requireProviderMetadata: true);
+        validatedInvocations.Add(ordinaryInvocation);
         ordinaryChatPassed = ordinaryTurn.Phase == "Completed"
                              && ordinaryInvocation.Status == AiInvocationStatus.Succeeded;
         RequireR3(ordinaryChatPassed, "r3_ordinary_chat_failed");
@@ -537,13 +549,14 @@ static async Task<R3DeepSeekValidationResult> RunStage2R3DeepSeekPreparationAsyn
             .WaitAsync(cancellationToken);
         await streamingObservation.Terminal.WaitAsync(cancellationToken);
         var streamingTurn = streamingSnapshot.Turns.Single(item => item.Id == streaming.TurnId);
-        _ = AssertR3ConversationInvocation(
+        var streamingInvocation = AssertR3ConversationInvocation(
             await invocations.GetForSessionTurnAsync(streaming.TurnId, cancellationToken),
             provider,
             streamingTurn,
-            modelId,
+            expectedModelId,
             AiInvocationStatus.Succeeded,
             requireProviderMetadata: true);
+        validatedInvocations.Add(streamingInvocation);
         streamingDeltaCount = streamingObservation.DeltaCount;
         streamingPassed = streamingDeltaCount >= 2
                           && streamingObservation.FinalUpdateObserved
@@ -617,9 +630,10 @@ static async Task<R3DeepSeekValidationResult> RunStage2R3DeepSeekPreparationAsyn
         await invocations.GetForSessionTurnAsync(cancelling.TurnId, cancellationToken),
         provider,
         cancelledTurn,
-        modelId,
+        expectedModelId,
         AiInvocationStatus.Cancelled,
         requireProviderMetadata: false);
+    validatedInvocations.Add(cancelledInvocation);
     var lateDeltaRejected = cancellationObservation.DeltaCountWhenCancellationCompleted
                             == cancellationObservation.DeltaCount;
     var lateFinalRejected = !cancellationObservation.FinalUpdateObserved;
@@ -638,7 +652,7 @@ static async Task<R3DeepSeekValidationResult> RunStage2R3DeepSeekPreparationAsyn
           && ordinary is not null
           && ordinaryTurn is not null
           && ordinaryInvocation.ProviderId == DeepSeekChatModelProvider.ProviderId
-          && ordinaryInvocation.ModelId == modelId
+          && ordinaryInvocation.ModelId == expectedModelId
           && ordinaryInvocation.DataDestination == DeepSeekChatModelProvider.DataDestination
           && !string.IsNullOrWhiteSpace(ordinaryInvocation.PromptId)
           && !string.IsNullOrWhiteSpace(ordinaryInvocation.PromptVersion)
@@ -655,6 +669,14 @@ static async Task<R3DeepSeekValidationResult> RunStage2R3DeepSeekPreparationAsyn
             HasProviderRequestId: !string.IsNullOrWhiteSpace(
                 cancelledInvocation.ProviderRequestId)));
     RequireR3(auditPassed, "r3_audit_failed");
+    var modelEvidence = new R3ExpectedModelEvidence(
+        expectedModelId,
+        settingsModelId,
+        provider.RequestIdentities.Select(identity => identity.ModelId).ToArray(),
+        validatedInvocations.Select(invocation => invocation.ModelId).ToArray());
+    RequireR3(
+        modelEvidence.IsCompleteMatch,
+        R3ExpectedModelGate.MismatchErrorCode);
     RequireR3(
         provider.RequestCount == plan.ExpectedProviderRequests,
         "r3_request_count_mismatch");
@@ -664,7 +686,7 @@ static async Task<R3DeepSeekValidationResult> RunStage2R3DeepSeekPreparationAsyn
         Stage: "complete",
         Passed: true,
         DeepSeekChatModelProvider.ProviderId,
-        modelId,
+        expectedModelId,
         provider.RequestCount,
         healthPassed,
         ordinaryChatPassed,
@@ -685,7 +707,8 @@ static async Task<R3DeepSeekValidationResult> RunStage2R3DeepSeekPreparationAsyn
         HealthExecuted = plan.RunHealth,
         OrdinaryChatExecuted = plan.RunOrdinaryChat,
         StreamingSuccessExecuted = plan.RunStreamingSuccess,
-        StreamingCancellationExecuted = plan.RunStreamingCancellation
+        StreamingCancellationExecuted = plan.RunStreamingCancellation,
+        ModelEvidence = modelEvidence
     };
 }
 
@@ -693,17 +716,19 @@ static AiInvocationRecord AssertR3ConversationInvocation(
     IReadOnlyList<AiInvocationRecord> records,
     R3BudgetedChatModelProvider provider,
     UnifiedSessionTurnDto turn,
-    string modelId,
+    string expectedModelId,
     AiInvocationStatus expectedStatus,
     bool requireProviderMetadata)
 {
     var invocation = records.Single(record => record.Purpose == AiInvocationPurpose.Conversation);
     var identity = provider.RequestIdentities.Single(item => item.TurnId == turn.Id);
+    R3ExpectedModelGate.RequireFrozenRouteMatch(expectedModelId, identity.ModelId);
+    R3ExpectedModelGate.RequireInvocationMatch(expectedModelId, invocation.ModelId);
     var matches = invocation.Id == identity.RequestId
                   && invocation.SessionTurnId == turn.Id
                   && invocation.ConversationTurnId == turn.ConversationTurnId
                   && invocation.ProviderId == DeepSeekChatModelProvider.ProviderId
-                  && invocation.ModelId == modelId
+                  && invocation.ModelId == expectedModelId
                   && invocation.DataDestination == DeepSeekChatModelProvider.DataDestination
                   && invocation.Status == expectedStatus
                   && !string.IsNullOrWhiteSpace(invocation.PromptId)
@@ -812,6 +837,16 @@ static string SafeR3ErrorCode(Exception exception) => exception switch
 static string? SafeR3DiagnosticCode(Exception exception) =>
     exception is R3ValidationFailureException failure
         ? failure.DiagnosticCode
+        : null;
+
+static string? SafeR3ActualModelId(Exception exception) =>
+    exception is R3ValidationFailureException failure
+        ? failure.ActualModelId
+        : null;
+
+static string? SafeR3ModelEvidenceLayer(Exception exception) =>
+    exception is R3ValidationFailureException failure
+        ? failure.ModelEvidenceLayer
         : null;
 
 static async Task RunStage2LiveProviderAcceptanceAsync(
