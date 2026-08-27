@@ -18,10 +18,9 @@ public static class R3RunnerHostComposition
         return BuildCore(
             hostOptions,
             validation,
-            serviceProvider => R3SecureCredentialLeaseBinding.CreateReadOnly(
-                new WindowsDpapiCredentialStore(
-                    canonicalCredentialRoot,
-                    serviceProvider.GetRequiredService<TimeProvider>())),
+            serviceProvider => new WindowsDpapiCredentialStore(
+                canonicalCredentialRoot,
+                serviceProvider.GetRequiredService<TimeProvider>()),
             () => new HttpClientHandler { AllowAutoRedirect = false });
     }
 
@@ -36,7 +35,7 @@ public static class R3RunnerHostComposition
         return BuildCore(
             hostOptions,
             validation,
-            _ => R3SecureCredentialLeaseBinding.CreateReadOnly(fakeCredentialStore),
+            _ => fakeCredentialStore,
             () => stubTransport);
     }
 
@@ -68,9 +67,11 @@ public static class R3RunnerHostComposition
                 {
                     var responseShapes = serviceProvider
                         .GetRequiredService<R3SafeResponseShapeCollector>();
+                    var credentialLeaseSource = R3SecureCredentialLeaseBinding.CreateReadOnly(
+                        serviceProvider.GetRequiredService<IProviderCredentialStore>());
                     return new R3BudgetedChatModelProvider(
                         new DeepSeekChatModelProvider(
-                            serviceProvider.GetRequiredService<IProviderCredentialStore>(),
+                            credentialLeaseSource,
                             new R3SafeResponseShapeTrackingHandler(
                                 transportFactory(),
                                 responseShapes)),
