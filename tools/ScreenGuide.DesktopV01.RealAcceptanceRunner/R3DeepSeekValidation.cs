@@ -1,3 +1,6 @@
+using System.Net;
+using System.Text;
+using System.Text.Json;
 using ScreenGuide.AI.Core;
 using ScreenGuide.AI.DeepSeek;
 
@@ -338,6 +341,471 @@ public sealed record R3DeepSeekValidationResult(
     public bool StreamingCancellationExecuted { get; init; } = true;
 
     public R3ExpectedModelEvidence? ModelEvidence { get; init; }
+
+    public R3CancellationTerminalStateEvidence? CancellationTerminalEvidence { get; init; }
+
+    public IReadOnlyList<R3SafeResponseShapeEvidence> ResponseShapeEvidence { get; init; } = [];
+}
+
+public sealed record R3CancellationTerminalStateEvidence(
+    string SessionTurnState,
+    string ConversationTurnState,
+    string AiInvocationState)
+{
+    public bool IsCancelled =>
+        string.Equals(SessionTurnState, "Cancelled", StringComparison.Ordinal)
+        && string.Equals(ConversationTurnState, "Cancelled", StringComparison.Ordinal)
+        && string.Equals(AiInvocationState, "Cancelled", StringComparison.Ordinal);
+}
+
+public static class R3CancellationTerminalStateGate
+{
+    public static void RequireCancelled(R3CancellationTerminalStateEvidence evidence)
+    {
+        ArgumentNullException.ThrowIfNull(evidence);
+        if (!evidence.IsCancelled)
+        {
+            throw new R3ValidationFailureException("r3_cancellation_terminal_mismatch");
+        }
+    }
+}
+
+public sealed record R3SafeResponseShapeEvidence(
+    int SseEventCount,
+    int DeltaCount,
+    bool ContentAppeared,
+    long ContentCharacterCount,
+    bool ReasoningContentAppeared,
+    long ReasoningContentCharacterCount,
+    bool DoneAppeared,
+    bool FinishReasonAppeared,
+    string? FinishReasonCategory,
+    string? StableErrorKind,
+    string? ProviderDiagnosticCode);
+
+public sealed class R3SafeResponseShapeCollector
+{
+    private readonly AsyncLocal<R3MutableResponseShape?> _current = new();
+    private readonly System.Collections.Concurrent.ConcurrentQueue<R3SafeResponseShapeEvidence>
+        _completed = new();
+
+    internal R3MutableResponseShape? Current => _current.Value;
+
+    public IReadOnlyList<R3SafeResponseShapeEvidence> Snapshot() => _completed.ToArray();
+
+    internal R3SafeResponseShapeScope BeginRequest()
+    {
+        if (_current.Value is not null)
+        {
+            throw new InvalidOperationException("R3 response-shape tracking is already active.");
+        }
+
+        var shape = new R3MutableResponseShape();
+        _current.Value = shape;
+        return new R3SafeResponseShapeScope(this, shape);
+    }
+
+    internal void Complete(R3MutableResponseShape shape)
+    {
+        if (!ReferenceEquals(_current.Value, shape))
+        {
+            throw new InvalidOperationException("R3 response-shape tracking scope mismatched.");
+        }
+
+        _current.Value = null;
+        _completed.Enqueue(shape.Snapshot());
+    }
+}
+
+internal sealed class R3SafeResponseShapeScope(
+    R3SafeResponseShapeCollector collector,
+    R3MutableResponseShape shape) : IDisposable
+{
+    private int _disposed;
+
+    public void RecordFailure(ChatModelException exception)
+    {
+        ArgumentNullException.ThrowIfNull(exception);
+        shape.RecordFailure(
+            R3FailureEvidenceReporter.StableFailureCode(exception.Error.Kind),
+            exception.Error.Code);
+    }
+
+    public void RecordUnknownFailure() => shape.RecordFailure("chat_provider_error", null);
+
+    public void Dispose()
+    {
+        if (Interlocked.Exchange(ref _disposed, 1) == 0)
+        {
+            collector.Complete(shape);
+        }
+    }
+}
+
+internal sealed class R3MutableResponseShape
+{
+    private readonly object _sync = new();
+    private int _sseEventCount;
+    private int _deltaCount;
+    private bool _contentAppeared;
+    private long _contentCharacterCount;
+    private bool _reasoningContentAppeared;
+    private long _reasoningContentCharacterCount;
+    private bool _doneAppeared;
+    private bool _finishReasonAppeared;
+    private string? _finishReasonCategory;
+    private string? _stableErrorKind;
+    private string? _providerDiagnosticCode;
+
+    public void ObserveDataLine(string payload)
+    {
+        lock (_sync)
+        {
+            _sseEventCount = SaturatingIncrement(_sseEventCount);
+            if (string.Equals(payload, "[DONE]", StringComparison.Ordinal))
+            {
+                _doneAppeared = true;
+                return;
+            }
+
+            try
+            {
+                using var document = JsonDocument.Parse(payload);
+                var root = document.RootElement;
+                if (!root.TryGetProperty("choices", out var choices)
+                    || choices.ValueKind != JsonValueKind.Array
+                    || choices.GetArrayLength() == 0)
+                {
+                    return;
+                }
+
+                var choice = choices[0];
+                if (choice.TryGetProperty("finish_reason", out var finishReason))
+                {
+                    _finishReasonAppeared = true;
+                    _finishReasonCategory = SafeFinishReason(finishReason);
+                }
+
+                if (!choice.TryGetProperty("delta", out var delta)
+                    || delta.ValueKind != JsonValueKind.Object)
+                {
+                    return;
+                }
+
+                _deltaCount = SaturatingIncrement(_deltaCount);
+                ObserveTextProperty(
+                    delta,
+                    "content",
+                    ref _contentAppeared,
+                    ref _contentCharacterCount);
+                ObserveTextProperty(
+                    delta,
+                    "reasoning_content",
+                    ref _reasoningContentAppeared,
+                    ref _reasoningContentCharacterCount);
+            }
+            catch (JsonException)
+            {
+                // The production provider owns protocol classification. Shape evidence records no raw data.
+            }
+        }
+    }
+
+    public void RecordFailure(string stableErrorKind, string? providerDiagnosticCode)
+    {
+        lock (_sync)
+        {
+            _stableErrorKind = stableErrorKind;
+            _providerDiagnosticCode = NormalizeDiagnosticCode(providerDiagnosticCode);
+        }
+    }
+
+    public R3SafeResponseShapeEvidence Snapshot()
+    {
+        lock (_sync)
+        {
+            return new R3SafeResponseShapeEvidence(
+                _sseEventCount,
+                _deltaCount,
+                _contentAppeared,
+                _contentCharacterCount,
+                _reasoningContentAppeared,
+                _reasoningContentCharacterCount,
+                _doneAppeared,
+                _finishReasonAppeared,
+                _finishReasonCategory,
+                _stableErrorKind,
+                _providerDiagnosticCode);
+        }
+    }
+
+    private static void ObserveTextProperty(
+        JsonElement delta,
+        string propertyName,
+        ref bool appeared,
+        ref long characterCount)
+    {
+        if (!delta.TryGetProperty(propertyName, out var value))
+        {
+            return;
+        }
+
+        appeared = true;
+        if (value.ValueKind == JsonValueKind.String)
+        {
+            characterCount = SaturatingAdd(characterCount, value.GetString()?.Length ?? 0);
+        }
+    }
+
+    private static string SafeFinishReason(JsonElement value)
+    {
+        if (value.ValueKind == JsonValueKind.Null)
+        {
+            return "null";
+        }
+
+        if (value.ValueKind != JsonValueKind.String)
+        {
+            return "invalid";
+        }
+
+        return value.GetString() switch
+        {
+            "stop" => "stop",
+            "length" => "length",
+            "content_filter" => "content_filter",
+            "insufficient_system_resource" => "error",
+            _ => "other"
+        };
+    }
+
+    private static string? NormalizeDiagnosticCode(string? value) =>
+        !string.IsNullOrWhiteSpace(value)
+        && value.Length <= 128
+        && value.All(character =>
+            char.IsAsciiLetterOrDigit(character)
+            || character is '.' or '_' or '-')
+            ? value
+            : null;
+
+    private static int SaturatingIncrement(int value) =>
+        value == int.MaxValue ? value : value + 1;
+
+    private static long SaturatingAdd(long value, int addition) =>
+        value > long.MaxValue - addition ? long.MaxValue : value + addition;
+}
+
+public sealed class R3SafeResponseShapeTrackingHandler : DelegatingHandler
+{
+    private readonly R3SafeResponseShapeCollector _collector;
+
+    public R3SafeResponseShapeTrackingHandler(
+        HttpMessageHandler innerHandler,
+        R3SafeResponseShapeCollector collector)
+    {
+        InnerHandler = innerHandler ?? throw new ArgumentNullException(nameof(innerHandler));
+        _collector = collector ?? throw new ArgumentNullException(nameof(collector));
+    }
+
+    protected override async Task<HttpResponseMessage> SendAsync(
+        HttpRequestMessage request,
+        CancellationToken cancellationToken)
+    {
+        var response = await base.SendAsync(request, cancellationToken).ConfigureAwait(false);
+        var shape = _collector.Current;
+        if (shape is not null
+            && response.Content is { } content
+            && string.Equals(
+                content.Headers.ContentType?.MediaType,
+                "text/event-stream",
+                StringComparison.OrdinalIgnoreCase))
+        {
+            var trackedContent = new R3SafeResponseShapeTrackingContent(content, shape);
+            foreach (var header in content.Headers)
+            {
+                trackedContent.Headers.TryAddWithoutValidation(header.Key, header.Value);
+            }
+
+            response.Content = trackedContent;
+        }
+
+        return response;
+    }
+}
+
+internal sealed class R3SafeResponseShapeTrackingContent(
+    HttpContent inner,
+    R3MutableResponseShape shape) : HttpContent
+{
+    private readonly HttpContent _inner = inner ?? throw new ArgumentNullException(nameof(inner));
+    private readonly R3MutableResponseShape _shape = shape ?? throw new ArgumentNullException(nameof(shape));
+
+    protected override bool TryComputeLength(out long length)
+    {
+        length = _inner.Headers.ContentLength ?? 0;
+        return _inner.Headers.ContentLength.HasValue;
+    }
+
+    protected override async Task SerializeToStreamAsync(
+        Stream stream,
+        TransportContext? context)
+    {
+        await using var source = await CreateTrackedStreamAsync(CancellationToken.None)
+            .ConfigureAwait(false);
+        await source.CopyToAsync(stream).ConfigureAwait(false);
+    }
+
+    protected override Task<Stream> CreateContentReadStreamAsync() =>
+        CreateTrackedStreamAsync(CancellationToken.None);
+
+    protected override Task<Stream> CreateContentReadStreamAsync(
+        CancellationToken cancellationToken) =>
+        CreateTrackedStreamAsync(cancellationToken);
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            _inner.Dispose();
+        }
+
+        base.Dispose(disposing);
+    }
+
+    private async Task<Stream> CreateTrackedStreamAsync(CancellationToken cancellationToken)
+    {
+        var stream = await _inner.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+        return new R3SafeResponseShapeTrackingStream(stream, _shape);
+    }
+}
+
+internal sealed class R3SafeResponseShapeTrackingStream(
+    Stream inner,
+    R3MutableResponseShape shape) : Stream
+{
+    private const int MaximumObservedLineBytes = 64 * 1024;
+    private readonly Stream _inner = inner ?? throw new ArgumentNullException(nameof(inner));
+    private readonly R3MutableResponseShape _shape = shape ?? throw new ArgumentNullException(nameof(shape));
+    private readonly List<byte> _line = [];
+    private bool _discardLine;
+    private bool _endObserved;
+
+    public override bool CanRead => _inner.CanRead;
+    public override bool CanSeek => false;
+    public override bool CanWrite => false;
+    public override long Length => throw new NotSupportedException();
+    public override long Position
+    {
+        get => throw new NotSupportedException();
+        set => throw new NotSupportedException();
+    }
+
+    public override int Read(byte[] buffer, int offset, int count)
+    {
+        var read = _inner.Read(buffer, offset, count);
+        Observe(buffer.AsSpan(offset, read), read == 0);
+        return read;
+    }
+
+    public override async Task<int> ReadAsync(
+        byte[] buffer,
+        int offset,
+        int count,
+        CancellationToken cancellationToken)
+    {
+        var read = await _inner.ReadAsync(buffer.AsMemory(offset, count), cancellationToken)
+            .ConfigureAwait(false);
+        Observe(buffer.AsSpan(offset, read), read == 0);
+        return read;
+    }
+
+    public override async ValueTask<int> ReadAsync(
+        Memory<byte> buffer,
+        CancellationToken cancellationToken = default)
+    {
+        var read = await _inner.ReadAsync(buffer, cancellationToken).ConfigureAwait(false);
+        Observe(buffer.Span[..read], read == 0);
+        return read;
+    }
+
+    public override void Flush() => throw new NotSupportedException();
+    public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+    public override void SetLength(long value) => throw new NotSupportedException();
+    public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            _inner.Dispose();
+        }
+
+        base.Dispose(disposing);
+    }
+
+    public override async ValueTask DisposeAsync()
+    {
+        await _inner.DisposeAsync().ConfigureAwait(false);
+        GC.SuppressFinalize(this);
+    }
+
+    private void Observe(ReadOnlySpan<byte> bytes, bool endOfStream)
+    {
+        foreach (var value in bytes)
+        {
+            if (value == (byte)'\n')
+            {
+                CompleteLine();
+                continue;
+            }
+
+            if (_discardLine)
+            {
+                continue;
+            }
+
+            if (_line.Count >= MaximumObservedLineBytes)
+            {
+                _line.Clear();
+                _discardLine = true;
+                continue;
+            }
+
+            _line.Add(value);
+        }
+
+        if (endOfStream && !_endObserved)
+        {
+            _endObserved = true;
+            CompleteLine();
+        }
+    }
+
+    private void CompleteLine()
+    {
+        if (_discardLine)
+        {
+            _discardLine = false;
+            _line.Clear();
+            return;
+        }
+
+        if (_line.Count > 0 && _line[^1] == (byte)'\r')
+        {
+            _line.RemoveAt(_line.Count - 1);
+        }
+
+        if (_line.Count >= 5)
+        {
+            var line = Encoding.UTF8.GetString(_line.ToArray());
+            if (line.StartsWith("data:", StringComparison.Ordinal))
+            {
+                _shape.ObserveDataLine(line[5..].TrimStart());
+            }
+        }
+
+        _line.Clear();
+    }
 }
 
 public sealed record R3FailureModelEvidence(
@@ -455,7 +923,10 @@ public sealed record R3RunnerFailureEvidence(
     bool StreamingSuccessExecuted,
     bool StreamingCancellationExecuted,
     string ExceptionType,
-    bool RealProvider);
+    bool RealProvider)
+{
+    public IReadOnlyList<R3SafeResponseShapeEvidence> ResponseShapeEvidence { get; init; } = [];
+}
 
 public static class R3FailureEvidenceReporter
 {
@@ -463,7 +934,8 @@ public static class R3FailureEvidenceReporter
         Exception exception,
         R3RunEvidenceTracker tracker,
         int requestCount,
-        IReadOnlyList<string> frozenRouteModelIds)
+        IReadOnlyList<string> frozenRouteModelIds,
+        IReadOnlyList<R3SafeResponseShapeEvidence>? responseShapeEvidence = null)
     {
         ArgumentNullException.ThrowIfNull(exception);
         ArgumentNullException.ThrowIfNull(tracker);
@@ -500,7 +972,10 @@ public static class R3FailureEvidenceReporter
             tracker.StreamingSuccessExecuted,
             tracker.StreamingCancellationExecuted,
             exception.GetType().Name,
-            RealProvider: true);
+            RealProvider: true)
+        {
+            ResponseShapeEvidence = responseShapeEvidence?.ToArray() ?? []
+        };
     }
 
     private static string ErrorCode(Exception exception) => exception switch
@@ -519,7 +994,7 @@ public static class R3FailureEvidenceReporter
         _ => null
     };
 
-    private static string StableFailureCode(ChatModelErrorKind kind) => kind switch
+    internal static string StableFailureCode(ChatModelErrorKind kind) => kind switch
     {
         ChatModelErrorKind.InvalidRequest => "invalid_request",
         ChatModelErrorKind.Configuration => "configuration",
@@ -700,6 +1175,7 @@ public sealed class R3BudgetedChatModelProvider : IChatModelProvider
     private readonly IChatModelProvider _inner;
     private readonly string _expectedModelId;
     private readonly R3DeepSeekValidationBudget _budget;
+    private readonly R3SafeResponseShapeCollector? _responseShapeCollector;
     private readonly System.Collections.Concurrent.ConcurrentDictionary<Guid, R3ValidationCallObservation>
         _activeObservations = new();
     private readonly System.Collections.Concurrent.ConcurrentQueue<R3ProviderRequestIdentity>
@@ -710,7 +1186,8 @@ public sealed class R3BudgetedChatModelProvider : IChatModelProvider
     public R3BudgetedChatModelProvider(
         IChatModelProvider inner,
         string expectedModelId,
-        R3DeepSeekValidationBudget budget)
+        R3DeepSeekValidationBudget budget,
+        R3SafeResponseShapeCollector? responseShapeCollector = null)
     {
         _inner = inner ?? throw new ArgumentNullException(nameof(inner));
         if (!R3ExpectedModelGate.IsSupported(expectedModelId))
@@ -720,6 +1197,7 @@ public sealed class R3BudgetedChatModelProvider : IChatModelProvider
 
         _expectedModelId = expectedModelId;
         _budget = ValidateBudget(budget);
+        _responseShapeCollector = responseShapeCollector;
     }
 
     public ChatProviderDescriptor Descriptor => _inner.Descriptor;
@@ -728,6 +1206,9 @@ public sealed class R3BudgetedChatModelProvider : IChatModelProvider
 
     public IReadOnlyList<R3ProviderRequestIdentity> RequestIdentities =>
         _requestIdentities.ToArray();
+
+    public IReadOnlyList<R3SafeResponseShapeEvidence> ResponseShapeEvidence =>
+        _responseShapeCollector?.Snapshot() ?? [];
 
     public R3ValidationCallObservation PrepareNextCall(R3ValidationCallMode mode)
     {
@@ -780,6 +1261,7 @@ public sealed class R3BudgetedChatModelProvider : IChatModelProvider
             };
         }
 
+        using var responseShapeScope = _responseShapeCollector?.BeginRequest();
         try
         {
             var response = await _inner.CompleteAsync(
@@ -795,6 +1277,16 @@ public sealed class R3BudgetedChatModelProvider : IChatModelProvider
                 .ConfigureAwait(false);
             observation?.MarkResponseReturned();
             return response;
+        }
+        catch (ChatModelException exception)
+        {
+            responseShapeScope?.RecordFailure(exception);
+            throw;
+        }
+        catch
+        {
+            responseShapeScope?.RecordUnknownFailure();
+            throw;
         }
         finally
         {

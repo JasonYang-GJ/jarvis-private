@@ -95,12 +95,21 @@ if (stage2R3DeepSeek)
         new DesktopHostOptions(dataRoot, pipeName: pipeName),
         services =>
         {
+            services.AddSingleton<R3SafeResponseShapeCollector>();
             services.AddSingleton(serviceProvider =>
-                new R3BudgetedChatModelProvider(
+            {
+                var responseShapes = serviceProvider
+                    .GetRequiredService<R3SafeResponseShapeCollector>();
+                return new R3BudgetedChatModelProvider(
                     new DeepSeekChatModelProvider(
-                        serviceProvider.GetRequiredService<IProviderCredentialStore>()),
+                        serviceProvider.GetRequiredService<IProviderCredentialStore>(),
+                        new R3SafeResponseShapeTrackingHandler(
+                            new HttpClientHandler { AllowAutoRedirect = false },
+                            responseShapes)),
                     r3Validation.ExpectedModelId!,
-                    r3Budget));
+                    r3Budget,
+                    responseShapes);
+            });
             services.AddSingleton(serviceProvider => new ChatProviderRegistry(
             [
                 serviceProvider.GetRequiredService<CodexChatModelProvider>(),
@@ -181,7 +190,8 @@ try
                 r3Provider?.RequestIdentities
                     .Select(identity => identity.ModelId)
                     .ToArray()
-                ?? []);
+                ?? [],
+                r3Provider?.ResponseShapeEvidence ?? []);
             Console.WriteLine(R3ResultPrefix + JsonSerializer.Serialize(failureEvidence));
             return 1;
         }
@@ -632,7 +642,13 @@ static async Task<R3DeepSeekValidationResult> RunStage2R3DeepSeekPreparationAsyn
         throw new R3ValidationFailureException("r3_cancellation_precondition_timeout");
     }
 
-    _ = precondition.TerminalEvidence ?? await earlyTerminal.WaitAsync(cancellationToken);
+    var cancellationTerminal = precondition.TerminalEvidence
+                               ?? await earlyTerminal.WaitAsync(cancellationToken);
+    var cancellationTerminalEvidence = new R3CancellationTerminalStateEvidence(
+        cancellationTerminal.SessionState,
+        cancellationTerminal.ConversationState,
+        cancellationTerminal.InvocationState);
+    R3CancellationTerminalStateGate.RequireCancelled(cancellationTerminalEvidence);
     var cancelledSnapshot = await WaitForSessionTurnAsync(
             api,
             cancelling.TurnId,
@@ -725,7 +741,9 @@ static async Task<R3DeepSeekValidationResult> RunStage2R3DeepSeekPreparationAsyn
         OrdinaryChatExecuted = plan.RunOrdinaryChat,
         StreamingSuccessExecuted = plan.RunStreamingSuccess,
         StreamingCancellationExecuted = plan.RunStreamingCancellation,
-        ModelEvidence = modelEvidence
+        ModelEvidence = modelEvidence,
+        CancellationTerminalEvidence = cancellationTerminalEvidence,
+        ResponseShapeEvidence = provider.ResponseShapeEvidence
     };
 }
 

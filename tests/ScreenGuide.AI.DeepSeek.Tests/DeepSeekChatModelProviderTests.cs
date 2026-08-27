@@ -246,6 +246,21 @@ public sealed class DeepSeekChatModelProviderTests
         Assert.True(observation.HasProviderRequestId);
         Assert.False(observation.RestrictedDataLeaked);
         Assert.Equal(1, observation.FakeHandlerSendCount);
+        Assert.Equal(2, observation.ShapeEvidence.SseEventCount);
+        Assert.Equal(1, observation.ShapeEvidence.DeltaCount);
+        Assert.True(observation.ShapeEvidence.ContentAppeared);
+        Assert.Equal("fixture-answer".Length, observation.ShapeEvidence.ContentCharacterCount);
+        Assert.False(observation.ShapeEvidence.ReasoningContentAppeared);
+        Assert.Equal(0, observation.ShapeEvidence.ReasoningContentCharacterCount);
+        Assert.True(observation.ShapeEvidence.DoneAppeared);
+        Assert.True(observation.ShapeEvidence.FinishReasonAppeared);
+        Assert.Equal("stop", observation.ShapeEvidence.FinishReasonCategory);
+        Assert.Null(observation.ShapeEvidence.StableErrorKind);
+        Assert.Null(observation.ShapeEvidence.ProviderDiagnosticCode);
+        Assert.DoesNotContain(
+            "fixture-answer",
+            JsonSerializer.Serialize(observation.ShapeEvidence),
+            StringComparison.Ordinal);
     }
 
     [Fact]
@@ -270,6 +285,27 @@ public sealed class DeepSeekChatModelProviderTests
         Assert.False(observation.HasProviderRequestId);
         Assert.False(observation.RestrictedDataLeaked);
         Assert.Equal(1, observation.FakeHandlerSendCount);
+        Assert.Equal(2, observation.ShapeEvidence.SseEventCount);
+        Assert.Equal(1, observation.ShapeEvidence.DeltaCount);
+        Assert.False(observation.ShapeEvidence.ContentAppeared);
+        Assert.Equal(0, observation.ShapeEvidence.ContentCharacterCount);
+        Assert.True(observation.ShapeEvidence.ReasoningContentAppeared);
+        Assert.Equal(
+            reasoningSentinel.Length,
+            observation.ShapeEvidence.ReasoningContentCharacterCount);
+        Assert.True(observation.ShapeEvidence.DoneAppeared);
+        Assert.True(observation.ShapeEvidence.FinishReasonAppeared);
+        Assert.Equal("stop", observation.ShapeEvidence.FinishReasonCategory);
+        Assert.Equal("invalid_response", observation.ShapeEvidence.StableErrorKind);
+        Assert.Equal(
+            "deepseek.stream_empty",
+            observation.ShapeEvidence.ProviderDiagnosticCode);
+        var evidenceJson = JsonSerializer.Serialize(observation.ShapeEvidence);
+        Assert.DoesNotContain(reasoningSentinel, evidenceJson, StringComparison.Ordinal);
+        Assert.DoesNotContain("fixture-fake-credential", evidenceJson, StringComparison.Ordinal);
+        Assert.DoesNotContain("你好", evidenceJson, StringComparison.Ordinal);
+        Assert.DoesNotContain("Authorization", evidenceJson, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("data:", evidenceJson, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -296,6 +332,22 @@ public sealed class DeepSeekChatModelProviderTests
         Assert.True(observation.HasProviderRequestId);
         Assert.False(observation.RestrictedDataLeaked);
         Assert.Equal(1, observation.FakeHandlerSendCount);
+        Assert.Equal(3, observation.ShapeEvidence.SseEventCount);
+        Assert.Equal(2, observation.ShapeEvidence.DeltaCount);
+        Assert.True(observation.ShapeEvidence.ContentAppeared);
+        Assert.Equal("fixture-answer".Length, observation.ShapeEvidence.ContentCharacterCount);
+        Assert.True(observation.ShapeEvidence.ReasoningContentAppeared);
+        Assert.Equal(
+            reasoningSentinel.Length,
+            observation.ShapeEvidence.ReasoningContentCharacterCount);
+        Assert.True(observation.ShapeEvidence.DoneAppeared);
+        Assert.True(observation.ShapeEvidence.FinishReasonAppeared);
+        Assert.Equal("stop", observation.ShapeEvidence.FinishReasonCategory);
+        Assert.Null(observation.ShapeEvidence.StableErrorKind);
+        Assert.Null(observation.ShapeEvidence.ProviderDiagnosticCode);
+        var evidenceJson = JsonSerializer.Serialize(observation.ShapeEvidence);
+        Assert.DoesNotContain(reasoningSentinel, evidenceJson, StringComparison.Ordinal);
+        Assert.DoesNotContain("fixture-answer", evidenceJson, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -312,6 +364,19 @@ public sealed class DeepSeekChatModelProviderTests
         Assert.False(observation.HasProviderRequestId);
         Assert.False(observation.RestrictedDataLeaked);
         Assert.Equal(1, observation.FakeHandlerSendCount);
+        Assert.Equal(1, observation.ShapeEvidence.SseEventCount);
+        Assert.Equal(0, observation.ShapeEvidence.DeltaCount);
+        Assert.False(observation.ShapeEvidence.ContentAppeared);
+        Assert.Equal(0, observation.ShapeEvidence.ContentCharacterCount);
+        Assert.False(observation.ShapeEvidence.ReasoningContentAppeared);
+        Assert.Equal(0, observation.ShapeEvidence.ReasoningContentCharacterCount);
+        Assert.True(observation.ShapeEvidence.DoneAppeared);
+        Assert.False(observation.ShapeEvidence.FinishReasonAppeared);
+        Assert.Null(observation.ShapeEvidence.FinishReasonCategory);
+        Assert.Equal("invalid_response", observation.ShapeEvidence.StableErrorKind);
+        Assert.Equal(
+            "deepseek.stream_empty",
+            observation.ShapeEvidence.ProviderDiagnosticCode);
     }
 
     [Fact]
@@ -334,6 +399,19 @@ public sealed class DeepSeekChatModelProviderTests
         Assert.False(observation.HasProviderRequestId);
         Assert.False(observation.RestrictedDataLeaked);
         Assert.Equal(1, observation.FakeHandlerSendCount);
+        Assert.Equal(2, observation.ShapeEvidence.SseEventCount);
+        Assert.Equal(1, observation.ShapeEvidence.DeltaCount);
+        Assert.True(observation.ShapeEvidence.ContentAppeared);
+        Assert.Equal(0, observation.ShapeEvidence.ContentCharacterCount);
+        Assert.False(observation.ShapeEvidence.ReasoningContentAppeared);
+        Assert.Equal(0, observation.ShapeEvidence.ReasoningContentCharacterCount);
+        Assert.True(observation.ShapeEvidence.DoneAppeared);
+        Assert.True(observation.ShapeEvidence.FinishReasonAppeared);
+        Assert.Equal("stop", observation.ShapeEvidence.FinishReasonCategory);
+        Assert.Equal("invalid_response", observation.ShapeEvidence.StableErrorKind);
+        Assert.Equal(
+            "deepseek.stream_empty",
+            observation.ShapeEvidence.ProviderDiagnosticCode);
     }
 
     [Fact]
@@ -341,7 +419,7 @@ public sealed class DeepSeekChatModelProviderTests
     {
         const string rawEventSentinel = "fixture-raw-event-must-not-leak";
         var observation = await ObserveOfflineSseFixtureAsync(
-            $"data: {{\"marker\":\"{rawEventSentinel}\"\n\ndata: [DONE]\n",
+            $"data: {{\"marker\":\"{rawEventSentinel}\"\n",
             rawEventSentinel);
 
         Assert.False(observation.ResponseReturned);
@@ -353,6 +431,19 @@ public sealed class DeepSeekChatModelProviderTests
         Assert.False(observation.HasProviderRequestId);
         Assert.False(observation.RestrictedDataLeaked);
         Assert.Equal(1, observation.FakeHandlerSendCount);
+        Assert.Equal(1, observation.ShapeEvidence.SseEventCount);
+        Assert.Equal(0, observation.ShapeEvidence.DeltaCount);
+        Assert.False(observation.ShapeEvidence.ContentAppeared);
+        Assert.False(observation.ShapeEvidence.ReasoningContentAppeared);
+        Assert.False(observation.ShapeEvidence.DoneAppeared);
+        Assert.False(observation.ShapeEvidence.FinishReasonAppeared);
+        Assert.Null(observation.ShapeEvidence.FinishReasonCategory);
+        Assert.Equal("invalid_response", observation.ShapeEvidence.StableErrorKind);
+        Assert.Equal(
+            "deepseek.invalid_stream_event",
+            observation.ShapeEvidence.ProviderDiagnosticCode);
+        var evidenceJson = JsonSerializer.Serialize(observation.ShapeEvidence);
+        Assert.DoesNotContain(rawEventSentinel, evidenceJson, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -1003,9 +1094,19 @@ public sealed class DeepSeekChatModelProviderTests
         {
             Content = new StringContent(sse, Encoding.UTF8, "text/event-stream")
         });
-        await using var provider = new DeepSeekChatModelProvider(
-            new TestCredentialStore("fixture-fake-credential"),
-            handler);
+        var responseShapes = new R3SafeResponseShapeCollector();
+        await using var provider = new R3BudgetedChatModelProvider(
+            new DeepSeekChatModelProvider(
+                new TestCredentialStore("fixture-fake-credential"),
+                new R3SafeResponseShapeTrackingHandler(handler, responseShapes)),
+            DeepSeekChatModelProvider.ProModelId,
+            new R3DeepSeekValidationBudget(
+                MaxRequests: 1,
+                MaxOutputTokens: 64,
+                TotalTimeout: TimeSpan.FromSeconds(30),
+                NoAutomaticRetry: true,
+                NoFallback: true),
+            responseShapes);
         var updates = new List<ChatStreamUpdate>();
         ChatModelResponse? response = null;
         ChatModelException? failure = null;
@@ -1039,7 +1140,8 @@ public sealed class DeepSeekChatModelProviderTests
             HasProviderRequestId: !string.IsNullOrWhiteSpace(response?.Metadata.ProviderRequestId),
             RestrictedDataLeaked: restrictedSentinels.Any(sentinel =>
                 surfacedText.Contains(sentinel, StringComparison.Ordinal)),
-            FakeHandlerSendCount: handler.SendCount);
+            FakeHandlerSendCount: handler.SendCount,
+            ShapeEvidence: Assert.Single(provider.ResponseShapeEvidence));
     }
 
     private sealed record OfflineSseFixtureObservation(
@@ -1051,7 +1153,8 @@ public sealed class DeepSeekChatModelProviderTests
         bool HasUsage,
         bool HasProviderRequestId,
         bool RestrictedDataLeaked,
-        int FakeHandlerSendCount);
+        int FakeHandlerSendCount,
+        R3SafeResponseShapeEvidence ShapeEvidence);
 
     private static async Task WaitUntilAsync(Func<bool> condition, TimeSpan timeout)
     {
@@ -1321,12 +1424,25 @@ public sealed class DeepSeekChatModelProviderTests
                 ChatModelErrorKind.InvalidResponse,
                 "deepseek.stream_empty",
                 sensitiveText));
+        var responseShape = new R3SafeResponseShapeEvidence(
+            SseEventCount: 2,
+            DeltaCount: 1,
+            ContentAppeared: false,
+            ContentCharacterCount: 0,
+            ReasoningContentAppeared: true,
+            ReasoningContentCharacterCount: 24,
+            DoneAppeared: true,
+            FinishReasonAppeared: true,
+            FinishReasonCategory: "stop",
+            StableErrorKind: "invalid_response",
+            ProviderDiagnosticCode: "deepseek.stream_empty");
 
         var evidence = R3FailureEvidenceReporter.Create(
             failure,
             tracker,
             requestCount: 3,
-            frozenRouteModelIds: [DeepSeekChatModelProvider.ProModelId]);
+            frozenRouteModelIds: [DeepSeekChatModelProvider.ProModelId],
+            responseShapeEvidence: [responseShape]);
         var json = JsonSerializer.Serialize(evidence);
 
         Assert.Equal("streaming", evidence.FailureStage);
@@ -1343,6 +1459,8 @@ public sealed class DeepSeekChatModelProviderTests
         Assert.Equal(
             [DeepSeekChatModelProvider.ProModelId],
             evidence.ModelEvidence.FrozenRouteModelIds);
+        Assert.Equal([responseShape], evidence.ResponseShapeEvidence);
+        Assert.Contains("\"ReasoningContentCharacterCount\":24", json, StringComparison.Ordinal);
         Assert.DoesNotContain(sensitiveText, json, StringComparison.Ordinal);
         Assert.DoesNotContain("Authorization", json, StringComparison.OrdinalIgnoreCase);
     }
@@ -1373,6 +1491,64 @@ public sealed class DeepSeekChatModelProviderTests
             [DeepSeekChatModelProvider.ProModelId],
             evidence.ModelEvidence.InvocationModelIds);
         Assert.True(evidence.StreamingCancellationExecuted);
+    }
+
+    [Fact]
+    public void R3FinalResultPreservesAllThreeCancelledTerminalStates()
+    {
+        var terminalEvidence = new R3CancellationTerminalStateEvidence(
+            SessionTurnState: "Cancelled",
+            ConversationTurnState: "Cancelled",
+            AiInvocationState: "Cancelled");
+        R3CancellationTerminalStateGate.RequireCancelled(terminalEvidence);
+
+        var result = new R3DeepSeekValidationResult(
+            Stage: "complete",
+            Passed: true,
+            ProviderId: DeepSeekChatModelProvider.ProviderId,
+            ModelId: DeepSeekChatModelProvider.ProModelId,
+            Requests: 1,
+            HealthPassed: false,
+            OrdinaryChatPassed: false,
+            StreamingPassed: false,
+            StreamingDeltaCount: 0,
+            CancellationPassed: true,
+            CancellationDeltaCount: 2,
+            LateDeltaRejected: true,
+            LateFinalRejected: true,
+            LateSuccessRejected: true,
+            AuditPassed: true,
+            NoAutomaticRetry: true,
+            NoFallback: true,
+            ElapsedMilliseconds: 1,
+            ErrorCode: null)
+        {
+            CancellationTerminalEvidence = terminalEvidence
+        };
+        var json = JsonSerializer.Serialize(result);
+
+        Assert.Same(terminalEvidence, result.CancellationTerminalEvidence);
+        Assert.Contains("\"SessionTurnState\":\"Cancelled\"", json, StringComparison.Ordinal);
+        Assert.Contains("\"ConversationTurnState\":\"Cancelled\"", json, StringComparison.Ordinal);
+        Assert.Contains("\"AiInvocationState\":\"Cancelled\"", json, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("Completed", "Cancelled", "Cancelled")]
+    [InlineData("Cancelled", "Succeeded", "Cancelled")]
+    [InlineData("Cancelled", "Cancelled", "Failed")]
+    public void R3CancellationGateRejectsEachNonCancelledTerminalStateIndependently(
+        string sessionTurnState,
+        string conversationTurnState,
+        string aiInvocationState)
+    {
+        var exception = Assert.Throws<R3ValidationFailureException>(() =>
+            R3CancellationTerminalStateGate.RequireCancelled(new(
+                sessionTurnState,
+                conversationTurnState,
+                aiInvocationState)));
+
+        Assert.Equal("r3_cancellation_terminal_mismatch", exception.Code);
     }
 
     [Theory]
