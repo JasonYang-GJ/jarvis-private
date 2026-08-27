@@ -1643,10 +1643,11 @@ public sealed class DeepSeekChatModelProviderTests
                 NoAutomaticRetry: true,
                 NoFallback: true));
 
-        var exception = await Assert.ThrowsAsync<R3ValidationFailureException>(() =>
+        var exception = await Assert.ThrowsAsync<ChatModelException>(() =>
             provider.CompleteAsync(Request(modelId: DeepSeekChatModelProvider.ProModelId)));
 
-        Assert.Equal(R3SecureCredentialLeaseBinding.UnavailableErrorCode, exception.Code);
+        Assert.Equal(ChatModelErrorKind.Configuration, exception.Error.Kind);
+        Assert.Equal("deepseek.not_configured", exception.Error.Code);
         Assert.DoesNotContain(sentinel, exception.ToString(), StringComparison.Ordinal);
         Assert.Equal(1, source.OpenLeaseCount);
         Assert.Equal(0, handler.SendCount);
@@ -1673,10 +1674,11 @@ public sealed class DeepSeekChatModelProviderTests
                 NoAutomaticRetry: true,
                 NoFallback: true));
 
-        var exception = await Assert.ThrowsAsync<R3ValidationFailureException>(() =>
+        var exception = await Assert.ThrowsAsync<ChatModelException>(() =>
             provider.CompleteAsync(Request(modelId: DeepSeekChatModelProvider.ProModelId)));
 
-        Assert.Equal(R3SecureCredentialLeaseBinding.UnavailableErrorCode, exception.Code);
+        Assert.Equal(ChatModelErrorKind.Configuration, exception.Error.Kind);
+        Assert.Equal("deepseek.not_configured", exception.Error.Code);
         Assert.DoesNotContain(sentinel, exception.ToString(), StringComparison.Ordinal);
         Assert.Equal(1, source.OpenLeaseCount);
         Assert.True(source.LastLeaseDisposed);

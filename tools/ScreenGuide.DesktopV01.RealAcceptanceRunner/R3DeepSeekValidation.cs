@@ -481,7 +481,8 @@ public static class R3SecureCredentialLeaseBinding
 
                 if (lease.Secret.IsEmpty)
                 {
-                    throw new R3ValidationFailureException(UnavailableErrorCode);
+                    lease.Dispose();
+                    return null;
                 }
 
                 return lease;
@@ -491,15 +492,10 @@ public static class R3SecureCredentialLeaseBinding
                 lease?.Dispose();
                 throw;
             }
-            catch (R3ValidationFailureException)
-            {
-                lease?.Dispose();
-                throw;
-            }
             catch
             {
                 lease?.Dispose();
-                throw new R3ValidationFailureException(UnavailableErrorCode);
+                return null;
             }
         }
 

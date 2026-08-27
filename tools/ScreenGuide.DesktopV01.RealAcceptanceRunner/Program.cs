@@ -147,6 +147,18 @@ try
 
     if (stage2R3DeepSeek)
     {
+        if (r3Validation.CancellationOnly)
+        {
+            var outcome = await R3RunnerExecution.ExecuteCancellationOnlyAsync(
+                api,
+                r3Host!,
+                r3Provider!,
+                r3Validation,
+                r3EvidenceTracker!);
+            Console.WriteLine(R3ResultPrefix + outcome.StructuredEvidenceJson);
+            return outcome.Passed ? 0 : 1;
+        }
+
         try
         {
             var result = await RunStage2R3DeepSeekPreparationAsync(
@@ -560,100 +572,19 @@ static async Task<R3DeepSeekValidationResult> RunStage2R3DeepSeekPreparationAsyn
 
     RequireR3(plan.RunStreamingCancellation, "r3_cancellation_not_planned");
 
-    evidenceTracker.BeginStreamingCancellation();
-    const string cancellationCanary = "R3-CANCEL-LATE-CANARY";
-    var cancellationObservation = provider.PrepareNextCall(
-        R3ValidationCallMode.StreamingCancellation);
-    var cancelling = await api.SubmitSessionInputAsync(new SessionInputRequestDto(
-            $"{cancellationCanary}: write 100 numbered short lines and do not summarize.",
-            "Text",
-            $"r3-cancel-{Guid.NewGuid():N}",
-            session.SessionId))
-        .WaitAsync(cancellationToken);
-    var earlyTerminal = WaitForR3CancellationTerminalEvidenceAsync(
+    var cancellation = await R3RunnerExecution.ExecuteCancellationTurnAsync(
         api,
         sessions,
         conversations,
         invocations,
-        cancellationObservation.Terminal,
-        cancelling.TurnId,
-        budget.TotalTimeout,
-        cancellationToken);
-    var precondition = await R3CancellationPreconditionCoordinator.WaitAsync(
-        cancellationObservation.AtLeastTwoDeltas,
-        earlyTerminal,
-        Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken),
-        async () =>
-        {
-            _ = await api.CancelSessionTurnAsync(session.SessionId, cancelling.TurnId)
-                .WaitAsync(cancellationToken);
-        });
-    if (precondition.Disposition == R3CancellationPreconditionDisposition.TerminalFailed)
-    {
-        evidenceTracker.RecordInvocationModel(
-            precondition.TerminalEvidence?.InvocationModelId);
-        throw new R3ValidationFailureException(
-            precondition.TerminalEvidence?.PublicFailureCode
-            ?? "r3_cancellation_provider_failed",
-            precondition.TerminalEvidence?.ProviderDiagnosticCode);
-    }
-
-    if (precondition.Disposition == R3CancellationPreconditionDisposition.TerminalSucceeded)
-    {
-        evidenceTracker.RecordInvocationModel(
-            precondition.TerminalEvidence?.InvocationModelId);
-        throw new R3ValidationFailureException("r3_cancellation_precondition_succeeded");
-    }
-
-    if (precondition.Disposition == R3CancellationPreconditionDisposition.TerminalInterrupted)
-    {
-        evidenceTracker.RecordInvocationModel(
-            precondition.TerminalEvidence?.InvocationModelId);
-        throw new R3ValidationFailureException(
-            "r3_cancellation_precondition_interrupted",
-            precondition.TerminalEvidence?.ProviderDiagnosticCode);
-    }
-
-    if (precondition.Disposition == R3CancellationPreconditionDisposition.TimedOut)
-    {
-        throw new R3ValidationFailureException("r3_cancellation_precondition_timeout");
-    }
-
-    var cancellationTerminal = precondition.TerminalEvidence
-                               ?? await earlyTerminal.WaitAsync(cancellationToken);
-    var cancellationTerminalEvidence = new R3CancellationTerminalStateEvidence(
-        cancellationTerminal.SessionState,
-        cancellationTerminal.ConversationState,
-        cancellationTerminal.InvocationState);
-    R3CancellationTerminalStateGate.RequireCancelled(cancellationTerminalEvidence);
-    var cancelledSnapshot = await WaitForSessionTurnAsync(
-            api,
-            cancelling.TurnId,
-            ["Cancelled"],
-            budget.TotalTimeout)
-        .WaitAsync(cancellationToken);
-    var cancelledTurn = cancelledSnapshot.Turns.Single(item => item.Id == cancelling.TurnId);
-    var cancelledInvocation = AssertR3ConversationInvocation(
-        await invocations.GetForSessionTurnAsync(cancelling.TurnId, cancellationToken),
         provider,
-        cancelledTurn,
+        budget,
         expectedModelId,
-        AiInvocationStatus.Cancelled,
-        requireProviderMetadata: false);
+        session.SessionId,
+        evidenceTracker,
+        cancellationToken);
+    var cancelledInvocation = cancellation.Invocation;
     validatedInvocations.Add(cancelledInvocation);
-    evidenceTracker.RecordInvocationModel(cancelledInvocation.ModelId);
-    var lateDeltaRejected = cancellationObservation.DeltaCountWhenCancellationCompleted
-                            == cancellationObservation.DeltaCount;
-    var lateFinalRejected = !cancellationObservation.FinalUpdateObserved;
-    var lateSuccessRejected = !cancellationObservation.ResponseReturned
-                              && cancelledTurn.Phase == "Cancelled"
-                              && !cancelledSnapshot.Messages.Any(message =>
-                                  message.Role == "Assistant"
-                                  && message.Content.Contains(
-                                      cancellationCanary,
-                                      StringComparison.Ordinal));
-    var cancellationPassed = lateDeltaRejected && lateFinalRejected && lateSuccessRejected;
-    RequireR3(cancellationPassed, "r3_cancellation_failed");
 
     evidenceTracker.BeginAudit();
     var auditPassed = plan.RunOrdinaryChat
@@ -702,11 +633,11 @@ static async Task<R3DeepSeekValidationResult> RunStage2R3DeepSeekPreparationAsyn
         ordinaryChatPassed,
         streamingPassed,
         streamingDeltaCount,
-        cancellationPassed,
-        cancellationObservation.DeltaCount,
-        lateDeltaRejected,
-        lateFinalRejected,
-        lateSuccessRejected,
+        cancellation.Passed,
+        cancellation.DeltaCount,
+        cancellation.LateDeltaRejected,
+        cancellation.LateFinalRejected,
+        cancellation.LateSuccessRejected,
         auditPassed,
         budget.NoAutomaticRetry,
         budget.NoFallback,
@@ -719,7 +650,7 @@ static async Task<R3DeepSeekValidationResult> RunStage2R3DeepSeekPreparationAsyn
         StreamingSuccessExecuted = plan.RunStreamingSuccess,
         StreamingCancellationExecuted = plan.RunStreamingCancellation,
         ModelEvidence = modelEvidence,
-        CancellationTerminalEvidence = cancellationTerminalEvidence,
+        CancellationTerminalEvidence = cancellation.TerminalEvidence,
         ResponseShapeEvidence = provider.ResponseShapeEvidence
     };
 }
@@ -768,44 +699,6 @@ static AiInvocationRecord AssertR3ConversationInvocation(
 
     RequireR3(matches, "r3_invocation_mismatch");
     return invocation;
-}
-
-static async Task<R3CancellationTerminalEvidence> WaitForR3CancellationTerminalEvidenceAsync(
-    IDesktopApiClient api,
-    ISessionStore sessions,
-    IConversationStore conversations,
-    IAiInvocationStore invocations,
-    Task providerTerminal,
-    Guid sessionTurnId,
-    TimeSpan timeout,
-    CancellationToken cancellationToken)
-{
-    var snapshot = await WaitForSessionTurnAsync(
-            api,
-            sessionTurnId,
-            ["Failed", "Cancelled", "Completed", "Interrupted"],
-            timeout)
-        .WaitAsync(cancellationToken);
-    await providerTerminal.WaitAsync(cancellationToken);
-    var sessionTurn = snapshot.Turns.Single(item => item.Id == sessionTurnId);
-    var persistedSessionTurn = await sessions.GetTurnAsync(sessionTurnId, cancellationToken)
-                               ?? throw new R3ValidationFailureException(
-                                   "r3_cancellation_session_turn_missing");
-    var conversationTurn = sessionTurn.ConversationTurnId is { } conversationTurnId
-        ? (await conversations.GetTurnsAsync(snapshot.ConversationId, cancellationToken))
-            .SingleOrDefault(item => item.Id == conversationTurnId)
-        : null;
-    var invocation = (await invocations.GetForSessionTurnAsync(
-            sessionTurnId,
-            cancellationToken))
-        .SingleOrDefault(item => item.Purpose == AiInvocationPurpose.Conversation);
-    return new R3CancellationTerminalEvidence(
-        sessionTurn.Phase,
-        conversationTurn?.Status.ToString() ?? "Missing",
-        invocation?.Status.ToString() ?? "Missing",
-        persistedSessionTurn.FailureCode ?? conversationTurn?.FailureCode,
-        invocation?.FailureCode,
-        invocation?.ModelId);
 }
 
 static async Task<AiSettingsDto> WaitForDeepSeekConfigurationOnlyAsync(
