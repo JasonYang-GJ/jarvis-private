@@ -15,9 +15,10 @@ namespace ScreenGuide.DesktopHost.Tests;
 public sealed class R3RunnerEndToEndExecutionTests
 {
     [Fact]
-    public async Task SharedRunnerExecutionPersistsRealCancelledSessionConversationAndInvocationWithoutPersistingCredential()
+    public async Task SharedRunnerExecutionCancelsReasoningOnlyProtocolDeltasWithoutDisclosingReasoning()
     {
         const string sentinel = "fake-r3-end-to-end-credential-sentinel";
+        const string reasoningSentinel = "fake-r3-private-reasoning-sentinel";
         var root = Path.Combine(
             Path.GetTempPath(),
             $"ScreenGuide.R3.RunnerExecution.Tests.{Guid.NewGuid():N}");
@@ -27,7 +28,7 @@ public sealed class R3RunnerEndToEndExecutionTests
             Path.Combine(root, "isolated-data"),
             pipeName: $"ScreenGuide.R3.Execution.{Guid.NewGuid():N}");
         var credentials = new FakeCredentialStore(FakeCredentialMode.Valid, sentinel);
-        var transport = new CancellationSseTransport();
+        var transport = new ReasoningOnlyCancellationSseTransport(reasoningSentinel);
         try
         {
             _ = await R3IsolatedAiSettingsMaterializer.MaterializeAndVerifyAsync(
@@ -47,22 +48,47 @@ public sealed class R3RunnerEndToEndExecutionTests
                 var provider = host.Services.GetRequiredService<R3BudgetedChatModelProvider>();
                 var tracker = new R3RunEvidenceTracker(DeepSeekChatModelProvider.ProModelId);
 
-                var outcome = await R3RunnerExecution.ExecuteCancellationOnlyAsync(
+                var execution = R3RunnerExecution.ExecuteCancellationOnlyAsync(
                     api,
                     host,
                     provider,
                     validation,
                     tracker);
+                await transport.InitialReasoningDeltasSent.WaitAsync(TimeSpan.FromSeconds(2));
+                var cancellationSignal = transport.CancellationObservedTask;
+                if (await Task.WhenAny(
+                        cancellationSignal,
+                        Task.Delay(TimeSpan.FromMilliseconds(500))) != cancellationSignal)
+                {
+                    transport.AllowTerminalCompletion();
+                }
 
-                Assert.True(outcome.Passed);
+                var outcome = await execution.WaitAsync(TimeSpan.FromSeconds(5));
+
+                Assert.True(outcome.Passed, outcome.StructuredEvidenceJson);
                 Assert.NotNull(outcome.Success);
                 Assert.Null(outcome.Failure);
                 Assert.True(outcome.Success!.CancellationPassed);
+                Assert.Equal(1, outcome.Success.CancellationRequestCount);
                 Assert.True(outcome.Success.AuditPassed);
                 Assert.True(outcome.Success.CancellationTerminalEvidence?.IsCancelled);
                 Assert.Equal(1, outcome.Success.Requests);
+                Assert.Equal(2, outcome.Success.CancellationDeltaCount);
+                Assert.Equal(2, outcome.Success.CancellationDeltaCountAtCompletion);
                 Assert.Equal(1, transport.SendCount);
                 Assert.True(transport.CancellationObserved);
+                var responseShape = Assert.Single(outcome.Success.ResponseShapeEvidence);
+                Assert.Equal(2, responseShape.SseEventCount);
+                Assert.Equal(2, responseShape.DeltaCount);
+                Assert.True(responseShape.ContentAppeared);
+                Assert.Equal(0, responseShape.ContentCharacterCount);
+                Assert.True(responseShape.ReasoningContentAppeared);
+                Assert.Equal(
+                    reasoningSentinel.Length * 2,
+                    responseShape.ReasoningContentCharacterCount);
+                Assert.False(responseShape.DoneAppeared);
+                Assert.True(responseShape.FinishReasonAppeared);
+                Assert.Equal("null", responseShape.FinishReasonCategory);
                 var snapshot = await api.GetCurrentSessionAsync();
                 var sessionTurn = Assert.Single(snapshot!.Turns);
                 Assert.Equal("Cancelled", sessionTurn.Phase);
@@ -82,6 +108,34 @@ public sealed class R3RunnerEndToEndExecutionTests
                 await host.StopAsync();
                 hostStopped = true;
                 Assert.DoesNotContain(sentinel, outcome.StructuredEvidenceJson, StringComparison.Ordinal);
+                Assert.DoesNotContain(
+                    reasoningSentinel,
+                    outcome.StructuredEvidenceJson,
+                    StringComparison.Ordinal);
+                Assert.DoesNotContain(
+                    "R3-CANCEL-LATE-CANARY",
+                    outcome.StructuredEvidenceJson,
+                    StringComparison.Ordinal);
+                Assert.DoesNotContain(
+                    "Authorization",
+                    outcome.StructuredEvidenceJson,
+                    StringComparison.OrdinalIgnoreCase);
+                Assert.DoesNotContain(
+                    "data:",
+                    outcome.StructuredEvidenceJson,
+                    StringComparison.Ordinal);
+                Assert.DoesNotContain(
+                    "offline-cancel",
+                    outcome.StructuredEvidenceJson,
+                    StringComparison.Ordinal);
+                Assert.Contains(
+                    "\"CancellationRequestCount\":1",
+                    outcome.StructuredEvidenceJson,
+                    StringComparison.Ordinal);
+                Assert.Contains(
+                    "\"CancellationDeltaCountAtCompletion\":2",
+                    outcome.StructuredEvidenceJson,
+                    StringComparison.Ordinal);
                 Assert.DoesNotContain(arguments, argument =>
                     argument.Contains(sentinel, StringComparison.Ordinal));
                 Assert.All(
@@ -91,6 +145,13 @@ public sealed class R3RunnerEndToEndExecutionTests
                         SearchOption.AllDirectories),
                     path => Assert.False(File.ReadAllBytes(path).AsSpan().IndexOf(
                         Encoding.UTF8.GetBytes(sentinel)) >= 0));
+                Assert.All(
+                    Directory.EnumerateFiles(
+                        hostOptions.DataDirectory,
+                        "*",
+                        SearchOption.AllDirectories),
+                    path => Assert.False(File.ReadAllBytes(path).AsSpan().IndexOf(
+                        Encoding.UTF8.GetBytes(reasoningSentinel)) >= 0));
                 Assert.False(Directory.Exists(hostOptions.SecretsDirectory));
             }
             finally
@@ -327,26 +388,38 @@ public sealed class R3RunnerEndToEndExecutionTests
         }
     }
 
-    private sealed class CancellationSseTransport : HttpMessageHandler
+    private sealed class ReasoningOnlyCancellationSseTransport(string reasoningSentinel)
+        : HttpMessageHandler
     {
+        private readonly TaskCompletionSource _initialReasoningDeltasSent =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource _allowTerminalCompletion =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource _cancellationObserved =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
         public int SendCount { get; private set; }
 
         public bool CancellationObserved => _stream?.CancellationObserved ?? false;
 
-        private BlockingSseStream? _stream;
+        public Task InitialReasoningDeltasSent => _initialReasoningDeltasSent.Task;
+
+        public Task CancellationObservedTask => _cancellationObserved.Task;
+
+        private ReasoningOnlySseStream? _stream;
+
+        public void AllowTerminalCompletion() => _allowTerminalCompletion.TrySetResult();
 
         protected override Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request,
             CancellationToken cancellationToken)
         {
             SendCount++;
-            _stream = new BlockingSseStream(
-                """
-                data: {"id":"offline-cancel","choices":[{"delta":{"content":"one"},"finish_reason":null}]}
-
-                data: {"id":"offline-cancel","choices":[{"delta":{"content":"two"},"finish_reason":null}]}
-
-                """);
+            _stream = new ReasoningOnlySseStream(
+                reasoningSentinel,
+                _initialReasoningDeltasSent,
+                _allowTerminalCompletion.Task,
+                _cancellationObserved);
             var content = new StreamContent(_stream);
             content.Headers.ContentType = new("text/event-stream");
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
@@ -356,10 +429,45 @@ public sealed class R3RunnerEndToEndExecutionTests
         }
     }
 
-    private sealed class BlockingSseStream(string firstChunk) : Stream
+    private sealed class ReasoningOnlySseStream : Stream
     {
-        private readonly byte[] _firstChunk = Encoding.UTF8.GetBytes(firstChunk);
-        private bool _sent;
+        private readonly byte[] _reasoningChunk;
+        private readonly byte[] _terminalChunk;
+        private readonly TaskCompletionSource _initialReasoningDeltasSent;
+        private readonly Task _allowTerminalCompletion;
+        private readonly TaskCompletionSource _cancellationObserved;
+        private int _readStage;
+
+        public ReasoningOnlySseStream(
+            string reasoningSentinel,
+            TaskCompletionSource initialReasoningDeltasSent,
+            Task allowTerminalCompletion,
+            TaskCompletionSource cancellationObserved)
+        {
+            _reasoningChunk = Encoding.UTF8.GetBytes(
+                $$"""
+                data: {"id":"offline-cancel","choices":[{"delta":{"content":"","reasoning_content":"{{reasoningSentinel}}"},"finish_reason":null}]}
+
+                data: {"id":"offline-cancel","choices":[{"delta":{"reasoning_content":"{{reasoningSentinel}}"},"finish_reason":null}]}
+
+                """);
+            _terminalChunk = Encoding.UTF8.GetBytes(
+                $$"""
+                data: {"id":"offline-cancel","choices":[{"delta":{"reasoning_content":"{{reasoningSentinel}}"},"finish_reason":null}]}
+
+                data: {"id":"offline-cancel","choices":[{"delta":{"reasoning_content":"{{reasoningSentinel}}"},"finish_reason":null}]}
+
+                data: {"id":"offline-cancel","choices":[{"delta":{"reasoning_content":"{{reasoningSentinel}}"},"finish_reason":null}]}
+
+                data: {"id":"offline-cancel","choices":[{"delta":{},"finish_reason":"length"}]}
+
+                data: [DONE]
+
+                """);
+            _initialReasoningDeltasSent = initialReasoningDeltasSent;
+            _allowTerminalCompletion = allowTerminalCompletion;
+            _cancellationObserved = cancellationObserved;
+        }
 
         public bool CancellationObserved { get; private set; }
 
@@ -380,21 +488,28 @@ public sealed class R3RunnerEndToEndExecutionTests
             Memory<byte> buffer,
             CancellationToken cancellationToken = default)
         {
-            if (!_sent)
+            if (Interlocked.CompareExchange(ref _readStage, 1, 0) == 0)
             {
-                _sent = true;
-                _firstChunk.CopyTo(buffer);
-                return _firstChunk.Length;
+                _reasoningChunk.CopyTo(buffer);
+                _initialReasoningDeltasSent.TrySetResult();
+                return _reasoningChunk.Length;
+            }
+
+            if (Interlocked.CompareExchange(ref _readStage, 2, 1) != 1)
+            {
+                return 0;
             }
 
             try
             {
-                await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
-                return 0;
+                await _allowTerminalCompletion.WaitAsync(cancellationToken);
+                _terminalChunk.CopyTo(buffer);
+                return _terminalChunk.Length;
             }
             catch (OperationCanceledException)
             {
                 CancellationObserved = true;
+                _cancellationObserved.TrySetResult();
                 throw;
             }
         }

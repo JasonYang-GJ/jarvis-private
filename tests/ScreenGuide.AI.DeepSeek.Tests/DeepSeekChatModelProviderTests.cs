@@ -239,6 +239,7 @@ public sealed class DeepSeekChatModelProviderTests
 
         Assert.True(observation.ResponseReturned);
         Assert.Equal(1, observation.NonEmptyDeltaCount);
+        Assert.Equal(1, observation.ValidProtocolDeltaCount);
         Assert.True(observation.FinalUpdateObserved);
         Assert.Equal(ChatFinishReason.Stop, observation.FinishReason);
         Assert.Null(observation.ErrorCode);
@@ -278,6 +279,7 @@ public sealed class DeepSeekChatModelProviderTests
 
         Assert.False(observation.ResponseReturned);
         Assert.Equal(0, observation.NonEmptyDeltaCount);
+        Assert.Equal(1, observation.ValidProtocolDeltaCount);
         Assert.False(observation.FinalUpdateObserved);
         Assert.Null(observation.FinishReason);
         Assert.Equal("deepseek.stream_empty", observation.ErrorCode);
@@ -325,6 +327,7 @@ public sealed class DeepSeekChatModelProviderTests
 
         Assert.True(observation.ResponseReturned);
         Assert.Equal(1, observation.NonEmptyDeltaCount);
+        Assert.Equal(2, observation.ValidProtocolDeltaCount);
         Assert.True(observation.FinalUpdateObserved);
         Assert.Equal(ChatFinishReason.Stop, observation.FinishReason);
         Assert.Null(observation.ErrorCode);
@@ -357,6 +360,7 @@ public sealed class DeepSeekChatModelProviderTests
 
         Assert.False(observation.ResponseReturned);
         Assert.Equal(0, observation.NonEmptyDeltaCount);
+        Assert.Equal(0, observation.ValidProtocolDeltaCount);
         Assert.False(observation.FinalUpdateObserved);
         Assert.Null(observation.FinishReason);
         Assert.Equal("deepseek.stream_empty", observation.ErrorCode);
@@ -392,6 +396,7 @@ public sealed class DeepSeekChatModelProviderTests
 
         Assert.False(observation.ResponseReturned);
         Assert.Equal(0, observation.NonEmptyDeltaCount);
+        Assert.Equal(0, observation.ValidProtocolDeltaCount);
         Assert.False(observation.FinalUpdateObserved);
         Assert.Null(observation.FinishReason);
         Assert.Equal("deepseek.stream_empty", observation.ErrorCode);
@@ -424,6 +429,7 @@ public sealed class DeepSeekChatModelProviderTests
 
         Assert.False(observation.ResponseReturned);
         Assert.Equal(0, observation.NonEmptyDeltaCount);
+        Assert.Equal(0, observation.ValidProtocolDeltaCount);
         Assert.False(observation.FinalUpdateObserved);
         Assert.Null(observation.FinishReason);
         Assert.Equal("deepseek.invalid_stream_event", observation.ErrorCode);
@@ -1108,6 +1114,8 @@ public sealed class DeepSeekChatModelProviderTests
                 NoFallback: true),
             responseShapes);
         var updates = new List<ChatStreamUpdate>();
+        var callObservation = provider.PrepareNextCall(
+            R3ValidationCallMode.StreamingCancellation);
         ChatModelResponse? response = null;
         ChatModelException? failure = null;
         try
@@ -1133,6 +1141,7 @@ public sealed class DeepSeekChatModelProviderTests
         return new OfflineSseFixtureObservation(
             ResponseReturned: response is not null,
             NonEmptyDeltaCount: updates.Count(update => !string.IsNullOrEmpty(update.DeltaText)),
+            ValidProtocolDeltaCount: callObservation.DeltaCount,
             FinalUpdateObserved: updates.Any(update => update.IsFinal),
             FinishReason: response?.FinishReason,
             ErrorCode: failure?.Error.Code,
@@ -1147,6 +1156,7 @@ public sealed class DeepSeekChatModelProviderTests
     private sealed record OfflineSseFixtureObservation(
         bool ResponseReturned,
         int NonEmptyDeltaCount,
+        int ValidProtocolDeltaCount,
         bool FinalUpdateObserved,
         ChatFinishReason? FinishReason,
         string? ErrorCode,

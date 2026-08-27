@@ -569,6 +569,10 @@ public sealed record R3DeepSeekValidationResult(
 
     public R3CancellationTerminalStateEvidence? CancellationTerminalEvidence { get; init; }
 
+    public int CancellationRequestCount { get; init; }
+
+    public int? CancellationDeltaCountAtCompletion { get; init; }
+
     public IReadOnlyList<R3SafeResponseShapeEvidence> ResponseShapeEvidence { get; init; } = [];
 }
 
@@ -618,14 +622,14 @@ public sealed class R3SafeResponseShapeCollector
 
     public IReadOnlyList<R3SafeResponseShapeEvidence> Snapshot() => _completed.ToArray();
 
-    internal R3SafeResponseShapeScope BeginRequest()
+    internal R3SafeResponseShapeScope BeginRequest(Action? validProtocolDeltaObserved = null)
     {
         if (_current.Value is not null)
         {
             throw new InvalidOperationException("R3 response-shape tracking is already active.");
         }
 
-        var shape = new R3MutableResponseShape();
+        var shape = new R3MutableResponseShape(validProtocolDeltaObserved);
         _current.Value = shape;
         return new R3SafeResponseShapeScope(this, shape);
     }
@@ -667,8 +671,9 @@ internal sealed class R3SafeResponseShapeScope(
     }
 }
 
-internal sealed class R3MutableResponseShape
+internal sealed class R3MutableResponseShape(Action? validProtocolDeltaObserved = null)
 {
+    private readonly Action? _validProtocolDeltaObserved = validProtocolDeltaObserved;
     private readonly object _sync = new();
     private int _sseEventCount;
     private int _deltaCount;
@@ -684,6 +689,7 @@ internal sealed class R3MutableResponseShape
 
     public void ObserveDataLine(string payload)
     {
+        var validProtocolDelta = false;
         lock (_sync)
         {
             _sseEventCount = SaturatingIncrement(_sseEventCount);
@@ -718,21 +724,27 @@ internal sealed class R3MutableResponseShape
                 }
 
                 _deltaCount = SaturatingIncrement(_deltaCount);
-                ObserveTextProperty(
+                var hasContent = ObserveTextProperty(
                     delta,
                     "content",
                     ref _contentAppeared,
                     ref _contentCharacterCount);
-                ObserveTextProperty(
+                var hasReasoningContent = ObserveTextProperty(
                     delta,
                     "reasoning_content",
                     ref _reasoningContentAppeared,
                     ref _reasoningContentCharacterCount);
+                validProtocolDelta = hasContent || hasReasoningContent;
             }
             catch (JsonException)
             {
                 // The production provider owns protocol classification. Shape evidence records no raw data.
             }
+        }
+
+        if (validProtocolDelta)
+        {
+            _validProtocolDeltaObserved?.Invoke();
         }
     }
 
@@ -764,7 +776,7 @@ internal sealed class R3MutableResponseShape
         }
     }
 
-    private static void ObserveTextProperty(
+    private static bool ObserveTextProperty(
         JsonElement delta,
         string propertyName,
         ref bool appeared,
@@ -772,14 +784,18 @@ internal sealed class R3MutableResponseShape
     {
         if (!delta.TryGetProperty(propertyName, out var value))
         {
-            return;
+            return false;
         }
 
         appeared = true;
         if (value.ValueKind == JsonValueKind.String)
         {
-            characterCount = SaturatingAdd(characterCount, value.GetString()?.Length ?? 0);
+            var length = value.GetString()?.Length ?? 0;
+            characterCount = SaturatingAdd(characterCount, length);
+            return length > 0;
         }
+
+        return false;
     }
 
     private static string SafeFinishReason(JsonElement value)
@@ -1369,18 +1385,23 @@ public sealed class R3ValidationCallObservation
 
     public bool ResponseReturned => Volatile.Read(ref _responseReturned) != 0;
 
-    internal void Record(ChatStreamUpdate update)
+    internal void Record(ChatStreamUpdate update, bool countProtocolDelta)
     {
         if (update.IsFinal)
         {
             Volatile.Write(ref _finalUpdateObserved, 1);
         }
 
-        if (string.IsNullOrEmpty(update.DeltaText))
+        if (!countProtocolDelta || string.IsNullOrEmpty(update.DeltaText))
         {
             return;
         }
 
+        RecordProtocolDelta();
+    }
+
+    internal void RecordProtocolDelta()
+    {
         if (Interlocked.Increment(ref _deltaCount) >= 2)
         {
             _atLeastTwoDeltas.TrySetResult();
@@ -1390,7 +1411,7 @@ public sealed class R3ValidationCallObservation
     internal void MarkResponseReturned() => Volatile.Write(ref _responseReturned, 1);
 
     internal void MarkCancellationCompleted() =>
-        Volatile.Write(ref _deltaCountWhenCancellationCompleted, DeltaCount);
+        Interlocked.CompareExchange(ref _deltaCountWhenCancellationCompleted, DeltaCount, -1);
 
     internal void MarkTerminal() => _terminal.TrySetResult();
 }
@@ -1476,9 +1497,10 @@ public sealed class R3BudgetedChatModelProvider : IChatModelProvider
         ChatModelStreamCallback? effectiveCallback = streamCallback;
         if (observation is not null)
         {
+            var safeProtocolShapeAvailable = _responseShapeCollector is not null;
             effectiveCallback = async (update, token) =>
             {
-                observation.Record(update);
+                observation.Record(update, countProtocolDelta: !safeProtocolShapeAvailable);
                 if (streamCallback is not null)
                 {
                     await streamCallback(update, token).ConfigureAwait(false);
@@ -1486,7 +1508,8 @@ public sealed class R3BudgetedChatModelProvider : IChatModelProvider
             };
         }
 
-        using var responseShapeScope = _responseShapeCollector?.BeginRequest();
+        using var responseShapeScope = _responseShapeCollector?.BeginRequest(
+            observation is null ? null : observation.RecordProtocolDelta);
         try
         {
             var response = await _inner.CompleteAsync(
@@ -1505,6 +1528,11 @@ public sealed class R3BudgetedChatModelProvider : IChatModelProvider
         }
         catch (ChatModelException exception)
         {
+            if (exception.Error.Kind == ChatModelErrorKind.Cancelled)
+            {
+                observation?.MarkCancellationCompleted();
+            }
+
             responseShapeScope?.RecordFailure(exception);
             throw;
         }

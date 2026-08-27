@@ -20,7 +20,9 @@ public sealed record R3RunnerExecutionOutcome(
 internal sealed record R3RunnerCancellationTurnEvidence(
     AiInvocationRecord Invocation,
     R3CancellationTerminalStateEvidence TerminalEvidence,
+    int CancellationRequestCount,
     int DeltaCount,
+    int DeltaCountAtCancellationCompletion,
     bool LateDeltaRejected,
     bool LateFinalRejected,
     bool LateSuccessRejected,
@@ -171,6 +173,8 @@ public static class R3RunnerExecution
             StreamingCancellationExecuted = true,
             ModelEvidence = modelEvidence,
             CancellationTerminalEvidence = cancellation.TerminalEvidence,
+            CancellationRequestCount = cancellation.CancellationRequestCount,
+            CancellationDeltaCountAtCompletion = cancellation.DeltaCountAtCancellationCompletion,
             ResponseShapeEvidence = provider.ResponseShapeEvidence
         };
     }
@@ -190,6 +194,7 @@ public static class R3RunnerExecution
         evidenceTracker.BeginStreamingCancellation();
         const string cancellationCanary = "R3-CANCEL-LATE-CANARY";
         var observation = provider.PrepareNextCall(R3ValidationCallMode.StreamingCancellation);
+        var cancellationRequestCount = 0;
         var cancelling = await api.SubmitSessionInputAsync(
                 new SessionInputRequestDto(
                     $"{cancellationCanary}: write 100 numbered short lines and do not summarize.",
@@ -213,6 +218,12 @@ public static class R3RunnerExecution
                 Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken),
                 async () =>
                 {
+                    if (Interlocked.Increment(ref cancellationRequestCount) != 1)
+                    {
+                        throw new R3ValidationFailureException(
+                            "r3_cancellation_request_count_mismatch");
+                    }
+
                     _ = await api.CancelSessionTurnAsync(
                             sessionId,
                             cancelling.TurnId,
@@ -245,8 +256,8 @@ public static class R3RunnerExecution
             expectedModelId,
             AiInvocationStatus.Cancelled);
         evidenceTracker.RecordInvocationModel(invocation.ModelId);
-        var lateDeltaRejected = observation.DeltaCountWhenCancellationCompleted
-                                == observation.DeltaCount;
+        var deltaCountAtCancellationCompletion = observation.DeltaCountWhenCancellationCompleted;
+        var lateDeltaRejected = deltaCountAtCancellationCompletion == observation.DeltaCount;
         var lateFinalRejected = !observation.FinalUpdateObserved;
         var lateSuccessRejected = !observation.ResponseReturned
                                   && turn.Phase == "Cancelled"
@@ -255,12 +266,16 @@ public static class R3RunnerExecution
                                       && message.Content.Contains(
                                           cancellationCanary,
                                           StringComparison.Ordinal));
+        Require(lateDeltaRejected, "r3_cancellation_late_delta");
+        Require(lateFinalRejected, "r3_cancellation_late_final");
+        Require(lateSuccessRejected, "r3_cancellation_late_success");
         var passed = lateDeltaRejected && lateFinalRejected && lateSuccessRejected;
-        Require(passed, "r3_cancellation_failed");
         return new R3RunnerCancellationTurnEvidence(
             invocation,
             terminalEvidence,
+            cancellationRequestCount,
             observation.DeltaCount,
+            deltaCountAtCancellationCompletion!.Value,
             lateDeltaRejected,
             lateFinalRejected,
             lateSuccessRejected,
