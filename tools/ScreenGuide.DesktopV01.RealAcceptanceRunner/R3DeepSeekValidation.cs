@@ -187,56 +187,48 @@ public sealed record R3DeepSeekValidationOptions(
     }
 }
 
-public sealed record R3SecureCredentialStoreReference(
-    bool IsValid,
-    string? ErrorCode,
-    string? RootDirectory)
+public static class R3CanonicalCredentialStoreRoot
 {
-    private const string ArgumentPrefix = "--credential-store-root=";
+    public const string ErrorCode = "r3_canonical_credential_root_unavailable";
 
-    public static R3SecureCredentialStoreReference Parse(IReadOnlyList<string> arguments)
+    public static string ResolveCurrentUser() => Resolve(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData));
+
+    internal static string Resolve(string localApplicationData)
     {
-        ArgumentNullException.ThrowIfNull(arguments);
-        var matches = arguments
-            .Where(argument => argument.StartsWith(
-                ArgumentPrefix,
-                StringComparison.OrdinalIgnoreCase))
-            .ToArray();
-        if (matches.Length == 0)
+        if (string.IsNullOrWhiteSpace(localApplicationData)
+            || !Path.IsPathFullyQualified(localApplicationData)
+            || localApplicationData.StartsWith("\\\\", StringComparison.Ordinal))
         {
-            return Invalid("real_provider_credential_store_root_missing");
-        }
-
-        if (matches.Length != 1)
-        {
-            return Invalid("real_provider_credential_store_root_repeated");
-        }
-
-        var configuredRoot = matches[0][ArgumentPrefix.Length..];
-        if (string.IsNullOrWhiteSpace(configuredRoot)
-            || !Path.IsPathFullyQualified(configuredRoot))
-        {
-            return Invalid("real_provider_credential_store_root_invalid");
+            throw new R3ValidationFailureException(ErrorCode);
         }
 
         try
         {
-            return new R3SecureCredentialStoreReference(
-                IsValid: true,
-                ErrorCode: null,
-                RootDirectory: Path.GetFullPath(configuredRoot));
+            var normalizedLocalData = Path.GetFullPath(localApplicationData);
+            var pathRoot = Path.GetPathRoot(normalizedLocalData);
+            if (string.IsNullOrWhiteSpace(pathRoot)
+                || pathRoot.StartsWith("\\\\", StringComparison.Ordinal)
+                || normalizedLocalData.StartsWith("\\\\?\\", StringComparison.Ordinal)
+                || normalizedLocalData.StartsWith("\\\\.\\", StringComparison.Ordinal))
+            {
+                throw new R3ValidationFailureException(ErrorCode);
+            }
+
+            return Path.Combine(normalizedLocalData, "ScreenGuide", "V01", "secrets");
+        }
+        catch (R3ValidationFailureException)
+        {
+            throw;
         }
         catch (Exception exception) when (
             exception is ArgumentException
                 or NotSupportedException
                 or PathTooLongException)
         {
-            return Invalid("real_provider_credential_store_root_invalid");
+            throw new R3ValidationFailureException(ErrorCode);
         }
     }
-
-    private static R3SecureCredentialStoreReference Invalid(string errorCode) =>
-        new(IsValid: false, errorCode, RootDirectory: null);
 }
 
 public sealed class R3ValidationBudgetExceededException(string code) : Exception(
@@ -433,31 +425,39 @@ public static class R3IsolatedAiSettingsMaterializer
 
 public static class R3SecureCredentialLeaseBinding
 {
-    public static IProviderCredentialStore CreateReadOnly(
-        string secureRootReference,
-        Func<string, IProviderCredentialStore> storeFactory)
-    {
-        if (string.IsNullOrWhiteSpace(secureRootReference))
-        {
-            throw new ArgumentException(
-                "R3 安全凭据存储引用不能为空。",
-                nameof(secureRootReference));
-        }
+    public const string UnavailableErrorCode = "r3_credential_lease_unavailable";
 
-        ArgumentNullException.ThrowIfNull(storeFactory);
-        var normalizedRootReference = Path.GetFullPath(secureRootReference.Trim());
-        var source = storeFactory(normalizedRootReference)
-                     ?? throw new InvalidOperationException("R3 安全凭据 Store 未创建。");
+    public static IProviderCredentialStore CreateReadOnly(IProviderCredentialStore source)
+    {
+        ArgumentNullException.ThrowIfNull(source);
         return new ReadOnlyCredentialLeaseStore(source);
     }
 
     private sealed class ReadOnlyCredentialLeaseStore(IProviderCredentialStore source)
         : IProviderCredentialStore
     {
-        public Task<ProviderCredentialStatus> GetStatusAsync(
+        public async Task<ProviderCredentialStatus> GetStatusAsync(
             string providerId,
-            CancellationToken cancellationToken = default) =>
-            source.GetStatusAsync(providerId, cancellationToken);
+            CancellationToken cancellationToken = default)
+        {
+            try
+            {
+                return await source.GetStatusAsync(providerId, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (R3ValidationFailureException)
+            {
+                throw;
+            }
+            catch
+            {
+                throw new R3ValidationFailureException(UnavailableErrorCode);
+            }
+        }
 
         public Task SetAsync(
             string providerId,
@@ -465,10 +465,43 @@ public static class R3SecureCredentialLeaseBinding
             CancellationToken cancellationToken = default) =>
             throw new R3ValidationFailureException("r3_credential_store_read_only");
 
-        public ValueTask<IProviderCredentialLease?> OpenLeaseAsync(
+        public async ValueTask<IProviderCredentialLease?> OpenLeaseAsync(
             string providerId,
-            CancellationToken cancellationToken = default) =>
-            source.OpenLeaseAsync(providerId, cancellationToken);
+            CancellationToken cancellationToken = default)
+        {
+            IProviderCredentialLease? lease = null;
+            try
+            {
+                lease = await source.OpenLeaseAsync(providerId, cancellationToken)
+                    .ConfigureAwait(false);
+                if (lease is null)
+                {
+                    return null;
+                }
+
+                if (lease.Secret.IsEmpty)
+                {
+                    throw new R3ValidationFailureException(UnavailableErrorCode);
+                }
+
+                return lease;
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                lease?.Dispose();
+                throw;
+            }
+            catch (R3ValidationFailureException)
+            {
+                lease?.Dispose();
+                throw;
+            }
+            catch
+            {
+                lease?.Dispose();
+                throw new R3ValidationFailureException(UnavailableErrorCode);
+            }
+        }
 
         public Task<bool> DeleteAsync(
             string providerId,

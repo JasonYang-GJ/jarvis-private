@@ -2,14 +2,12 @@ using System.Diagnostics;
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
-using ScreenGuide.Agent.Codex;
 using ScreenGuide.AI.Core;
 using ScreenGuide.AI.DeepSeek;
 using ScreenGuide.Core.Ai;
 using ScreenGuide.Core.Conversations;
 using ScreenGuide.Core.Sessions;
 using ScreenGuide.DesktopHost.Configuration;
-using ScreenGuide.DesktopHost.Runtime;
 using ScreenGuide.DesktopProtocol;
 using ScreenGuide.DesktopV01.RealAcceptanceRunner;
 using ScreenGuide.Skills.Windows;
@@ -30,24 +28,6 @@ if (r3Validation.Requested && !r3Validation.IsValid)
 }
 
 var stage2R3DeepSeek = r3Validation.IsValid;
-R3SecureCredentialStoreReference? r3CredentialStoreReference = null;
-if (stage2R3DeepSeek)
-{
-    r3CredentialStoreReference = R3SecureCredentialStoreReference.Parse(args);
-    if (!r3CredentialStoreReference.IsValid)
-    {
-        Console.WriteLine(R3ResultPrefix + JsonSerializer.Serialize(new
-        {
-            Stage = "guard",
-            Passed = false,
-            ErrorCode = r3CredentialStoreReference.ErrorCode,
-            Requests = 0,
-            RealProvider = false
-        }));
-        return 2;
-    }
-}
-
 var smokeOnly = args.Any(argument =>
     string.Equals(argument, "--smoke", StringComparison.OrdinalIgnoreCase));
 var desktopActionSmoke = args.Any(argument =>
@@ -107,44 +87,12 @@ R3BudgetedChatModelProvider? r3Provider = null;
 R3RunEvidenceTracker? r3EvidenceTracker = null;
 if (stage2R3DeepSeek)
 {
-    var r3Budget = r3Validation.Budget!;
     var r3HostOptions = new DesktopHostOptions(dataRoot, pipeName: pipeName);
     _ = await R3IsolatedAiSettingsMaterializer.MaterializeAndVerifyAsync(
         r3HostOptions.AiSettingsPath,
         r3Validation.ExpectedModelId!);
     r3EvidenceTracker = new R3RunEvidenceTracker(r3Validation.ExpectedModelId!);
-    r3Host = DesktopHostFactory.Build(
-        [],
-        r3HostOptions,
-        services =>
-        {
-            services.AddSingleton<IProviderCredentialStore>(serviceProvider =>
-                R3SecureCredentialLeaseBinding.CreateReadOnly(
-                    r3CredentialStoreReference!.RootDirectory!,
-                    secureRootReference => new WindowsDpapiCredentialStore(
-                        secureRootReference,
-                        serviceProvider.GetRequiredService<TimeProvider>())));
-            services.AddSingleton<R3SafeResponseShapeCollector>();
-            services.AddSingleton(serviceProvider =>
-            {
-                var responseShapes = serviceProvider
-                    .GetRequiredService<R3SafeResponseShapeCollector>();
-                return new R3BudgetedChatModelProvider(
-                    new DeepSeekChatModelProvider(
-                        serviceProvider.GetRequiredService<IProviderCredentialStore>(),
-                        new R3SafeResponseShapeTrackingHandler(
-                            new HttpClientHandler { AllowAutoRedirect = false },
-                            responseShapes)),
-                    r3Validation.ExpectedModelId!,
-                    r3Budget,
-                    responseShapes);
-            });
-            services.AddSingleton(serviceProvider => new ChatProviderRegistry(
-            [
-                serviceProvider.GetRequiredService<CodexChatModelProvider>(),
-                serviceProvider.GetRequiredService<R3BudgetedChatModelProvider>()
-            ]));
-        });
+    r3Host = R3RunnerHostComposition.BuildCurrentUser(r3HostOptions, r3Validation);
     using var startupTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
     await r3Host.StartAsync(startupTimeout.Token);
     r3Provider = r3Host.Services.GetRequiredService<R3BudgetedChatModelProvider>();

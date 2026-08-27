@@ -20,6 +20,13 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Compile Include="..\..\tools\ScreenGuide.DesktopV01.RealAcceptanceRunner\R3DeepSeekValidation.cs"
+             Link="R3DeepSeekValidation.cs" />
+    <Compile Include="..\..\tools\ScreenGuide.DesktopV01.RealAcceptanceRunner\R3RunnerHostComposition.cs"
+             Link="R3RunnerHostComposition.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\..\src\ScreenGuide.Agent.Abstractions\ScreenGuide.Agent.Abstractions.csproj" />
     <ProjectReference Include="..\..\src\ScreenGuide.Core\ScreenGuide.Core.csproj" />
     <ProjectReference Include="..\..\src\ScreenGuide.DesktopHost\ScreenGuide.DesktopHost.csproj" />
