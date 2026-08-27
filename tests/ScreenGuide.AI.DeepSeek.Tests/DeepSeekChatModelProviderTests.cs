@@ -227,6 +227,135 @@ public sealed class DeepSeekChatModelProviderTests
     }
 
     [Fact]
+    public async Task R3OfflineSseFixtureContentOnlyProducesContentAndMetadata()
+    {
+        var observation = await ObserveOfflineSseFixtureAsync(
+            """
+            data: {"id":"fixture-content","choices":[{"delta":{"content":"fixture-answer"},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":1,"total_tokens":4}}
+
+            data: [DONE]
+
+            """);
+
+        Assert.True(observation.ResponseReturned);
+        Assert.Equal(1, observation.NonEmptyDeltaCount);
+        Assert.True(observation.FinalUpdateObserved);
+        Assert.Equal(ChatFinishReason.Stop, observation.FinishReason);
+        Assert.Null(observation.ErrorCode);
+        Assert.True(observation.HasUsage);
+        Assert.True(observation.HasProviderRequestId);
+        Assert.False(observation.RestrictedDataLeaked);
+        Assert.Equal(1, observation.FakeHandlerSendCount);
+    }
+
+    [Fact]
+    public async Task R3OfflineSseFixtureReasoningOnlyIsClassifiedAsStreamEmptyWithoutLeakage()
+    {
+        const string reasoningSentinel = "fixture-private-reasoning";
+        var observation = await ObserveOfflineSseFixtureAsync(
+            """
+            data: {"id":"fixture-reasoning","choices":[{"delta":{"reasoning_content":"__REASONING__"},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":1,"total_tokens":4}}
+
+            data: [DONE]
+
+            """.Replace("__REASONING__", reasoningSentinel, StringComparison.Ordinal),
+            reasoningSentinel);
+
+        Assert.False(observation.ResponseReturned);
+        Assert.Equal(0, observation.NonEmptyDeltaCount);
+        Assert.False(observation.FinalUpdateObserved);
+        Assert.Null(observation.FinishReason);
+        Assert.Equal("deepseek.stream_empty", observation.ErrorCode);
+        Assert.False(observation.HasUsage);
+        Assert.False(observation.HasProviderRequestId);
+        Assert.False(observation.RestrictedDataLeaked);
+        Assert.Equal(1, observation.FakeHandlerSendCount);
+    }
+
+    [Fact]
+    public async Task R3OfflineSseFixtureReasoningAndContentDeliversOnlyContent()
+    {
+        const string reasoningSentinel = "fixture-hidden-reasoning";
+        var observation = await ObserveOfflineSseFixtureAsync(
+            """
+            data: {"id":"fixture-mixed","choices":[{"delta":{"reasoning_content":"__REASONING__"},"finish_reason":null}]}
+
+            data: {"id":"fixture-mixed","choices":[{"delta":{"content":"fixture-answer"},"finish_reason":"stop"}],"usage":{"prompt_tokens":5,"completion_tokens":2,"total_tokens":7}}
+
+            data: [DONE]
+
+            """.Replace("__REASONING__", reasoningSentinel, StringComparison.Ordinal),
+            reasoningSentinel);
+
+        Assert.True(observation.ResponseReturned);
+        Assert.Equal(1, observation.NonEmptyDeltaCount);
+        Assert.True(observation.FinalUpdateObserved);
+        Assert.Equal(ChatFinishReason.Stop, observation.FinishReason);
+        Assert.Null(observation.ErrorCode);
+        Assert.True(observation.HasUsage);
+        Assert.True(observation.HasProviderRequestId);
+        Assert.False(observation.RestrictedDataLeaked);
+        Assert.Equal(1, observation.FakeHandlerSendCount);
+    }
+
+    [Fact]
+    public async Task R3OfflineSseFixtureDoneWithoutContentIsClassifiedAsStreamEmpty()
+    {
+        var observation = await ObserveOfflineSseFixtureAsync("data: [DONE]\n");
+
+        Assert.False(observation.ResponseReturned);
+        Assert.Equal(0, observation.NonEmptyDeltaCount);
+        Assert.False(observation.FinalUpdateObserved);
+        Assert.Null(observation.FinishReason);
+        Assert.Equal("deepseek.stream_empty", observation.ErrorCode);
+        Assert.False(observation.HasUsage);
+        Assert.False(observation.HasProviderRequestId);
+        Assert.False(observation.RestrictedDataLeaked);
+        Assert.Equal(1, observation.FakeHandlerSendCount);
+    }
+
+    [Fact]
+    public async Task R3OfflineSseFixtureEmptyDeltaIsClassifiedAsStreamEmpty()
+    {
+        var observation = await ObserveOfflineSseFixtureAsync(
+            """
+            data: {"id":"fixture-empty","choices":[{"delta":{"content":""},"finish_reason":"stop"}],"usage":{"prompt_tokens":2,"completion_tokens":0,"total_tokens":2}}
+
+            data: [DONE]
+
+            """);
+
+        Assert.False(observation.ResponseReturned);
+        Assert.Equal(0, observation.NonEmptyDeltaCount);
+        Assert.False(observation.FinalUpdateObserved);
+        Assert.Null(observation.FinishReason);
+        Assert.Equal("deepseek.stream_empty", observation.ErrorCode);
+        Assert.False(observation.HasUsage);
+        Assert.False(observation.HasProviderRequestId);
+        Assert.False(observation.RestrictedDataLeaked);
+        Assert.Equal(1, observation.FakeHandlerSendCount);
+    }
+
+    [Fact]
+    public async Task R3OfflineSseFixtureMalformedEventHasDistinctSafeError()
+    {
+        const string rawEventSentinel = "fixture-raw-event-must-not-leak";
+        var observation = await ObserveOfflineSseFixtureAsync(
+            $"data: {{\"marker\":\"{rawEventSentinel}\"\n\ndata: [DONE]\n",
+            rawEventSentinel);
+
+        Assert.False(observation.ResponseReturned);
+        Assert.Equal(0, observation.NonEmptyDeltaCount);
+        Assert.False(observation.FinalUpdateObserved);
+        Assert.Null(observation.FinishReason);
+        Assert.Equal("deepseek.invalid_stream_event", observation.ErrorCode);
+        Assert.False(observation.HasUsage);
+        Assert.False(observation.HasProviderRequestId);
+        Assert.False(observation.RestrictedDataLeaked);
+        Assert.Equal(1, observation.FakeHandlerSendCount);
+    }
+
+    [Fact]
     public async Task CancelAsyncCancelsTheBoundTurnAndRejectsALateSuccessfulResponse()
     {
         var turnId = Guid.NewGuid();
@@ -866,6 +995,64 @@ public sealed class DeepSeekChatModelProviderTests
         }
     }
 
+    private static async Task<OfflineSseFixtureObservation> ObserveOfflineSseFixtureAsync(
+        string sse,
+        params string[] restrictedSentinels)
+    {
+        var handler = new StubHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(sse, Encoding.UTF8, "text/event-stream")
+        });
+        await using var provider = new DeepSeekChatModelProvider(
+            new TestCredentialStore("fixture-fake-credential"),
+            handler);
+        var updates = new List<ChatStreamUpdate>();
+        ChatModelResponse? response = null;
+        ChatModelException? failure = null;
+        try
+        {
+            response = await provider.CompleteAsync(
+                Request(modelId: DeepSeekChatModelProvider.ProModelId),
+                (update, _) =>
+                {
+                    updates.Add(update);
+                    return ValueTask.CompletedTask;
+                });
+        }
+        catch (ChatModelException exception)
+        {
+            failure = exception;
+        }
+
+        var surfacedText = string.Join(
+            "\n",
+            updates.Select(update => update.DeltaText)
+                .Append(response?.Text ?? string.Empty)
+                .Append(failure?.ToString() ?? string.Empty));
+        return new OfflineSseFixtureObservation(
+            ResponseReturned: response is not null,
+            NonEmptyDeltaCount: updates.Count(update => !string.IsNullOrEmpty(update.DeltaText)),
+            FinalUpdateObserved: updates.Any(update => update.IsFinal),
+            FinishReason: response?.FinishReason,
+            ErrorCode: failure?.Error.Code,
+            HasUsage: response?.Usage is not null,
+            HasProviderRequestId: !string.IsNullOrWhiteSpace(response?.Metadata.ProviderRequestId),
+            RestrictedDataLeaked: restrictedSentinels.Any(sentinel =>
+                surfacedText.Contains(sentinel, StringComparison.Ordinal)),
+            FakeHandlerSendCount: handler.SendCount);
+    }
+
+    private sealed record OfflineSseFixtureObservation(
+        bool ResponseReturned,
+        int NonEmptyDeltaCount,
+        bool FinalUpdateObserved,
+        ChatFinishReason? FinishReason,
+        string? ErrorCode,
+        bool HasUsage,
+        bool HasProviderRequestId,
+        bool RestrictedDataLeaked,
+        int FakeHandlerSendCount);
+
     private static async Task WaitUntilAsync(Func<bool> condition, TimeSpan timeout)
     {
         var deadline = DateTimeOffset.UtcNow + timeout;
@@ -1115,6 +1302,77 @@ public sealed class DeepSeekChatModelProviderTests
             InvocationModelIds: [DeepSeekChatModelProvider.FlashModelId]);
 
         Assert.False(evidence.IsCompleteMatch);
+    }
+
+    [Fact]
+    public void R3FailureEvidencePreservesStreamEmptyWithoutExposingSensitiveText()
+    {
+        const string sensitiveText = "fake-response-body-must-not-appear";
+        var tracker = new R3RunEvidenceTracker(DeepSeekChatModelProvider.ProModelId);
+        tracker.BeginConfiguration();
+        tracker.RecordSettingsModel(DeepSeekChatModelProvider.ProModelId);
+        tracker.BeginHealth();
+        tracker.BeginOrdinaryChat();
+        tracker.BeginStreamingSuccess();
+        var failure = new ChatModelException(
+            DeepSeekChatModelProvider.ProviderId,
+            DeepSeekChatModelProvider.ProModelId,
+            new ChatModelError(
+                ChatModelErrorKind.InvalidResponse,
+                "deepseek.stream_empty",
+                sensitiveText));
+
+        var evidence = R3FailureEvidenceReporter.Create(
+            failure,
+            tracker,
+            requestCount: 3,
+            frozenRouteModelIds: [DeepSeekChatModelProvider.ProModelId]);
+        var json = JsonSerializer.Serialize(evidence);
+
+        Assert.Equal("streaming", evidence.FailureStage);
+        Assert.Equal("invalid_response", evidence.ErrorCode);
+        Assert.Equal("deepseek.stream_empty", evidence.ProviderDiagnosticCode);
+        Assert.Equal(DeepSeekChatModelProvider.ProModelId, evidence.ExpectedModelId);
+        Assert.Equal(DeepSeekChatModelProvider.ProModelId, evidence.ActualModelId);
+        Assert.Equal(3, evidence.RequestCount);
+        Assert.True(evidence.HealthExecuted);
+        Assert.True(evidence.OrdinaryChatExecuted);
+        Assert.True(evidence.StreamingSuccessExecuted);
+        Assert.False(evidence.StreamingCancellationExecuted);
+        Assert.Equal(DeepSeekChatModelProvider.ProModelId, evidence.ModelEvidence.SettingsModelId);
+        Assert.Equal(
+            [DeepSeekChatModelProvider.ProModelId],
+            evidence.ModelEvidence.FrozenRouteModelIds);
+        Assert.DoesNotContain(sensitiveText, json, StringComparison.Ordinal);
+        Assert.DoesNotContain("Authorization", json, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void R3FailureEvidenceKeepsPublicAndProviderCodesInSeparateFields()
+    {
+        var tracker = new R3RunEvidenceTracker(DeepSeekChatModelProvider.ProModelId);
+        tracker.BeginConfiguration();
+        tracker.RecordSettingsModel(DeepSeekChatModelProvider.ProModelId);
+        tracker.BeginStreamingCancellation();
+        tracker.RecordInvocationModel(DeepSeekChatModelProvider.ProModelId);
+        var failure = new R3ValidationFailureException(
+            "invalid_response",
+            "deepseek.stream_empty");
+
+        var evidence = R3FailureEvidenceReporter.Create(
+            failure,
+            tracker,
+            requestCount: 1,
+            frozenRouteModelIds: [DeepSeekChatModelProvider.ProModelId]);
+
+        Assert.Equal("cancellation", evidence.FailureStage);
+        Assert.Equal("invalid_response", evidence.ErrorCode);
+        Assert.Equal("deepseek.stream_empty", evidence.ProviderDiagnosticCode);
+        Assert.Equal(DeepSeekChatModelProvider.ProModelId, evidence.ActualModelId);
+        Assert.Equal(
+            [DeepSeekChatModelProvider.ProModelId],
+            evidence.ModelEvidence.InvocationModelIds);
+        Assert.True(evidence.StreamingCancellationExecuted);
     }
 
     [Theory]

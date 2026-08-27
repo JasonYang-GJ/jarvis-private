@@ -340,6 +340,204 @@ public sealed record R3DeepSeekValidationResult(
     public R3ExpectedModelEvidence? ModelEvidence { get; init; }
 }
 
+public sealed record R3FailureModelEvidence(
+    string ExpectedModelId,
+    string? SettingsModelId,
+    IReadOnlyList<string> FrozenRouteModelIds,
+    IReadOnlyList<string> InvocationModelIds);
+
+public sealed class R3RunEvidenceTracker
+{
+    private readonly List<string> _invocationModelIds = [];
+    private string? _settingsModelId;
+
+    public R3RunEvidenceTracker(string expectedModelId)
+    {
+        if (!R3ExpectedModelGate.IsSupported(expectedModelId))
+        {
+            throw new ArgumentOutOfRangeException(nameof(expectedModelId));
+        }
+
+        ExpectedModelId = expectedModelId;
+    }
+
+    public string ExpectedModelId { get; }
+
+    public string FailureStage { get; private set; } = "initialization";
+
+    public bool HealthExecuted { get; private set; }
+
+    public bool OrdinaryChatExecuted { get; private set; }
+
+    public bool StreamingSuccessExecuted { get; private set; }
+
+    public bool StreamingCancellationExecuted { get; private set; }
+
+    public void BeginConfiguration() => FailureStage = "configuration";
+
+    public void RecordSettingsModel(string? modelId)
+    {
+        FailureStage = "settings";
+        _settingsModelId = NormalizeModelId(modelId);
+    }
+
+    public void BeginHealth()
+    {
+        FailureStage = "health";
+        HealthExecuted = true;
+    }
+
+    public void BeginOrdinaryChat()
+    {
+        FailureStage = "ordinary_chat";
+        OrdinaryChatExecuted = true;
+    }
+
+    public void BeginStreamingSuccess()
+    {
+        FailureStage = "streaming";
+        StreamingSuccessExecuted = true;
+    }
+
+    public void BeginStreamingCancellation()
+    {
+        FailureStage = "cancellation";
+        StreamingCancellationExecuted = true;
+    }
+
+    public void BeginAudit() => FailureStage = "audit";
+
+    public void BeginModelEvidence() => FailureStage = "model_evidence";
+
+    public void RecordInvocationModel(string? modelId)
+    {
+        var normalized = NormalizeModelId(modelId);
+        if (normalized is not null)
+        {
+            _invocationModelIds.Add(normalized);
+        }
+    }
+
+    public R3FailureModelEvidence Snapshot(IReadOnlyList<string> frozenRouteModelIds)
+    {
+        ArgumentNullException.ThrowIfNull(frozenRouteModelIds);
+        return new R3FailureModelEvidence(
+            ExpectedModelId,
+            _settingsModelId,
+            frozenRouteModelIds
+                .Select(NormalizeModelId)
+                .Where(modelId => modelId is not null)
+                .Cast<string>()
+                .ToArray(),
+            _invocationModelIds.ToArray());
+    }
+
+    private static string? NormalizeModelId(string? modelId) =>
+        R3ExpectedModelGate.IsSupported(modelId)
+            ? modelId
+            : modelId is null
+                ? null
+                : "unsupported";
+}
+
+public sealed record R3RunnerFailureEvidence(
+    string Stage,
+    bool Passed,
+    string FailureStage,
+    string ErrorCode,
+    string? ProviderDiagnosticCode,
+    string ExpectedModelId,
+    string? ActualModelId,
+    int RequestCount,
+    R3FailureModelEvidence ModelEvidence,
+    bool HealthExecuted,
+    bool OrdinaryChatExecuted,
+    bool StreamingSuccessExecuted,
+    bool StreamingCancellationExecuted,
+    string ExceptionType,
+    bool RealProvider);
+
+public static class R3FailureEvidenceReporter
+{
+    public static R3RunnerFailureEvidence Create(
+        Exception exception,
+        R3RunEvidenceTracker tracker,
+        int requestCount,
+        IReadOnlyList<string> frozenRouteModelIds)
+    {
+        ArgumentNullException.ThrowIfNull(exception);
+        ArgumentNullException.ThrowIfNull(tracker);
+        ArgumentNullException.ThrowIfNull(frozenRouteModelIds);
+        if (requestCount < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(requestCount));
+        }
+
+        var modelEvidence = tracker.Snapshot(frozenRouteModelIds);
+        var actualModelId = exception switch
+        {
+            R3ValidationFailureException failure when failure.ActualModelId is not null =>
+                failure.ActualModelId,
+            ChatModelException chat when R3ExpectedModelGate.IsSupported(chat.ModelId) =>
+                chat.ModelId,
+            _ => modelEvidence.InvocationModelIds.LastOrDefault()
+                 ?? modelEvidence.FrozenRouteModelIds.LastOrDefault()
+                 ?? modelEvidence.SettingsModelId
+        };
+
+        return new R3RunnerFailureEvidence(
+            Stage: "failed",
+            Passed: false,
+            tracker.FailureStage,
+            ErrorCode(exception),
+            ProviderDiagnosticCode(exception),
+            tracker.ExpectedModelId,
+            actualModelId,
+            requestCount,
+            modelEvidence,
+            tracker.HealthExecuted,
+            tracker.OrdinaryChatExecuted,
+            tracker.StreamingSuccessExecuted,
+            tracker.StreamingCancellationExecuted,
+            exception.GetType().Name,
+            RealProvider: true);
+    }
+
+    private static string ErrorCode(Exception exception) => exception switch
+    {
+        R3ValidationFailureException failure => failure.Code,
+        R3ValidationBudgetExceededException budget => budget.Code,
+        OperationCanceledException => "r3_total_timeout",
+        ChatModelException chat => StableFailureCode(chat.Error.Kind),
+        _ => "r3_validation_failed"
+    };
+
+    private static string? ProviderDiagnosticCode(Exception exception) => exception switch
+    {
+        R3ValidationFailureException failure => failure.DiagnosticCode,
+        ChatModelException chat => chat.Error.Code,
+        _ => null
+    };
+
+    private static string StableFailureCode(ChatModelErrorKind kind) => kind switch
+    {
+        ChatModelErrorKind.InvalidRequest => "invalid_request",
+        ChatModelErrorKind.Configuration => "configuration",
+        ChatModelErrorKind.Unauthorized => "unauthorized",
+        ChatModelErrorKind.Authorization => "authorization",
+        ChatModelErrorKind.PolicyDisabled => "disabled_by_security_policy",
+        ChatModelErrorKind.ModelNotFound => "model_not_found",
+        ChatModelErrorKind.RateLimited => "rate_limited",
+        ChatModelErrorKind.InsufficientBalance => "insufficient_balance",
+        ChatModelErrorKind.Timeout => "timeout",
+        ChatModelErrorKind.Cancelled => "cancelled",
+        ChatModelErrorKind.Network => "network",
+        ChatModelErrorKind.InvalidResponse => "invalid_response",
+        ChatModelErrorKind.Unavailable => "unavailable",
+        _ => "chat_provider_error"
+    };
+}
+
 internal sealed record R3DeepSeekCancellationAuditEvidence(
     string TerminalState,
     string? DiagnosticCode,
@@ -378,7 +576,8 @@ internal sealed record R3CancellationTerminalEvidence(
     string ConversationState,
     string InvocationState,
     string? PublicFailureCode,
-    string? ProviderDiagnosticCode);
+    string? ProviderDiagnosticCode,
+    string? InvocationModelId = null);
 
 internal sealed record R3CancellationPreconditionResult(
     R3CancellationPreconditionDisposition Disposition,

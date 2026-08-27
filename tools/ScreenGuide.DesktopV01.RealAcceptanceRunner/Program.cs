@@ -85,9 +85,11 @@ var pipeName = $"ScreenGuide.DesktopV01.Real.{Guid.NewGuid():N}";
 Process? trackedHost = null;
 IHost? r3Host = null;
 R3BudgetedChatModelProvider? r3Provider = null;
+R3RunEvidenceTracker? r3EvidenceTracker = null;
 if (stage2R3DeepSeek)
 {
     var r3Budget = r3Validation.Budget!;
+    r3EvidenceTracker = new R3RunEvidenceTracker(r3Validation.ExpectedModelId!);
     r3Host = DesktopHostFactory.Build(
         [],
         new DesktopHostOptions(dataRoot, pipeName: pipeName),
@@ -165,25 +167,22 @@ try
                 api,
                 r3Host!,
                 r3Provider!,
-                r3Validation);
+                r3Validation,
+                r3EvidenceTracker!);
             Console.WriteLine(R3ResultPrefix + JsonSerializer.Serialize(result));
             return result.Passed ? 0 : 1;
         }
         catch (Exception exception)
         {
-            Console.WriteLine(R3ResultPrefix + JsonSerializer.Serialize(new
-            {
-                Stage = "failed",
-                Passed = false,
-                ErrorCode = SafeR3ErrorCode(exception),
-                DiagnosticCode = SafeR3DiagnosticCode(exception),
-                ExpectedModelId = r3Validation.ExpectedModelId,
-                ActualModelId = SafeR3ActualModelId(exception),
-                ModelEvidenceLayer = SafeR3ModelEvidenceLayer(exception),
-                Requests = r3Provider?.RequestCount ?? 0,
-                ExceptionType = exception.GetType().Name,
-                RealProvider = true
-            }));
+            var failureEvidence = R3FailureEvidenceReporter.Create(
+                exception,
+                r3EvidenceTracker!,
+                r3Provider?.RequestCount ?? 0,
+                r3Provider?.RequestIdentities
+                    .Select(identity => identity.ModelId)
+                    .ToArray()
+                ?? []);
+            Console.WriteLine(R3ResultPrefix + JsonSerializer.Serialize(failureEvidence));
             return 1;
         }
     }
@@ -464,7 +463,8 @@ static async Task<R3DeepSeekValidationResult> RunStage2R3DeepSeekPreparationAsyn
     IDesktopApiClient api,
     IHost host,
     R3BudgetedChatModelProvider provider,
-    R3DeepSeekValidationOptions options)
+    R3DeepSeekValidationOptions options,
+    R3RunEvidenceTracker evidenceTracker)
 {
     var budget = options.Budget
                  ?? throw new R3ValidationFailureException("real_provider_budget_missing");
@@ -479,12 +479,15 @@ static async Task<R3DeepSeekValidationResult> RunStage2R3DeepSeekPreparationAsyn
         "[r3] 请只在可见的元枢设置页保存 DeepSeek Key，并选择要验收的 V4 模型；不要把 Key 输入命令行，也不要手动点击健康检查。");
     Console.Out.Flush();
 
+    evidenceTracker.BeginConfiguration();
     var settings = await WaitForDeepSeekConfigurationOnlyAsync(api, cancellationToken);
     var settingsModelId = settings.CurrentChatRoute.ModelId;
+    evidenceTracker.RecordSettingsModel(settingsModelId);
     R3ExpectedModelGate.RequireSettingsMatch(expectedModelId, settingsModelId);
     var healthPassed = false;
     if (plan.RunHealth)
     {
+        evidenceTracker.BeginHealth();
         var health = await api.CheckAiProviderHealthAsync(new ProviderIdRequestDto("deepseek"))
             .WaitAsync(cancellationToken);
         healthPassed = health.State == "Healthy";
@@ -504,6 +507,7 @@ static async Task<R3DeepSeekValidationResult> RunStage2R3DeepSeekPreparationAsyn
     var ordinaryChatPassed = false;
     if (plan.RunOrdinaryChat)
     {
+        evidenceTracker.BeginOrdinaryChat();
         ordinary = await api.SubmitSessionInputAsync(new SessionInputRequestDto(
                 "R3 ordinary chat canary. Reply only with R3-CHAT-OK.",
                 "Text",
@@ -525,6 +529,7 @@ static async Task<R3DeepSeekValidationResult> RunStage2R3DeepSeekPreparationAsyn
             AiInvocationStatus.Succeeded,
             requireProviderMetadata: true);
         validatedInvocations.Add(ordinaryInvocation);
+        evidenceTracker.RecordInvocationModel(ordinaryInvocation.ModelId);
         ordinaryChatPassed = ordinaryTurn.Phase == "Completed"
                              && ordinaryInvocation.Status == AiInvocationStatus.Succeeded;
         RequireR3(ordinaryChatPassed, "r3_ordinary_chat_failed");
@@ -534,6 +539,7 @@ static async Task<R3DeepSeekValidationResult> RunStage2R3DeepSeekPreparationAsyn
     var streamingPassed = false;
     if (plan.RunStreamingSuccess)
     {
+        evidenceTracker.BeginStreamingSuccess();
         var streamingObservation = provider.PrepareNextCall(R3ValidationCallMode.Streaming);
         var streaming = await api.SubmitSessionInputAsync(new SessionInputRequestDto(
                 "R3 streaming canary. Write the numbers 1 through 20, one per line.",
@@ -557,6 +563,7 @@ static async Task<R3DeepSeekValidationResult> RunStage2R3DeepSeekPreparationAsyn
             AiInvocationStatus.Succeeded,
             requireProviderMetadata: true);
         validatedInvocations.Add(streamingInvocation);
+        evidenceTracker.RecordInvocationModel(streamingInvocation.ModelId);
         streamingDeltaCount = streamingObservation.DeltaCount;
         streamingPassed = streamingDeltaCount >= 2
                           && streamingObservation.FinalUpdateObserved
@@ -566,6 +573,7 @@ static async Task<R3DeepSeekValidationResult> RunStage2R3DeepSeekPreparationAsyn
 
     RequireR3(plan.RunStreamingCancellation, "r3_cancellation_not_planned");
 
+    evidenceTracker.BeginStreamingCancellation();
     const string cancellationCanary = "R3-CANCEL-LATE-CANARY";
     var cancellationObservation = provider.PrepareNextCall(
         R3ValidationCallMode.StreamingCancellation);
@@ -595,6 +603,8 @@ static async Task<R3DeepSeekValidationResult> RunStage2R3DeepSeekPreparationAsyn
         });
     if (precondition.Disposition == R3CancellationPreconditionDisposition.TerminalFailed)
     {
+        evidenceTracker.RecordInvocationModel(
+            precondition.TerminalEvidence?.InvocationModelId);
         throw new R3ValidationFailureException(
             precondition.TerminalEvidence?.PublicFailureCode
             ?? "r3_cancellation_provider_failed",
@@ -603,11 +613,15 @@ static async Task<R3DeepSeekValidationResult> RunStage2R3DeepSeekPreparationAsyn
 
     if (precondition.Disposition == R3CancellationPreconditionDisposition.TerminalSucceeded)
     {
+        evidenceTracker.RecordInvocationModel(
+            precondition.TerminalEvidence?.InvocationModelId);
         throw new R3ValidationFailureException("r3_cancellation_precondition_succeeded");
     }
 
     if (precondition.Disposition == R3CancellationPreconditionDisposition.TerminalInterrupted)
     {
+        evidenceTracker.RecordInvocationModel(
+            precondition.TerminalEvidence?.InvocationModelId);
         throw new R3ValidationFailureException(
             "r3_cancellation_precondition_interrupted",
             precondition.TerminalEvidence?.ProviderDiagnosticCode);
@@ -634,6 +648,7 @@ static async Task<R3DeepSeekValidationResult> RunStage2R3DeepSeekPreparationAsyn
         AiInvocationStatus.Cancelled,
         requireProviderMetadata: false);
     validatedInvocations.Add(cancelledInvocation);
+    evidenceTracker.RecordInvocationModel(cancelledInvocation.ModelId);
     var lateDeltaRejected = cancellationObservation.DeltaCountWhenCancellationCompleted
                             == cancellationObservation.DeltaCount;
     var lateFinalRejected = !cancellationObservation.FinalUpdateObserved;
@@ -647,6 +662,7 @@ static async Task<R3DeepSeekValidationResult> RunStage2R3DeepSeekPreparationAsyn
     var cancellationPassed = lateDeltaRejected && lateFinalRejected && lateSuccessRejected;
     RequireR3(cancellationPassed, "r3_cancellation_failed");
 
+    evidenceTracker.BeginAudit();
     var auditPassed = plan.RunOrdinaryChat
         ? ordinaryInvocation is not null
           && ordinary is not null
@@ -669,6 +685,7 @@ static async Task<R3DeepSeekValidationResult> RunStage2R3DeepSeekPreparationAsyn
             HasProviderRequestId: !string.IsNullOrWhiteSpace(
                 cancelledInvocation.ProviderRequestId)));
     RequireR3(auditPassed, "r3_audit_failed");
+    evidenceTracker.BeginModelEvidence();
     var modelEvidence = new R3ExpectedModelEvidence(
         expectedModelId,
         settingsModelId,
@@ -792,7 +809,8 @@ static async Task<R3CancellationTerminalEvidence> WaitForR3CancellationTerminalE
         conversationTurn?.Status.ToString() ?? "Missing",
         invocation?.Status.ToString() ?? "Missing",
         persistedSessionTurn.FailureCode ?? conversationTurn?.FailureCode,
-        invocation?.FailureCode);
+        invocation?.FailureCode,
+        invocation?.ModelId);
 }
 
 static async Task<AiSettingsDto> WaitForDeepSeekConfigurationOnlyAsync(
@@ -824,30 +842,6 @@ static void RequireR3(bool condition, string errorCode)
         throw new R3ValidationFailureException(errorCode);
     }
 }
-
-static string SafeR3ErrorCode(Exception exception) => exception switch
-{
-    R3ValidationFailureException failure => failure.Code,
-    R3ValidationBudgetExceededException budget => budget.Code,
-    OperationCanceledException => "r3_total_timeout",
-    ChatModelException chat => chat.Error.Code,
-    _ => "r3_validation_failed"
-};
-
-static string? SafeR3DiagnosticCode(Exception exception) =>
-    exception is R3ValidationFailureException failure
-        ? failure.DiagnosticCode
-        : null;
-
-static string? SafeR3ActualModelId(Exception exception) =>
-    exception is R3ValidationFailureException failure
-        ? failure.ActualModelId
-        : null;
-
-static string? SafeR3ModelEvidenceLayer(Exception exception) =>
-    exception is R3ValidationFailureException failure
-        ? failure.ModelEvidenceLayer
-        : null;
 
 static async Task RunStage2LiveProviderAcceptanceAsync(
     IDesktopApiClient api,
