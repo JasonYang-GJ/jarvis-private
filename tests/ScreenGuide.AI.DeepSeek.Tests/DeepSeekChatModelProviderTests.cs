@@ -1345,6 +1345,204 @@ public sealed class DeepSeekChatModelProviderTests
         Assert.Equal(0, providerCalls);
     }
 
+    [Fact]
+    public async Task R3FreshIsolationMaterializesAndReadsBackTheExpectedProRoute()
+    {
+        var root = Path.Combine(
+            Path.GetTempPath(),
+            "ScreenGuide.R3.IsolatedSettings.Tests",
+            Guid.NewGuid().ToString("N"));
+        var settingsPath = Path.Combine(root, "settings", "ai-settings.json");
+        try
+        {
+            var options = R3DeepSeekValidationOptions.Parse(
+            [
+                "--stage2-r3-deepseek",
+                "--real-provider",
+                "--expected-model=deepseek-v4-pro",
+                "--max-requests=4",
+                "--max-output-tokens=64",
+                "--total-timeout-seconds=120",
+                "--no-automatic-retry",
+                "--no-fallback"
+            ]);
+            Assert.True(options.IsValid);
+
+            var evidence = await R3IsolatedAiSettingsMaterializer.MaterializeAndVerifyAsync(
+                settingsPath,
+                options.ExpectedModelId!);
+
+            Assert.Equal(DeepSeekChatModelProvider.ProviderId, evidence.ProviderId);
+            Assert.Equal(DeepSeekChatModelProvider.ProModelId, evidence.ModelId);
+            using var store = new FileAiSettingsStore(
+                settingsPath,
+                new AiSettings(new ChatModelRoute("codex", "codex-default")));
+            var settings = await store.LoadAsync();
+            Assert.Equal(DeepSeekChatModelProvider.ProviderId, settings.DefaultChatRoute.ProviderId);
+            Assert.Equal(DeepSeekChatModelProvider.ProModelId, settings.DefaultChatRoute.ModelId);
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task R3MissingIsolatedSettingsFailClosedBeforeSessionOrProviderWork()
+    {
+        var root = Path.Combine(
+            Path.GetTempPath(),
+            "ScreenGuide.R3.IsolatedSettings.Tests",
+            Guid.NewGuid().ToString("N"));
+        var settingsPath = Path.Combine(root, "settings", "ai-settings.json");
+        var sessionCalls = 0;
+        var providerCalls = 0;
+
+        var exception = await Assert.ThrowsAsync<R3ValidationFailureException>(async () =>
+        {
+            _ = await R3IsolatedAiSettingsMaterializer.LoadAndVerifyAsync(
+                settingsPath,
+                DeepSeekChatModelProvider.ProModelId);
+            sessionCalls++;
+            providerCalls++;
+        });
+
+        Assert.Equal(R3IsolatedAiSettingsMaterializer.MissingErrorCode, exception.Code);
+        Assert.Equal("settings", exception.ModelEvidenceLayer);
+        Assert.Equal(0, sessionCalls);
+        Assert.Equal(0, providerCalls);
+        Assert.False(Directory.Exists(root));
+    }
+
+    [Theory]
+    [InlineData("codex", "codex-default")]
+    [InlineData("deepseek", DeepSeekChatModelProvider.FlashModelId)]
+    [InlineData("deepseek", "deepseek-unsupported")]
+    public async Task R3ExistingIsolatedRouteMismatchFailsClosedWithoutBeingOverwritten(
+        string providerId,
+        string modelId)
+    {
+        var root = Path.Combine(
+            Path.GetTempPath(),
+            "ScreenGuide.R3.IsolatedSettings.Tests",
+            Guid.NewGuid().ToString("N"));
+        var settingsPath = Path.Combine(root, "settings", "ai-settings.json");
+        try
+        {
+            using (var store = new FileAiSettingsStore(
+                       settingsPath,
+                       new AiSettings(new ChatModelRoute("codex", "codex-default"))))
+            {
+                await store.SaveAsync(new AiSettings(new ChatModelRoute(providerId, modelId)));
+            }
+
+            var before = await File.ReadAllTextAsync(settingsPath);
+            var exception = await Assert.ThrowsAsync<R3ValidationFailureException>(() =>
+                R3IsolatedAiSettingsMaterializer.MaterializeAndVerifyAsync(
+                    settingsPath,
+                    DeepSeekChatModelProvider.ProModelId));
+            var after = await File.ReadAllTextAsync(settingsPath);
+
+            Assert.Equal(R3ExpectedModelGate.MismatchErrorCode, exception.Code);
+            Assert.Equal("settings", exception.ModelEvidenceLayer);
+            Assert.Equal(before, after);
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task R3InvalidIsolatedSettingsFailClosedWithASafeStableCode()
+    {
+        var root = Path.Combine(
+            Path.GetTempPath(),
+            "ScreenGuide.R3.IsolatedSettings.Tests",
+            Guid.NewGuid().ToString("N"));
+        var settingsPath = Path.Combine(root, "settings", "ai-settings.json");
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(settingsPath)!);
+            await File.WriteAllTextAsync(settingsPath, "{ malformed");
+
+            var exception = await Assert.ThrowsAsync<R3ValidationFailureException>(() =>
+                R3IsolatedAiSettingsMaterializer.LoadAndVerifyAsync(
+                    settingsPath,
+                    DeepSeekChatModelProvider.ProModelId));
+
+            Assert.Equal(R3IsolatedAiSettingsMaterializer.InvalidErrorCode, exception.Code);
+            Assert.Equal("settings", exception.ModelEvidenceLayer);
+            Assert.DoesNotContain("malformed", exception.Message);
+            Assert.DoesNotContain(settingsPath, exception.Message, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task R3IsolatedSettingsRequireNoCredentialStoreAndUseOnlyCanonicalRouteShape()
+    {
+        var root = Path.Combine(
+            Path.GetTempPath(),
+            "ScreenGuide.R3.IsolatedSettings.Tests",
+            Guid.NewGuid().ToString("N"));
+        var settingsPath = Path.Combine(root, "settings", "ai-settings.json");
+        try
+        {
+            _ = await R3IsolatedAiSettingsMaterializer.MaterializeAndVerifyAsync(
+                settingsPath,
+                DeepSeekChatModelProvider.ProModelId);
+
+            using var document = JsonDocument.Parse(await File.ReadAllTextAsync(settingsPath));
+            var rootProperties = document.RootElement.EnumerateObject()
+                .Select(property => property.Name)
+                .Order(StringComparer.Ordinal)
+                .ToArray();
+            var settings = document.RootElement.GetProperty("settings");
+            var settingsProperties = settings.EnumerateObject()
+                .Select(property => property.Name)
+                .Order(StringComparer.Ordinal)
+                .ToArray();
+            var route = settings.GetProperty("defaultChatRoute");
+            var routeProperties = route.EnumerateObject()
+                .Select(property => property.Name)
+                .Order(StringComparer.Ordinal)
+                .ToArray();
+            var serialized = document.RootElement.GetRawText();
+
+            Assert.Equal(["schemaVersion", "settings"], rootProperties);
+            Assert.Equal(["defaultChatRoute"], settingsProperties);
+            Assert.Equal(["modelId", "providerId"], routeProperties);
+            Assert.Equal("deepseek", route.GetProperty("providerId").GetString());
+            Assert.Equal(
+                DeepSeekChatModelProvider.ProModelId,
+                route.GetProperty("modelId").GetString());
+            Assert.DoesNotContain("apiKey", serialized, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("authorization", serialized, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("secret", serialized, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("credential", serialized, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
     [Theory]
     [InlineData(DeepSeekChatModelProvider.FlashModelId)]
     [InlineData(DeepSeekChatModelProvider.ProModelId)]

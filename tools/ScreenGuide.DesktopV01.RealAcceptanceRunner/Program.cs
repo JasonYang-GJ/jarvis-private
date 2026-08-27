@@ -89,10 +89,14 @@ R3RunEvidenceTracker? r3EvidenceTracker = null;
 if (stage2R3DeepSeek)
 {
     var r3Budget = r3Validation.Budget!;
+    var r3HostOptions = new DesktopHostOptions(dataRoot, pipeName: pipeName);
+    _ = await R3IsolatedAiSettingsMaterializer.MaterializeAndVerifyAsync(
+        r3HostOptions.AiSettingsPath,
+        r3Validation.ExpectedModelId!);
     r3EvidenceTracker = new R3RunEvidenceTracker(r3Validation.ExpectedModelId!);
     r3Host = DesktopHostFactory.Build(
         [],
-        new DesktopHostOptions(dataRoot, pipeName: pipeName),
+        r3HostOptions,
         services =>
         {
             services.AddSingleton<R3SafeResponseShapeCollector>();

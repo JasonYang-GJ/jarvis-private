@@ -281,6 +281,104 @@ public static class R3ExpectedModelGate
         RequireMatch(expectedModelId, invocationModelId, "invocation");
 }
 
+public sealed record R3IsolatedAiSettingsEvidence(
+    string ProviderId,
+    string ModelId);
+
+public static class R3IsolatedAiSettingsMaterializer
+{
+    public const string MissingErrorCode = "r3_isolated_settings_missing";
+    public const string InvalidErrorCode = "r3_isolated_settings_invalid";
+
+    public static async Task<R3IsolatedAiSettingsEvidence> MaterializeAndVerifyAsync(
+        string settingsPath,
+        string expectedModelId,
+        CancellationToken cancellationToken = default)
+    {
+        if (!R3ExpectedModelGate.IsSupported(expectedModelId))
+        {
+            throw new ArgumentOutOfRangeException(nameof(expectedModelId));
+        }
+
+        if (!File.Exists(settingsPath))
+        {
+            using var writer = CreateStore(settingsPath);
+            await writer.SaveAsync(
+                    new AiSettings(new ChatModelRoute(
+                        DeepSeekChatModelProvider.ProviderId,
+                        expectedModelId)),
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        return await LoadAndVerifyAsync(settingsPath, expectedModelId, cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    public static async Task<R3IsolatedAiSettingsEvidence> LoadAndVerifyAsync(
+        string settingsPath,
+        string expectedModelId,
+        CancellationToken cancellationToken = default)
+    {
+        if (!R3ExpectedModelGate.IsSupported(expectedModelId))
+        {
+            throw new ArgumentOutOfRangeException(nameof(expectedModelId));
+        }
+
+        if (!File.Exists(settingsPath))
+        {
+            throw new R3ValidationFailureException(
+                MissingErrorCode,
+                expectedModelId: expectedModelId,
+                modelEvidenceLayer: "settings");
+        }
+
+        AiSettings settings;
+        try
+        {
+            using var reader = CreateStore(settingsPath);
+            settings = await reader.LoadAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception) when (
+            exception is InvalidDataException
+                or IOException
+                or UnauthorizedAccessException)
+        {
+            throw new R3ValidationFailureException(
+                InvalidErrorCode,
+                expectedModelId: expectedModelId,
+                modelEvidenceLayer: "settings");
+        }
+
+        var route = settings.DefaultChatRoute;
+        if (!string.Equals(
+                route.ProviderId,
+                DeepSeekChatModelProvider.ProviderId,
+                StringComparison.Ordinal))
+        {
+            throw new R3ValidationFailureException(
+                R3ExpectedModelGate.MismatchErrorCode,
+                expectedModelId: expectedModelId,
+                actualModelId: route.ModelId,
+                modelEvidenceLayer: "settings");
+        }
+
+        R3ExpectedModelGate.RequireSettingsMatch(expectedModelId, route.ModelId);
+        return new R3IsolatedAiSettingsEvidence(route.ProviderId, route.ModelId);
+    }
+
+    private static FileAiSettingsStore CreateStore(string settingsPath) =>
+        new(
+            settingsPath,
+            new AiSettings(new ChatModelRoute(
+                "r3-isolated-settings-missing",
+                "r3-isolated-settings-missing")));
+}
+
 public enum R3ValidationCallMode
 {
     Streaming,
