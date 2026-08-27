@@ -9,6 +9,7 @@ using ScreenGuide.Core.Ai;
 using ScreenGuide.Core.Conversations;
 using ScreenGuide.Core.Sessions;
 using ScreenGuide.DesktopHost.Configuration;
+using ScreenGuide.DesktopHost.Runtime;
 using ScreenGuide.DesktopProtocol;
 using ScreenGuide.DesktopV01.RealAcceptanceRunner;
 using ScreenGuide.Skills.Windows;
@@ -29,6 +30,24 @@ if (r3Validation.Requested && !r3Validation.IsValid)
 }
 
 var stage2R3DeepSeek = r3Validation.IsValid;
+R3SecureCredentialStoreReference? r3CredentialStoreReference = null;
+if (stage2R3DeepSeek)
+{
+    r3CredentialStoreReference = R3SecureCredentialStoreReference.Parse(args);
+    if (!r3CredentialStoreReference.IsValid)
+    {
+        Console.WriteLine(R3ResultPrefix + JsonSerializer.Serialize(new
+        {
+            Stage = "guard",
+            Passed = false,
+            ErrorCode = r3CredentialStoreReference.ErrorCode,
+            Requests = 0,
+            RealProvider = false
+        }));
+        return 2;
+    }
+}
+
 var smokeOnly = args.Any(argument =>
     string.Equals(argument, "--smoke", StringComparison.OrdinalIgnoreCase));
 var desktopActionSmoke = args.Any(argument =>
@@ -99,6 +118,12 @@ if (stage2R3DeepSeek)
         r3HostOptions,
         services =>
         {
+            services.AddSingleton<IProviderCredentialStore>(serviceProvider =>
+                R3SecureCredentialLeaseBinding.CreateReadOnly(
+                    r3CredentialStoreReference!.RootDirectory!,
+                    secureRootReference => new WindowsDpapiCredentialStore(
+                        secureRootReference,
+                        serviceProvider.GetRequiredService<TimeProvider>())));
             services.AddSingleton<R3SafeResponseShapeCollector>();
             services.AddSingleton(serviceProvider =>
             {

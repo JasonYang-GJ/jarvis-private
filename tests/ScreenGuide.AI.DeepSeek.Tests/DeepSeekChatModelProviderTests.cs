@@ -1543,6 +1543,227 @@ public sealed class DeepSeekChatModelProviderTests
         }
     }
 
+    [Fact]
+    public async Task R3IsolatedCredentialWiringObtainsAndDisposesTheFakeSecureLease()
+    {
+        const string sentinel = "fake-r3-lease-sentinel";
+        var secureRootReference = Path.Combine(
+            Path.GetTempPath(),
+            "ScreenGuide.R3.SecureCredentialReference.Tests",
+            Guid.NewGuid().ToString("N"));
+        var source = new TestCredentialStore(sentinel);
+        string? observedRootReference = null;
+        var credentialStore = R3SecureCredentialLeaseBinding.CreateReadOnly(
+            secureRootReference,
+            rootReference =>
+            {
+                observedRootReference = rootReference;
+                return source;
+            });
+        var handler = new StubHttpMessageHandler(_ => JsonResponse("""
+            {
+              "id": "fake-r3-response",
+              "choices": [
+                {
+                  "message": { "role": "assistant", "content": "ok" },
+                  "finish_reason": "stop"
+                }
+              ]
+            }
+            """));
+        await using var provider = new DeepSeekChatModelProvider(credentialStore, handler);
+
+        var response = await provider.CompleteAsync(Request(
+            modelId: DeepSeekChatModelProvider.ProModelId));
+
+        Assert.Equal("ok", response.Text);
+        Assert.Equal(Path.GetFullPath(secureRootReference), observedRootReference);
+        Assert.Equal(1, source.OpenLeaseCount);
+        Assert.True(source.LastLeaseDisposed);
+        Assert.Equal(1, handler.SendCount);
+        Assert.False(Directory.Exists(secureRootReference));
+    }
+
+    [Fact]
+    public void R3SecureCredentialStoreReferenceAcceptsOneAbsoluteNonSecretRoot()
+    {
+        var rootReference = Path.GetFullPath(Path.Combine(
+            Path.GetTempPath(),
+            "ScreenGuide.R3.SecureCredentialReference.Tests",
+            Guid.NewGuid().ToString("N")));
+        var arguments = new[] { $"--credential-store-root={rootReference}" };
+
+        var reference = R3SecureCredentialStoreReference.Parse(arguments);
+
+        Assert.True(reference.IsValid);
+        Assert.Null(reference.ErrorCode);
+        Assert.Equal(rootReference, reference.RootDirectory);
+        Assert.DoesNotContain(arguments, argument =>
+            argument.Contains("fake-r3-lease-sentinel", StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData(null, "real_provider_credential_store_root_missing")]
+    [InlineData("--credential-store-root=", "real_provider_credential_store_root_invalid")]
+    [InlineData("--credential-store-root=relative-secrets", "real_provider_credential_store_root_invalid")]
+    public void R3SecureCredentialStoreReferenceFailsClosedForMissingOrInvalidRoots(
+        string? argument,
+        string expectedErrorCode)
+    {
+        var arguments = argument is null ? Array.Empty<string>() : [argument];
+
+        var reference = R3SecureCredentialStoreReference.Parse(arguments);
+
+        Assert.False(reference.IsValid);
+        Assert.Equal(expectedErrorCode, reference.ErrorCode);
+        Assert.Null(reference.RootDirectory);
+    }
+
+    [Fact]
+    public void R3SecureCredentialStoreReferenceRejectsRepeatedRoots()
+    {
+        var first = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "r3-secure-first"));
+        var second = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "r3-secure-second"));
+
+        var reference = R3SecureCredentialStoreReference.Parse(
+        [
+            $"--credential-store-root={first}",
+            $"--credential-store-root={second}"
+        ]);
+
+        Assert.False(reference.IsValid);
+        Assert.Equal("real_provider_credential_store_root_repeated", reference.ErrorCode);
+        Assert.Null(reference.RootDirectory);
+    }
+
+    [Fact]
+    public async Task R3MissingSecureLeaseFailsClosedBeforeHttpWithoutRetryOrFallback()
+    {
+        var source = new TestCredentialStore();
+        var credentialStore = R3SecureCredentialLeaseBinding.CreateReadOnly(
+            Path.GetFullPath(Path.Combine(Path.GetTempPath(), "r3-missing-secure-lease")),
+            _ => source);
+        var handler = new StubHttpMessageHandler(_ =>
+            throw new Xunit.Sdk.XunitException("Missing lease must not reach HTTP."));
+        await using var inner = new DeepSeekChatModelProvider(credentialStore, handler);
+        await using var provider = new R3BudgetedChatModelProvider(
+            inner,
+            DeepSeekChatModelProvider.ProModelId,
+            new R3DeepSeekValidationBudget(
+                MaxRequests: 1,
+                MaxOutputTokens: 64,
+                TotalTimeout: TimeSpan.FromSeconds(30),
+                NoAutomaticRetry: true,
+                NoFallback: true));
+
+        var exception = await Assert.ThrowsAsync<ChatModelException>(() =>
+            provider.CompleteAsync(Request(modelId: DeepSeekChatModelProvider.ProModelId)));
+
+        Assert.Equal(ChatModelErrorKind.Configuration, exception.Error.Kind);
+        Assert.Equal("deepseek.not_configured", exception.Error.Code);
+        Assert.Equal(1, source.OpenLeaseCount);
+        Assert.Equal(0, handler.SendCount);
+        Assert.Equal(1, provider.RequestCount);
+        Assert.Single(provider.RequestIdentities);
+    }
+
+    [Fact]
+    public async Task R3CredentialLeaseBindingCannotWriteOrDeleteTheSecureSource()
+    {
+        var source = new TestCredentialStore("fake-r3-lease-sentinel");
+        var credentialStore = R3SecureCredentialLeaseBinding.CreateReadOnly(
+            Path.GetFullPath(Path.Combine(Path.GetTempPath(), "r3-read-only-secure-lease")),
+            _ => source);
+
+        var setFailure = await Assert.ThrowsAsync<R3ValidationFailureException>(() =>
+            credentialStore.SetAsync("deepseek", "replacement".AsMemory()));
+        var deleteFailure = await Assert.ThrowsAsync<R3ValidationFailureException>(() =>
+            credentialStore.DeleteAsync("deepseek"));
+
+        Assert.Equal("r3_credential_store_read_only", setFailure.Code);
+        Assert.Equal("r3_credential_store_read_only", deleteFailure.Code);
+        Assert.Equal(0, source.SetCount);
+        Assert.Equal(0, source.DeleteCount);
+    }
+
+    [Fact]
+    public async Task R3FakeCredentialNeverPersistsInIsolatedArtifactsArgumentsOrEvidence()
+    {
+        const string sentinel = "fake-r3-lease-sentinel";
+        var isolatedRoot = Path.Combine(
+            Path.GetTempPath(),
+            "ScreenGuide.R3.CredentialPersistence.Tests",
+            Guid.NewGuid().ToString("N"));
+        var settingsPath = Path.Combine(isolatedRoot, "settings", "ai-settings.json");
+        var secureRootReference = Path.GetFullPath(Path.Combine(
+            Path.GetTempPath(),
+            "ScreenGuide.R3.SecureCredentialReference.Tests",
+            Guid.NewGuid().ToString("N")));
+        try
+        {
+            var settingsEvidence =
+                await R3IsolatedAiSettingsMaterializer.MaterializeAndVerifyAsync(
+                    settingsPath,
+                    DeepSeekChatModelProvider.ProModelId);
+            var source = new TestCredentialStore(sentinel);
+            var credentialStore = R3SecureCredentialLeaseBinding.CreateReadOnly(
+                secureRootReference,
+                _ => source);
+            var handler = new StubHttpMessageHandler(_ => JsonResponse("""
+                {
+                  "id": "fake-r3-response",
+                  "choices": [
+                    {
+                      "message": { "role": "assistant", "content": "ok" },
+                      "finish_reason": "stop"
+                    }
+                  ]
+                }
+                """));
+            await using var provider = new DeepSeekChatModelProvider(credentialStore, handler);
+
+            var response = await provider.CompleteAsync(Request(
+                modelId: DeepSeekChatModelProvider.ProModelId));
+            var safeEvidence = JsonSerializer.Serialize(new
+            {
+                SettingsProviderId = settingsEvidence.ProviderId,
+                SettingsModelId = settingsEvidence.ModelId,
+                response.FinishReason,
+                ResponseProviderId = response.Metadata.ProviderId,
+                ResponseModelId = response.Metadata.ModelId
+            });
+            var arguments = new[] { $"--credential-store-root={secureRootReference}" };
+            var isolatedFiles = Directory.EnumerateFiles(
+                    isolatedRoot,
+                    "*",
+                    SearchOption.AllDirectories)
+                .ToArray();
+
+            Assert.Equal([settingsPath], isolatedFiles);
+            Assert.DoesNotContain(sentinel, safeEvidence, StringComparison.Ordinal);
+            Assert.DoesNotContain(arguments, argument =>
+                argument.Contains(sentinel, StringComparison.Ordinal));
+            Assert.All(isolatedFiles, path =>
+                Assert.DoesNotContain(
+                    sentinel,
+                    File.ReadAllText(path),
+                    StringComparison.Ordinal));
+            Assert.False(Directory.Exists(Path.Combine(isolatedRoot, "secrets")));
+            Assert.False(Directory.Exists(Path.Combine(isolatedRoot, "state")));
+            Assert.False(Directory.Exists(Path.Combine(isolatedRoot, "logs")));
+            Assert.False(Directory.Exists(Path.Combine(isolatedRoot, "evidence")));
+            Assert.Equal(1, source.OpenLeaseCount);
+            Assert.True(source.LastLeaseDisposed);
+        }
+        finally
+        {
+            if (Directory.Exists(isolatedRoot))
+            {
+                Directory.Delete(isolatedRoot, recursive: true);
+            }
+        }
+    }
+
     [Theory]
     [InlineData(DeepSeekChatModelProvider.FlashModelId)]
     [InlineData(DeepSeekChatModelProvider.ProModelId)]
@@ -2293,6 +2514,10 @@ public sealed class DeepSeekChatModelProviderTests
 
         public int OpenLeaseCount { get; private set; }
 
+        public int SetCount { get; private set; }
+
+        public int DeleteCount { get; private set; }
+
         public Task<ProviderCredentialStatus> GetStatusAsync(
             string providerId,
             CancellationToken cancellationToken = default) =>
@@ -2304,7 +2529,11 @@ public sealed class DeepSeekChatModelProviderTests
         public Task SetAsync(
             string providerId,
             ReadOnlyMemory<char> secret,
-            CancellationToken cancellationToken = default) => Task.CompletedTask;
+            CancellationToken cancellationToken = default)
+        {
+            SetCount++;
+            return Task.CompletedTask;
+        }
 
         public ValueTask<IProviderCredentialLease?> OpenLeaseAsync(
             string providerId,
@@ -2317,7 +2546,11 @@ public sealed class DeepSeekChatModelProviderTests
 
         public Task<bool> DeleteAsync(
             string providerId,
-            CancellationToken cancellationToken = default) => Task.FromResult(false);
+            CancellationToken cancellationToken = default)
+        {
+            DeleteCount++;
+            return Task.FromResult(false);
+        }
 
         private sealed class TestLease(string secret, Action disposed) : IProviderCredentialLease
         {

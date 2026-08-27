@@ -187,6 +187,58 @@ public sealed record R3DeepSeekValidationOptions(
     }
 }
 
+public sealed record R3SecureCredentialStoreReference(
+    bool IsValid,
+    string? ErrorCode,
+    string? RootDirectory)
+{
+    private const string ArgumentPrefix = "--credential-store-root=";
+
+    public static R3SecureCredentialStoreReference Parse(IReadOnlyList<string> arguments)
+    {
+        ArgumentNullException.ThrowIfNull(arguments);
+        var matches = arguments
+            .Where(argument => argument.StartsWith(
+                ArgumentPrefix,
+                StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+        if (matches.Length == 0)
+        {
+            return Invalid("real_provider_credential_store_root_missing");
+        }
+
+        if (matches.Length != 1)
+        {
+            return Invalid("real_provider_credential_store_root_repeated");
+        }
+
+        var configuredRoot = matches[0][ArgumentPrefix.Length..];
+        if (string.IsNullOrWhiteSpace(configuredRoot)
+            || !Path.IsPathFullyQualified(configuredRoot))
+        {
+            return Invalid("real_provider_credential_store_root_invalid");
+        }
+
+        try
+        {
+            return new R3SecureCredentialStoreReference(
+                IsValid: true,
+                ErrorCode: null,
+                RootDirectory: Path.GetFullPath(configuredRoot));
+        }
+        catch (Exception exception) when (
+            exception is ArgumentException
+                or NotSupportedException
+                or PathTooLongException)
+        {
+            return Invalid("real_provider_credential_store_root_invalid");
+        }
+    }
+
+    private static R3SecureCredentialStoreReference Invalid(string errorCode) =>
+        new(IsValid: false, errorCode, RootDirectory: null);
+}
+
 public sealed class R3ValidationBudgetExceededException(string code) : Exception(
     "R3 真实 Provider 验收预算已用完，未继续发送请求。")
 {
@@ -377,6 +429,52 @@ public static class R3IsolatedAiSettingsMaterializer
             new AiSettings(new ChatModelRoute(
                 "r3-isolated-settings-missing",
                 "r3-isolated-settings-missing")));
+}
+
+public static class R3SecureCredentialLeaseBinding
+{
+    public static IProviderCredentialStore CreateReadOnly(
+        string secureRootReference,
+        Func<string, IProviderCredentialStore> storeFactory)
+    {
+        if (string.IsNullOrWhiteSpace(secureRootReference))
+        {
+            throw new ArgumentException(
+                "R3 安全凭据存储引用不能为空。",
+                nameof(secureRootReference));
+        }
+
+        ArgumentNullException.ThrowIfNull(storeFactory);
+        var normalizedRootReference = Path.GetFullPath(secureRootReference.Trim());
+        var source = storeFactory(normalizedRootReference)
+                     ?? throw new InvalidOperationException("R3 安全凭据 Store 未创建。");
+        return new ReadOnlyCredentialLeaseStore(source);
+    }
+
+    private sealed class ReadOnlyCredentialLeaseStore(IProviderCredentialStore source)
+        : IProviderCredentialStore
+    {
+        public Task<ProviderCredentialStatus> GetStatusAsync(
+            string providerId,
+            CancellationToken cancellationToken = default) =>
+            source.GetStatusAsync(providerId, cancellationToken);
+
+        public Task SetAsync(
+            string providerId,
+            ReadOnlyMemory<char> secret,
+            CancellationToken cancellationToken = default) =>
+            throw new R3ValidationFailureException("r3_credential_store_read_only");
+
+        public ValueTask<IProviderCredentialLease?> OpenLeaseAsync(
+            string providerId,
+            CancellationToken cancellationToken = default) =>
+            source.OpenLeaseAsync(providerId, cancellationToken);
+
+        public Task<bool> DeleteAsync(
+            string providerId,
+            CancellationToken cancellationToken = default) =>
+            throw new R3ValidationFailureException("r3_credential_store_read_only");
+    }
 }
 
 public enum R3ValidationCallMode
