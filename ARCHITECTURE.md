@@ -187,7 +187,7 @@ V0.4.0 Stage 2 正式源码由下面这些内容共同组成：
 - `deepseek / deepseek-v4-flash`、`deepseek-v4-pro`：固定 HTTPS 目的地 `https://api.deepseek.com`，声明 Streaming、JSON Object 和 Reasoning；Key 只从凭据 lease 读取，不从环境变量、源码、SQLite 或普通配置读取。
 - `qwen / qwen3.7-plus`：固定阿里云百炼 HTTPS 目的地，声明 Streaming 与 JSON Object；只允许用户手动选择，不自动 fallback、重试或重发。
 
-Registry 中的注册不代表真实账号已经验收。阶段 2 普通聊天发布目标是 DeepSeek + 千问；千问真实账户/网络验收须在准确 SHA 获授权后执行。Codex 普通聊天保持安全停用，不属于该真实 Provider 发布门禁。
+Registry 中的注册本身不构成真实账号验收证据；阶段 2 千问 `qwen3.7-plus` 的真实 Health、Ordinary Chat 与 Cancellation 已在准确 SHA `f7506a6013d83318572c63865607d78861e669bc` 通过。未来如 Provider 或模型合同发生变化，必须针对新 SHA 重新获得授权并形成新证据；Codex 普通聊天继续保持 `ProductionDisabled`/`PolicyDisabled`，不属于阶段 2 真实 Provider 发布目标。
 
 ### 路由与无静默降级
 
