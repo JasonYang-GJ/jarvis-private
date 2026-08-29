@@ -1,6 +1,6 @@
 param(
     [string]$InstallerPath,
-    [string]$ExpectedFileVersion = '0.3.0.0'
+    [string]$ExpectedFileVersion = '0.5.0.0'
 )
 
 $ErrorActionPreference = 'Stop'
