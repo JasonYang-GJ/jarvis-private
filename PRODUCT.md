@@ -63,7 +63,7 @@
 - `ChatProviderRegistry` 当前注册三个普通聊天 Provider：安全停用的 Codex `codex-default`、DeepSeek 的 `deepseek-v4-flash`/`deepseek-v4-pro`，以及手动备用千问的 `qwen3.7-plus`。阶段 2 普通聊天发布目标是 DeepSeek + 千问；Codex 普通聊天不是发布目标。Qwen 真实健康、普通聊天和真取消已在授权预算内通过；它不会自动接管 DeepSeek 失败，也不会自动重试或跨 Provider 重发。
 - 同一 Conversation 的消息历史由元枢 SQLite 保存，每个 Turn 会重新交给当时明确选择的 Provider。Provider A → B → A 不依赖供应商 Thread，也不创建新 Session。
 - 切换只影响下一轮普通聊天；正在运行的回答保持原路由。系统没有静默 fallback，故障时不会在未告知用户的情况下把内容改发另一个供应商。
-- Prompt 已迁移到 `prompts/runtime/`：当前为 `chat.general@1` 与 `intent.semantic@1`。Registry 校验版本、适用 Provider、相对路径和内容 SHA-256；每次 AI 调用把 Prompt ID/版本/哈希、Provider、Model、目的地、状态和 Usage 写入 `ai_invocations`，不保存 Key 或完整 Prompt/Conversation 副本。
+- Prompt 已迁移到 `prompts/runtime/`：`chat.general@1` 仍是无记忆普通聊天的默认 Prompt；`chat.general@2` 只用于用户逐 Turn 明确选择并完整确认的记忆出站；`intent.semantic@1` 始终不接收记忆。Registry 校验版本、适用 Provider、相对路径和内容 SHA-256；每次 AI 调用把 Prompt ID/版本/哈希、Provider、Model、目的地、状态和 Usage 写入 `ai_invocations`，不保存 Key 或完整 Prompt/Conversation 副本。
 - DeepSeek 与千问 Key 分别使用 Windows DPAPI `CurrentUser` 加密保存在各自 Provider 凭据槽；路由设置与 Key 分开。UI/IPC 只显示配置状态，不读回或长时间展示完整 Key。
 - 设置页明确区分“普通聊天大脑”和“编程任务”。普通聊天可切换 Provider/Model；编程任务仍由独立的 Codex Connector/Skill 承担，不随普通聊天改变。
 - AI 语义层当前只在确定性规划仍判为普通聊天且文本命中有限候选条件时提供结构化“意图类型建议”。本机严格校验字段、枚举、置信度、歧义和上下文组合；模型 target 不被采用，真实目标、权限和确认都由本机确定性 Planner 与 CapabilityPolicy 重新计算。

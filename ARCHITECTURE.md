@@ -19,7 +19,7 @@ DesktopClient（WPF）
 DesktopHost
   ├─ SessionCoordinator（唯一会话与前台 Turn 协调入口）
   │    ├─ ConversationService → RoutedConversationProvider
-  │    │    ├─ PromptRegistry → chat.general@1
+  │    │    ├─ PromptRegistry → chat.general@1（默认无记忆）/ chat.general@2（逐 Turn 记忆确认）
   │    │    └─ ModelRouter → Provider Registry
   │    │         ├─ CodexChatModelProvider（生产策略安全停用）
   │    │         ├─ DeepSeekChatModelProvider
@@ -179,7 +179,7 @@ V0.4.0 Stage 2 正式源码由下面这些内容共同组成：
 
 ### 统一普通聊天入口
 
-`ConversationService` 仍只依赖既有 `IConversationProvider`，其当前实现改为 `RoutedConversationProvider`。这个兼容层从 ConversationStore 读取消息历史，获取 `chat.general@1`，冻结本 Turn 路由，调用统一 `IChatModelProvider`，并记录 AI 调用证据。SessionCoordinator 没有增加 Provider 分支。
+`ConversationService` 仍只依赖既有 `IConversationProvider`，其当前实现为 `RoutedConversationProvider`。这个兼容层从 ConversationStore 读取消息历史：无记忆普通聊天使用默认 `chat.general@1`；只有已完成逐 Turn 完整出站确认时才使用 `chat.general@2`。它消费本 Turn 冻结路由，调用统一 `IChatModelProvider`，并记录 AI 调用证据。SessionCoordinator 没有增加 Provider 分支。
 
 `IChatModelProvider` 统一 System Prompt、Messages、Model、可选采样参数、CancellationToken、流式回调、Usage、Finish Reason、Provider Metadata、健康和错误；`ChatModelCapabilities` 显式描述 Streaming、Tool Calling、Vision、JSON Object、JSON Schema、Reasoning 和 Context Window，调用方按真实能力使用。
 
@@ -197,7 +197,7 @@ Registry 中的注册本身不构成真实账号验收证据；阶段 2 千问 `
 
 ### Prompt 与调用审计
 
-`prompts/runtime/registry.json` 当前注册 `chat.general@1` 和 `intent.semantic@1`。每项包含 ID、版本、用途、文件、SHA-256、适用 Provider、创建时间和修改原因；加载时拒绝越界路径、重复项和哈希不一致。固定小型评测集覆盖连续指代、歧义、纠正、安全及缺项目/文件/窗口等场景。
+`prompts/runtime/registry.json` 当前注册 `chat.general@1`、`chat.general@2` 和 `intent.semantic@1`。`chat.general@1` 仍是无记忆普通聊天的默认 Prompt；`chat.general@2` 只用于用户逐 Turn 明确选择并完整确认的记忆出站；`intent.semantic@1` 始终不接收记忆。每项包含 ID、版本、用途、文件、SHA-256、适用 Provider、创建时间和修改原因；加载时拒绝越界路径、重复项和哈希不一致。固定小型评测集覆盖连续指代、歧义、纠正、安全及缺项目/文件/窗口等场景。
 
 SQLite `ai_invocations` 记录 Provider/Model、Prompt ID/版本/哈希、数据去向、状态、时间、Usage、Provider Request ID 和安全失败码；不记录 Key、Authorization Header、Prompt 正文或完整 Conversation 副本。
 

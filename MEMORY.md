@@ -47,7 +47,7 @@
 3. `ModelRouter` 第一版只支持用户明确选择的默认路由。每个 Turn 开始时冻结 Provider/Model；设置变化只影响下一轮，没有静默 fallback、自动付费重试或隐式跨供应商发送。
 4. 对话连续性由元枢 `ConversationStore` 保存的消息历史负责，而不是依赖 Provider Thread。A → B → A 时每轮把同一 Conversation 历史交给当时选中的 Provider。
 5. 普通聊天与编程 Agent 独立：`CodexChatModelProvider` 作为安全停用适配器保留，生产普通聊天以 `ProductionDisabled`/`PolicyDisabled` 失败关闭；编程任务继续走 `CodexConnector` / `CodexSkillAdapter`。DeepSeek/千问聊天切换不能改变项目授权或 TaskEvidence。
-6. Prompt Registry 使用仓库内受版本控制的文件和清单，当前 Prompt 为 `chat.general@1`、`intent.semantic@1`。每次加载校验相对路径、适用 Provider 和 SHA-256；每次调用记录 Prompt ID/版本/哈希。
+6. Prompt Registry 使用仓库内受版本控制的文件和清单：`chat.general@1` 仍是无记忆普通聊天的默认 Prompt，`chat.general@2` 只用于用户逐 Turn 明确选择并完整确认的记忆出站，`intent.semantic@1` 始终不接收记忆。每次加载校验相对路径、适用 Provider 和 SHA-256；每次调用记录 Prompt ID/版本/哈希。
 7. Provider/Model 设置与凭据分开。路由 ID 写普通设置文件；DeepSeek/Qwen Key 分别使用 Windows DPAPI `CurrentUser` 加密密文，只通过各自短生命周期 lease 读取，Key 不进 Git、SQLite、普通日志或 IPC 响应。
 8. 不做静默跨 Provider 降级。Provider 故障必须给用户明确、安全提示；是否切换数据目的地由用户决定。
 9. AI 语义层只提供不可信的意图类型建议。严格本机解析、置信度和歧义门槛通过后，仍由确定性 Planner 用真实上下文重算；模型 target、缺失上下文和任何“用户已同意”主张都不能授权。
