@@ -8,6 +8,7 @@ using ScreenGuide.AI.DeepSeek;
 using ScreenGuide.AI.Qwen;
 using ScreenGuide.Core.Ai;
 using ScreenGuide.Core.Conversations;
+using ScreenGuide.Core.Memories;
 using ScreenGuide.Core.Security;
 using ScreenGuide.Core.Sessions;
 using ScreenGuide.Core.Tasking;
@@ -73,6 +74,12 @@ public static class DesktopHostFactory
                     DeepSeekChatModelProvider.ProviderId,
                     DeepSeekChatModelProvider.ProModelId)));
         });
+        builder.Services.AddSingleton<IMemoryStore>(services =>
+        {
+            var hostOptions = services.GetRequiredService<DesktopHostOptions>();
+            return new SqliteMemoryStore(hostOptions.DatabasePath);
+        });
+        builder.Services.AddSingleton<IMemoryContentProtector, WindowsDpapiMemoryContentProtector>();
         builder.Services.AddSingleton(services =>
         {
             var hostOptions = services.GetRequiredService<DesktopHostOptions>();
@@ -124,6 +131,7 @@ public static class DesktopHostFactory
             services.GetServices<IChatModelProvider>()));
         builder.Services.AddSingleton<ModelRouter>();
         builder.Services.AddSingleton<AiSettingsService>();
+        builder.Services.AddSingleton<MemoryService>();
         builder.Services.AddSingleton<ModelSemanticIntentSuggester>();
         builder.Services.AddSingleton<ISemanticIntentSuggester>(services =>
             services.GetRequiredService<ModelSemanticIntentSuggester>());

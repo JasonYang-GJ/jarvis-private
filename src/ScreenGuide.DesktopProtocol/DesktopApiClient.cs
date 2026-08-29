@@ -157,6 +157,29 @@ public interface IDesktopApiClient
         ProviderIdRequestDto request,
         CancellationToken cancellationToken = default);
 
+    Task<IReadOnlyList<MemoryDto>> ListMemoriesAsync(
+        CancellationToken cancellationToken = default);
+
+    Task<MemoryDto> GetMemoryAsync(
+        Guid memoryId,
+        CancellationToken cancellationToken = default);
+
+    Task<MemoryDto> CreateMemoryAsync(
+        CreateMemoryRequestDto request,
+        CancellationToken cancellationToken = default);
+
+    Task<MemoryDto> UpdateMemoryAsync(
+        UpdateMemoryRequestDto request,
+        CancellationToken cancellationToken = default);
+
+    Task<MemoryDto> SetMemoryEnabledAsync(
+        SetMemoryEnabledRequestDto request,
+        CancellationToken cancellationToken = default);
+
+    Task<MemoryDto> DeleteMemoryAsync(
+        DeleteMemoryRequestDto request,
+        CancellationToken cancellationToken = default);
+
     Task ShutdownHostAsync(CancellationToken cancellationToken = default);
 }
 
@@ -489,6 +512,53 @@ public sealed class DesktopApiClient(
         CancellationToken cancellationToken = default) =>
         CallAsync<ProviderIdRequestDto, AiProviderHealthDto>(
             DesktopApiMethods.CheckAiProviderHealth,
+            request,
+            cancellationToken);
+
+    public async Task<IReadOnlyList<MemoryDto>> ListMemoriesAsync(
+        CancellationToken cancellationToken = default) =>
+        await CallAsync<EmptyRequest, MemoryDto[]>(
+            DesktopApiMethods.ListMemories,
+            new EmptyRequest(),
+            cancellationToken).ConfigureAwait(false);
+
+    public Task<MemoryDto> GetMemoryAsync(
+        Guid memoryId,
+        CancellationToken cancellationToken = default) =>
+        CallAsync<MemoryIdRequestDto, MemoryDto>(
+            DesktopApiMethods.GetMemory,
+            new MemoryIdRequestDto(memoryId),
+            cancellationToken);
+
+    public Task<MemoryDto> CreateMemoryAsync(
+        CreateMemoryRequestDto request,
+        CancellationToken cancellationToken = default) =>
+        CallAsync<CreateMemoryRequestDto, MemoryDto>(
+            DesktopApiMethods.CreateMemory,
+            request,
+            cancellationToken);
+
+    public Task<MemoryDto> UpdateMemoryAsync(
+        UpdateMemoryRequestDto request,
+        CancellationToken cancellationToken = default) =>
+        CallAsync<UpdateMemoryRequestDto, MemoryDto>(
+            DesktopApiMethods.UpdateMemory,
+            request,
+            cancellationToken);
+
+    public Task<MemoryDto> SetMemoryEnabledAsync(
+        SetMemoryEnabledRequestDto request,
+        CancellationToken cancellationToken = default) =>
+        CallAsync<SetMemoryEnabledRequestDto, MemoryDto>(
+            DesktopApiMethods.SetMemoryEnabled,
+            request,
+            cancellationToken);
+
+    public Task<MemoryDto> DeleteMemoryAsync(
+        DeleteMemoryRequestDto request,
+        CancellationToken cancellationToken = default) =>
+        CallAsync<DeleteMemoryRequestDto, MemoryDto>(
+            DesktopApiMethods.DeleteMemory,
             request,
             cancellationToken);
 

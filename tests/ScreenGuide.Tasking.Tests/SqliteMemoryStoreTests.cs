@@ -1,0 +1,212 @@
+using Microsoft.Data.Sqlite;
+using ScreenGuide.Core.Memories;
+using ScreenGuide.Core.Tasking;
+using ScreenGuide.Persistence.Sqlite;
+
+namespace ScreenGuide.Tasking.Tests;
+
+public sealed class SqliteMemoryStoreTests
+{
+    private static readonly DateTimeOffset Now =
+        new(2026, 8, 29, 9, 0, 0, TimeSpan.Zero);
+
+    [Fact]
+    public async Task Version8DatabaseMigratesAtomicallyToVersion9AndKeepsAPreVersion9Backup()
+    {
+        var root = NewRoot();
+        var databasePath = Path.Combine(root, "state", "tasking.db");
+        Directory.CreateDirectory(Path.GetDirectoryName(databasePath)!);
+        try
+        {
+            await CreateVersion8DatabaseAsync(databasePath);
+
+            await using var store = new SqliteTaskStore(databasePath);
+            await store.InitializeAsync();
+
+            Assert.Equal(9, await store.GetSchemaVersionAsync());
+            await using var connection = new SqliteConnection($"Data Source={databasePath}");
+            await connection.OpenAsync();
+            Assert.True(await ObjectExistsAsync(connection, "table", "memory_items"));
+            Assert.True(await ObjectExistsAsync(connection, "index", "ix_memory_items_status_expiry"));
+            Assert.True(await ObjectExistsAsync(connection, "index", "ix_memory_items_project"));
+            Assert.Equal("v8-device-canary", await ReadDeviceCanaryAsync(connection));
+
+            var backup = Assert.Single(Directory.GetFiles(
+                Path.GetDirectoryName(databasePath)!,
+                "tasking.pre-v9-from-v8-*.backup.db"));
+            await using var backupConnection = new SqliteConnection($"Data Source={backup};Mode=ReadOnly");
+            await backupConnection.OpenAsync();
+            Assert.Equal(8, await ReadSchemaVersionAsync(backupConnection));
+            Assert.False(await ObjectExistsAsync(backupConnection, "table", "memory_items"));
+            Assert.Equal("v8-device-canary", await ReadDeviceCanaryAsync(backupConnection));
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task FailedVersion9MigrationRollsBackAndLeavesVersion8AndBackupIntact()
+    {
+        var root = NewRoot();
+        var databasePath = Path.Combine(root, "state", "tasking.db");
+        Directory.CreateDirectory(Path.GetDirectoryName(databasePath)!);
+        try
+        {
+            await CreateVersion8DatabaseAsync(databasePath, addConflictingMemoryTable: true);
+
+            await using var store = new SqliteTaskStore(databasePath);
+            var failure = await Assert.ThrowsAsync<InvalidOperationException>(
+                () => store.InitializeAsync());
+
+            Assert.Contains("备份", failure.Message, StringComparison.Ordinal);
+            await using var connection = new SqliteConnection($"Data Source={databasePath}");
+            await connection.OpenAsync();
+            Assert.Equal(8, await ReadSchemaVersionAsync(connection));
+            Assert.False(await ObjectExistsAsync(connection, "index", "ix_memory_items_status_expiry"));
+            Assert.Equal("v8-device-canary", await ReadDeviceCanaryAsync(connection));
+            await using var command = connection.CreateCommand();
+            command.CommandText = "SELECT marker FROM memory_items;";
+            Assert.Equal("v8-canary", await command.ExecuteScalarAsync());
+            Assert.Single(Directory.GetFiles(
+                Path.GetDirectoryName(databasePath)!,
+                "tasking.pre-v9-from-v8-*.backup.db"));
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ProtectedCrudUsesOptimisticConcurrencyDisableExpiryAndContentFreeTombstone()
+    {
+        await using var environment = await TaskStoreTestEnvironment.CreateAsync();
+        await using var store = new SqliteMemoryStore(environment.DatabasePath);
+        await store.InitializeAsync();
+        var id = Guid.NewGuid();
+        var original = NewProtectedItem(id, version: 1);
+
+        await store.CreateAsync(original);
+        var created = await store.GetAsync(id);
+
+        Assert.Equal(original.ProtectedTitle, created?.ProtectedTitle);
+        Assert.Equal(original.ProtectedBody, created?.ProtectedBody);
+        Assert.Single(await store.ListAsync());
+
+        var conflict = await store.UpdateAsync(
+            NewProtectedItem(id, version: 2, title: [9], body: [8]),
+            expectedVersion: 7);
+        Assert.Equal(MemoryStoreMutationDisposition.Conflict, conflict.Disposition);
+        Assert.Equal(1, conflict.Current?.Metadata.Version);
+
+        var update = await store.UpdateAsync(
+            NewProtectedItem(id, version: 2, title: [9], body: [8]),
+            expectedVersion: 1);
+        Assert.Equal(MemoryStoreMutationDisposition.Applied, update.Disposition);
+        Assert.Equal(2, update.Current?.Metadata.Version);
+
+        var disabled = await store.SetEnabledAsync(id, false, 2, Now.AddMinutes(2));
+        Assert.Equal(MemoryStatus.Disabled, disabled.Current?.Metadata.Status);
+        Assert.False(disabled.Current?.Metadata is { } disabledMetadata
+            && new MemoryItem(disabledMetadata, "title", "body").IsRetrievalCandidate(Now));
+
+        var deleted = await store.DeleteAsync(id, 3, Now.AddMinutes(3));
+        Assert.Equal(MemoryStoreMutationDisposition.Applied, deleted.Disposition);
+        Assert.Equal(MemoryStatus.Deleted, deleted.Current?.Metadata.Status);
+        Assert.Null(deleted.Current?.ProtectedTitle);
+        Assert.Null(deleted.Current?.ProtectedBody);
+        Assert.Null(deleted.Current?.SourceReference);
+        Assert.Equal(4, deleted.Current?.Metadata.Version);
+
+        var idempotentDelete = await store.DeleteAsync(id, 4, Now.AddMinutes(4));
+        Assert.Equal(MemoryStoreMutationDisposition.AlreadyDeleted, idempotentDelete.Disposition);
+        Assert.Equal(4, idempotentDelete.Current?.Metadata.Version);
+    }
+
+    private static ProtectedMemoryItem NewProtectedItem(
+        Guid id,
+        int version,
+        byte[]? title = null,
+        byte[]? body = null) => new(
+        MemoryMetadata.Create(
+            id,
+            MemoryCategory.ProjectNote,
+            MemoryScope.Global,
+            MemoryStatus.Active,
+            MemorySourceKind.UserExplicit,
+            Now,
+            Now.AddMinutes(version - 1),
+            Now.AddDays(1),
+            1.0,
+            version),
+        title ?? [1, 2, 3],
+        body ?? [4, 5, 6],
+        null);
+
+    private static string NewRoot()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"screen-guide-memory-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        return root;
+    }
+
+    private static async Task CreateVersion8DatabaseAsync(
+        string databasePath,
+        bool addConflictingMemoryTable = false)
+    {
+        await using var connection = new SqliteConnection($"Data Source={databasePath}");
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = SqliteSchema.CreateVersion1
+            + SqliteSchema.CreateVersion2
+            + SqliteSchema.CreateVersion3
+            + SqliteSchema.CreateVersion4
+            + SqliteSchema.CreateVersion5
+            + SqliteSchema.CreateVersion6
+            + SqliteSchema.CreateVersion7
+            + SqliteSchema.CreateVersion8
+            + "INSERT INTO schema_info(version, applied_at_utc) VALUES "
+            + string.Join(",", Enumerable.Range(1, 8).Select(version => $"({version}, '2026-08-29T00:00:00Z')"))
+            + ";"
+            + "INSERT INTO devices(id, display_name, device_type, trust_state, created_at_utc) "
+            + "VALUES('11111111-1111-1111-1111-111111111111', 'v8-device-canary', "
+            + "'WindowsHost', 'Local', '2026-08-29T00:00:00Z');";
+        if (addConflictingMemoryTable)
+        {
+            command.CommandText += "CREATE TABLE memory_items(marker TEXT NOT NULL);"
+                + "INSERT INTO memory_items(marker) VALUES('v8-canary');";
+        }
+
+        await command.ExecuteNonQueryAsync();
+    }
+
+    private static async Task<int> ReadSchemaVersionAsync(SqliteConnection connection)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT MAX(version) FROM schema_info;";
+        return Convert.ToInt32(await command.ExecuteScalarAsync());
+    }
+
+    private static async Task<string?> ReadDeviceCanaryAsync(SqliteConnection connection)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT display_name FROM devices WHERE id = '11111111-1111-1111-1111-111111111111';";
+        return await command.ExecuteScalarAsync() as string;
+    }
+
+    private static async Task<bool> ObjectExistsAsync(
+        SqliteConnection connection,
+        string type,
+        string name)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type = $type AND name = $name;";
+        command.Parameters.AddWithValue("$type", type);
+        command.Parameters.AddWithValue("$name", name);
+        return Convert.ToInt32(await command.ExecuteScalarAsync()) == 1;
+    }
+}

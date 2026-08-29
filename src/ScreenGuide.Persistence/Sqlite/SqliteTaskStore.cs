@@ -61,6 +61,12 @@ public sealed class SqliteTaskStore : ILocalTaskStore
                 $"数据库版本 {storedVersion} 高于当前支持的版本 {V02Contract.SchemaVersion}。");
         }
 
+        if (storedVersion == 8)
+        {
+            await ValidateVersion8ForVersion9MigrationAsync(connection, cancellationToken)
+                .ConfigureAwait(false);
+        }
+
         string? backupPath = null;
         if (storedVersion > 0 && storedVersion < V02Contract.SchemaVersion)
         {
@@ -116,6 +122,12 @@ public sealed class SqliteTaskStore : ILocalTaskStore
             if (storedVersion < 8)
             {
                 await ApplyMigrationAsync(connection, 8, SqliteSchema.CreateVersion8, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+
+            if (storedVersion < 9)
+            {
+                await ApplyMigrationAsync(connection, 9, SqliteSchema.CreateVersion9, cancellationToken)
                     .ConfigureAwait(false);
             }
         }
@@ -2050,6 +2062,53 @@ public sealed class SqliteTaskStore : ILocalTaskStore
         await RecordSchemaVersionAsync(connection, transaction, version, cancellationToken)
             .ConfigureAwait(false);
         transaction.Commit();
+    }
+
+    private static async Task ValidateVersion8ForVersion9MigrationAsync(
+        SqliteConnection connection,
+        CancellationToken cancellationToken)
+    {
+        var requiredTurnColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "frozen_route_status",
+            "frozen_provider_id",
+            "frozen_model_id",
+            "frozen_data_destination",
+            "frozen_sends_data_off_device",
+            "frozen_at_utc",
+            "frozen_route_failure_code"
+        };
+        await using (var command = connection.CreateCommand())
+        {
+            command.CommandText = "SELECT name FROM pragma_table_info('session_turns');";
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+            {
+                requiredTurnColumns.Remove(reader.GetString(0));
+            }
+        }
+
+        if (requiredTurnColumns.Count != 0)
+        {
+            throw new InvalidOperationException(
+                $"schema v8 不完整，缺少列：{string.Join(", ", requiredTurnColumns.Order())}。");
+        }
+
+        await using var objectCommand = connection.CreateCommand();
+        objectCommand.CommandText = """
+            SELECT COUNT(*) FROM sqlite_master
+            WHERE (type = 'table' AND name = 'ai_invocations')
+               OR (type = 'index' AND name IN (
+                    'ix_ai_invocations_conversation_turn',
+                    'ix_ai_invocations_session_turn',
+                    'ix_ai_invocations_provider_model'));
+            """;
+        if (Convert.ToInt32(
+                await objectCommand.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false),
+                CultureInfo.InvariantCulture) != 4)
+        {
+            throw new InvalidOperationException("schema v8 不完整，AI Invocation 结构缺失。");
+        }
     }
 
     private static async Task RecordSchemaVersionAsync(

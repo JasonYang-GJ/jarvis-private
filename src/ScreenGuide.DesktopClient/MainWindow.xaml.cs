@@ -31,6 +31,7 @@ public partial class MainWindow : Window
     private IReadOnlyList<ProjectDto> _projects = [];
     private IReadOnlyList<DesktopApplicationDto> _desktopApplications = [];
     private IReadOnlyList<TaskSummaryDto> _tasks = [];
+    private IReadOnlyList<MemoryDto> _memories = [];
     private SystemStatusDto? _systemStatus;
     private Guid? _selectedTaskId;
     private Guid? _selectedConversationId;
@@ -38,6 +39,7 @@ public partial class MainWindow : Window
     private Task? _sessionUpdateLoop;
     private bool _isRefreshing;
     private bool _isLoadingAiSettings;
+    private bool _isLoadingMemories;
     private bool _isRenderingAiSettings;
     private bool _isHostOnline;
     private bool _forceClose;
@@ -259,6 +261,7 @@ public partial class MainWindow : Window
             .Where(project => project.AuthorizationState == "Authorized")
             .ToArray();
         PreserveProjectSelection(NewTaskProjectComboBox, authorized);
+        PreserveProjectSelection(MemoryProjectComboBox, authorized);
         NewTaskSubmitButton.IsEnabled = authorized.Length > 0 && _isHostOnline;
     }
 
@@ -464,6 +467,39 @@ public partial class MainWindow : Window
         finally
         {
             _isLoadingAiSettings = false;
+        }
+    }
+
+    private async Task LoadMemoriesForPageAsync(Guid? preferredMemoryId = null)
+    {
+        if (_isLoadingMemories || _lifetime.IsCancellationRequested)
+        {
+            return;
+        }
+
+        _isLoadingMemories = true;
+        try
+        {
+            _memories = await _api.ListMemoriesAsync(_lifetime.Token);
+            var rows = _memories.Select(MemoryRow.From).ToArray();
+            var selectedId = preferredMemoryId ?? (MemoryListBox.SelectedItem as MemoryRow)?.Item.Id;
+            MemoryListBox.ItemsSource = rows;
+            MemoryListBox.SelectedItem = rows.FirstOrDefault(row => row.Item.Id == selectedId);
+            if (MemoryListBox.SelectedItem is null && preferredMemoryId is null)
+            {
+                ClearMemoryEditor();
+            }
+        }
+        catch (OperationCanceledException) when (_lifetime.IsCancellationRequested)
+        {
+        }
+        catch (Exception exception)
+        {
+            ShowError("长期记忆暂时无法读取，请确认本机中枢正在运行。", exception);
+        }
+        finally
+        {
+            _isLoadingMemories = false;
         }
     }
 
@@ -1602,6 +1638,176 @@ public partial class MainWindow : Window
         });
     }
 
+    private void MemoryListBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (MemoryListBox.SelectedItem is not MemoryRow row)
+        {
+            ToggleMemoryButton.IsEnabled = false;
+            DeleteMemoryButton.IsEnabled = false;
+            return;
+        }
+
+        var item = row.Item;
+        SelectTaggedItem(MemoryCategoryComboBox, item.Category);
+        SelectTaggedItem(MemoryScopeComboBox, item.Scope);
+        MemoryProjectComboBox.SelectedItem = item.ProjectId is { } projectId
+            ? _projects.FirstOrDefault(project => project.Id == projectId)
+            : null;
+        MemoryTitleTextBox.Text = item.Title ?? string.Empty;
+        MemoryBodyTextBox.Text = item.Body ?? string.Empty;
+        MemoryExpiryDatePicker.SelectedDate = item.ExpiresAtUtc?.ToLocalTime().Date;
+        MemoryMetadataText.Text =
+            $"来源：{item.Source} · 状态：{MemoryStatusLabel(item.Status)} · 更新时间：{item.UpdatedAtUtc.ToLocalTime():yyyy-MM-dd HH:mm}"
+            + (item.ExpiresAtUtc is { } expires
+                ? $" · 到期：{expires.ToLocalTime():yyyy-MM-dd}"
+                : string.Empty);
+        ToggleMemoryButton.Content = item.Status == "Disabled" ? "启用" : "停用";
+        ToggleMemoryButton.IsEnabled = true;
+        DeleteMemoryButton.IsEnabled = true;
+        UpdateMemoryScopeEditor();
+    }
+
+    private void MemoryScopeComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e) =>
+        UpdateMemoryScopeEditor();
+
+    private void NewMemoryButton_Click(object sender, RoutedEventArgs e)
+    {
+        MemoryListBox.SelectedItem = null;
+        ClearMemoryEditor();
+        MemoryTitleTextBox.Focus();
+    }
+
+    private async void SaveMemoryButton_Click(object sender, RoutedEventArgs e)
+    {
+        var category = SelectedTag(MemoryCategoryComboBox);
+        var scope = SelectedTag(MemoryScopeComboBox);
+        var projectId = scope == "Project"
+            ? (MemoryProjectComboBox.SelectedItem as ProjectDto)?.Id
+            : null;
+        if (string.IsNullOrWhiteSpace(category)
+            || string.IsNullOrWhiteSpace(scope)
+            || (scope == "Project" && projectId is null))
+        {
+            ShowError("请选择记忆类别和有效的已授权项目。", null);
+            return;
+        }
+
+        DateTimeOffset? expiresAtUtc = MemoryExpiryDatePicker.SelectedDate is { } selectedDate
+            ? new DateTimeOffset(
+                    selectedDate.Date.AddDays(1),
+                    TimeZoneInfo.Local.GetUtcOffset(selectedDate.Date.AddDays(1)))
+                .ToUniversalTime()
+            : null;
+        var selected = (MemoryListBox.SelectedItem as MemoryRow)?.Item;
+        await RunCommandAsync(async () =>
+        {
+            var saved = selected is null
+                ? await _api.CreateMemoryAsync(new CreateMemoryRequestDto(
+                    category,
+                    scope,
+                    projectId,
+                    MemoryTitleTextBox.Text,
+                    MemoryBodyTextBox.Text,
+                    expiresAtUtc), _lifetime.Token)
+                : await _api.UpdateMemoryAsync(new UpdateMemoryRequestDto(
+                    selected.Id,
+                    selected.Version,
+                    category,
+                    scope,
+                    projectId,
+                    MemoryTitleTextBox.Text,
+                    MemoryBodyTextBox.Text,
+                    expiresAtUtc), _lifetime.Token);
+            await LoadMemoriesForPageAsync(saved.Id);
+            StatusBarText.Text = selected is null ? "长期记忆已保存在本机。" : "长期记忆已修正。";
+        });
+    }
+
+    private async void ToggleMemoryButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (MemoryListBox.SelectedItem is not MemoryRow row)
+        {
+            return;
+        }
+
+        var enable = row.Item.Status == "Disabled";
+        await RunCommandAsync(async () =>
+        {
+            var updated = await _api.SetMemoryEnabledAsync(new SetMemoryEnabledRequestDto(
+                row.Item.Id,
+                row.Item.Version,
+                enable), _lifetime.Token);
+            await LoadMemoriesForPageAsync(updated.Id);
+            StatusBarText.Text = enable ? "长期记忆已启用。" : "长期记忆已停用。";
+        });
+    }
+
+    private async void DeleteMemoryButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (MemoryListBox.SelectedItem is not MemoryRow row)
+        {
+            return;
+        }
+
+        var confirmed = MessageBox.Show(
+            $"确定删除“{row.Item.Title}”吗？删除后正文会从本机数据库中移除。",
+            "删除长期记忆",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Warning,
+            MessageBoxResult.No) == MessageBoxResult.Yes;
+        if (!confirmed)
+        {
+            return;
+        }
+
+        await RunCommandAsync(async () =>
+        {
+            _ = await _api.DeleteMemoryAsync(new DeleteMemoryRequestDto(
+                row.Item.Id,
+                row.Item.Version,
+                Confirmed: true), _lifetime.Token);
+            await LoadMemoriesForPageAsync();
+            StatusBarText.Text = "长期记忆已删除。";
+        });
+    }
+
+    private void ClearMemoryEditor()
+    {
+        SelectTaggedItem(MemoryCategoryComboBox, "UserFact");
+        SelectTaggedItem(MemoryScopeComboBox, "Global");
+        MemoryProjectComboBox.SelectedItem = null;
+        MemoryTitleTextBox.Clear();
+        MemoryBodyTextBox.Clear();
+        MemoryExpiryDatePicker.SelectedDate = null;
+        MemoryMetadataText.Text = "来源：用户明确保存";
+        ToggleMemoryButton.IsEnabled = false;
+        DeleteMemoryButton.IsEnabled = false;
+        UpdateMemoryScopeEditor();
+    }
+
+    private void UpdateMemoryScopeEditor()
+    {
+        var projectScoped = SelectedTag(MemoryScopeComboBox) == "Project";
+        MemoryProjectComboBox.Visibility = projectScoped ? Visibility.Visible : Visibility.Collapsed;
+        if (projectScoped)
+        {
+            var authorized = _projects
+                .Where(project => project.AuthorizationState == "Authorized")
+                .ToArray();
+            PreserveProjectSelection(MemoryProjectComboBox, authorized);
+        }
+    }
+
+    private static string? SelectedTag(WpfComboBox comboBox) =>
+        (comboBox.SelectedItem as WpfComboBoxItem)?.Tag as string;
+
+    private static void SelectTaggedItem(WpfComboBox comboBox, string tag)
+    {
+        comboBox.SelectedItem = comboBox.Items
+            .OfType<WpfComboBoxItem>()
+            .FirstOrDefault(item => string.Equals(item.Tag as string, tag, StringComparison.Ordinal));
+    }
+
     public void OpenDashboardFromTray() => ShowWindowAndPage(AppPage.Dashboard);
 
     public void OpenNewTaskFromTray() => ShowWindowAndPage(AppPage.Dashboard);
@@ -1723,6 +1929,7 @@ public partial class MainWindow : Window
         if (page == AppPage.Settings)
         {
             _ = LoadAiSettingsForPageAsync();
+            _ = LoadMemoriesForPageAsync();
         }
         foreach (var button in new[]
                  {
@@ -1914,6 +2121,34 @@ public partial class MainWindow : Window
             project.HasActiveTask,
             project.HasActiveTask ? "是" : "否");
     }
+
+    private sealed record MemoryRow(MemoryDto Item, string Title, string Summary)
+    {
+        public static MemoryRow From(MemoryDto item) => new(
+            item,
+            item.Title ?? "已删除的记忆",
+            $"{MemoryCategoryLabel(item.Category)} · {MemoryScopeLabel(item.Scope)} · {MemoryStatusLabel(item.Status)} · {item.UpdatedAtUtc.ToLocalTime():yyyy-MM-dd HH:mm}");
+    }
+
+    private static string MemoryCategoryLabel(string category) => category switch
+    {
+        "UserFact" => "用户事实",
+        "UserPreference" => "用户偏好",
+        "ProjectNote" => "项目备注",
+        "Decision" => "决定",
+        _ => category
+    };
+
+    private static string MemoryScopeLabel(string scope) =>
+        scope == "Project" ? "项目" : "全局";
+
+    private static string MemoryStatusLabel(string status) => status switch
+    {
+        "Active" => "已启用",
+        "Disabled" => "已停用",
+        "Deleted" => "已删除",
+        _ => status
+    };
 
     private sealed record HistoryRow(
         Guid Id,

@@ -2,6 +2,14 @@
 
 本项目从 V0.2.1 起采用可追溯版本记录。更早内容以历史报告和 Git 历史为准。
 
+## Unreleased - V2 阶段 3 R1 候选
+
+- 新增与 Conversation、Session/Turn、编程 Task、Provider Thread 和 `ai_invocations` 分离的本机长期记忆账本。
+- 设置页新增“长期记忆（阶段 3）”，仅支持用户显式新增、查看、修正、启停和确认删除，并明确“仅保存在本机；当前不会自动发送给模型”。
+- 标题/正文通过专用 Windows DPAPI `CurrentUser` 保护后持久化；项目作用域只接受精确已授权项目，修正/启停/删除使用版本冲突保护，删除清除密文并保留无内容墓碑。
+- SQLite 候选合同升级到 schema v9，Desktop IPC 候选合同升级到 protocol v9；v8 → v9 前生成 pre-v9 备份并原子迁移。V0.4.0 Stage 2 回滚必须使用 pre-v9 备份或隔离数据目录。
+- 本切片不自动提取、检索或向模型发送记忆，不包含 RAG、向量数据库、用户画像、权限授予或 Stage 3 完成声明。
+
 ## 0.4.0 - 2026-08-29（V2 阶段 2：通过）
 
 > 阶段 2 功能、真实 Provider、真实 Codex 编程隔离和 Release 定向验收已通过。普通聊天发布目标是 DeepSeek + 千问，千问仅作手动备用；Codex 普通聊天保持安全停用，独立 Codex 编程 Agent 不随聊天 Provider 变化。

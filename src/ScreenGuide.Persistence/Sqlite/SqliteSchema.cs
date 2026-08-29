@@ -493,4 +493,44 @@ internal static class SqliteSchema
         CREATE INDEX ix_ai_invocations_provider_model
             ON ai_invocations(provider_id, model_id, started_at_utc);
         """;
+
+    public const string CreateVersion9 = """
+        CREATE TABLE memory_items (
+            id TEXT NOT NULL PRIMARY KEY,
+            category TEXT NOT NULL,
+            scope_kind TEXT NOT NULL,
+            project_id TEXT NULL,
+            protected_title BLOB NULL,
+            protected_body BLOB NULL,
+            source_kind TEXT NOT NULL,
+            source_reference TEXT NULL,
+            created_at_utc TEXT NOT NULL,
+            updated_at_utc TEXT NOT NULL,
+            expires_at_utc TEXT NULL,
+            status TEXT NOT NULL,
+            confidence REAL NOT NULL,
+            version INTEGER NOT NULL,
+            CHECK (category IN ('UserFact', 'UserPreference', 'ProjectNote', 'Decision')),
+            CHECK (scope_kind IN ('Global', 'Project')),
+            CHECK (
+                (scope_kind = 'Global' AND project_id IS NULL)
+                OR (scope_kind = 'Project' AND project_id IS NOT NULL)
+            ),
+            CHECK (source_kind = 'UserExplicit'),
+            CHECK (status IN ('Active', 'Disabled', 'Deleted')),
+            CHECK (confidence = 1.0),
+            CHECK (version > 0),
+            CHECK (
+                (status = 'Deleted' AND protected_title IS NULL AND protected_body IS NULL
+                    AND source_reference IS NULL)
+                OR (status != 'Deleted' AND protected_title IS NOT NULL AND protected_body IS NOT NULL)
+            ),
+            FOREIGN KEY (project_id) REFERENCES projects(id)
+        );
+
+        CREATE INDEX ix_memory_items_status_expiry
+            ON memory_items(status, expires_at_utc, updated_at_utc);
+        CREATE INDEX ix_memory_items_project
+            ON memory_items(project_id, status, updated_at_utc);
+        """;
 }

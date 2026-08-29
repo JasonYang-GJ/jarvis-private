@@ -1,6 +1,6 @@
-# 元枢产品事实（V0.4.0 / V2 阶段 2）
+# 元枢产品事实（V0.4.0 冻结基线 / V2 阶段 3 R1 候选）
 
-> 当前产品事实的唯一入口。更新时间：2026-08-29。V2 阶段 2 功能、真实 Provider、真实 Codex 编程隔离和 Release 定向验收已通过；版本冻结为 V0.4.0，正式标签指向 `33b5859dcaa697bacd5edc5036a58d162b723a0e`，安装包身份记录在 `docs/baselines/V0.4.0_STAGE2.md`。
+> 当前产品事实的唯一入口。更新时间：2026-08-29。V0.4.0 阶段 2 已冻结；当前源码正在验证阶段 3 的第一个候选切片 S3-R1，它不是新的正式发布版本。阶段 2 安装包身份仍以 `docs/baselines/V0.4.0_STAGE2.md` 为准。
 
 ## 产品定位
 
@@ -11,7 +11,7 @@
 - **阶段 1 保留事实**：V0.3.0 的 Session、真取消、上下文补齐、安全门禁和真实桌面证据保持有效。
 - **阶段 2 正式能力**：统一 Chat Model、Provider Registry、Model Router、Prompt Registry、DPAPI 凭据、安全停用的 Codex 普通聊天适配器、DeepSeek/千问 Provider、设置 UI/IPC、AI 调用审计和只建议不授权的语义意图边界。
 - **发布合同**：普通聊天发布目标是 DeepSeek + 千问；千问仅作手动备用，无自动 fallback、retry 或跨 Provider resend。Codex 普通聊天保持 `ProductionDisabled`/`PolicyDisabled`，独立 Codex 编程 Agent 不随聊天 Provider 改变。
-- **未来阶段 3**：长期记忆、RAG、向量数据库、跨 Session 检索和用户画像，当前均未实现。
+- **阶段 3 R1 候选**：新增只由用户显式管理、仅保存在本机的加密长期记忆账本。当前不会自动提取、检索或发送给模型；RAG、向量数据库、跨 Session 自动个性化和用户画像仍未实现。
 
 详细代码边界见 [阶段 2 AI 模型路由设计](docs/V2_STAGE2_AI_MODEL_ROUTING_DESIGN.md)。
 
@@ -88,9 +88,17 @@
 - R4 离线 Release 定向 QA 173/173 通过；集成后 Qwen 56/56、R4 Runner 61/61、设置/无 fallback/工作负载隔离 3/3 通过。
 - 当普通聊天保存为 `qwen/qwen3.7-plus` 时，真实 Codex 编程任务仅1个 Task、1次 attempt，指定文件为唯一 Git 变化，指定 `dotnet test` 真实通过，TaskEvidence 完整，任务时窗内普通聊天 AI Invocation 为 0。
 
+## 阶段 3 R1 当前候选能力
+
+- 设置页提供“长期记忆（阶段 3）”，用户可以显式新增、查看、修正、启用/停用和确认删除四类记忆：用户事实、用户偏好、项目备注和决定。
+- 记忆独立于 Conversation、Session/Turn、编程 Task、Provider Thread 和 `ai_invocations`；当前不会参与 Prompt、普通聊天、语义建议或任何动作授权。
+- 标题和正文通过专用 Windows DPAPI `CurrentUser` 保护后写入 SQLite；数据库只保存密文。项目作用域只接受当前已授权的精确项目 ID。
+- SQLite 当前候选合同为 schema v9，Desktop IPC 当前候选合同为 protocol v9。v8 → v9 在变更前创建 pre-v9 备份并使用事务迁移；阶段 2 回滚必须使用该备份或隔离数据目录。
+- 删除需要可见确认，并在同一事务清除标题/正文密文，只保留无内容墓碑；并发修正、启停或删除使用版本号冲突保护。
+
 ## 尚未完成
 
-- 没有用户长期记忆、RAG、向量数据库、相关性检索、记忆纠错或跨 Session 个性化。SQLite 保存 Session/聊天记录不等于长期记忆。
+- S3-R1 只有显式本机记忆账本；没有自动记忆提取、模型上下文注入、相关性检索、RAG、向量数据库、用户画像或跨 Session 自动个性化。
 - 同 AppId 的安装—卸载—重装生命周期尚未在干净 Windows 环境执行；当前标签是可追溯的 Stage 2 开发基线，不等于已放行对外分发。
 - Prompt 已有版本、哈希和固定小型评测集，但真实模型质量评测、成本/Token 对比和长期回归趋势仍未形成发布证据。
 - Provider 路由当前只支持用户明确默认选择，不做自动成本/速度路由或自动降级；这是阶段 2 的有意范围，不是缺陷。
@@ -116,4 +124,5 @@
 - 上一标签 `v0.3.0-stage1` 继续可达；完整安装生命周期仍需在干净机验收后，才可把安装包视为对外分发版本。
 - V0.2.1 标签 `v0.2.1-baseline` 保留为上一版回滚点；回滚数据必须使用 pre-v7 备份或隔离数据目录。
 - 阶段 2 候选代码把 SQLite 升到 schema v8 并在升级前建立 `pre-v8` 备份。V0.3.0 不能直接打开 schema v8；回滚到阶段 1 时必须使用 pre-v8 备份或隔离数据目录，不能覆盖正式数据库。
+- 当前 S3-R1 候选把 SQLite 升到 schema v9，并在 v8 → v9 前建立 `pre-v9` 备份。V0.4.0 不能直接打开 schema v9；回滚到阶段 2 时必须保留 v9 主库并使用 pre-v9 备份或隔离数据目录。
 - 为保护本机同 AppId 的现有 V0.2.0 安装、卸载登记和用户数据，本阶段没有在该机器重复完整安装—卸载—重装；该发布生命周期仍应在干净机执行。

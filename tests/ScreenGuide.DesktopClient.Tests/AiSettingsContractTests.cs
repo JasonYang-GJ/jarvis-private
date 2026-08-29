@@ -7,9 +7,9 @@ namespace ScreenGuide.DesktopClient.Tests;
 public sealed class AiSettingsContractTests
 {
     [Fact]
-    public void ProtocolV8PublishesStableAiSettingsMethods()
+    public void ProtocolV9PreservesStableAiSettingsMethods()
     {
-        Assert.Equal(8, DesktopProtocolVersion.Current);
+        Assert.Equal(9, DesktopProtocolVersion.Current);
         Assert.Equal("ai.settings.get", DesktopApiMethods.GetAiSettings);
         Assert.Equal("ai.chat-route.set", DesktopApiMethods.SetChatRoute);
         Assert.Equal("ai.credentials.set", DesktopApiMethods.SetProviderCredential);

@@ -341,20 +341,15 @@ public sealed class SqliteTaskStoreTests
                 await command.ExecuteNonQueryAsync();
             }
 
-            await using (var taskStore = new SqliteTaskStore(databasePath))
-            {
-                await taskStore.InitializeAsync();
-                Assert.Equal(8, await taskStore.GetSchemaVersionAsync());
-            }
-
             var before = await ReadSessionTurnColumnsAsync(databasePath);
-            await using var sessions = new SqliteSessionStore(databasePath);
-            var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
-                sessions.InitializeAsync());
+            await using var taskStore = new SqliteTaskStore(databasePath);
+            var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+                () => taskStore.InitializeAsync());
             var after = await ReadSessionTurnColumnsAsync(databasePath);
 
             Assert.Contains("schema v8 不完整", exception.Message, StringComparison.Ordinal);
             Assert.Contains("frozen_route_status", exception.Message, StringComparison.Ordinal);
+            Assert.Equal(8, await taskStore.GetSchemaVersionAsync());
             Assert.Equal(before, after);
             Assert.DoesNotContain("frozen_route_status", after);
         }
@@ -893,54 +888,131 @@ public sealed class SqliteTaskStoreTests
     private static async Task<JsonElement> RunStage1CompatibilityScenarioAsync(string scenario)
     {
         var repositoryRoot = FindRepositoryRoot();
-        var scriptPath = Path.Combine(
-            repositoryRoot,
-            "scripts",
-            "test-stage1-pre-v8-rollback.ps1");
-        Assert.True(
-            File.Exists(scriptPath),
-            "尚未证明精确 Stage1 能读取 pre-v8 备份并拒绝 v8：验证脚本入口不存在。");
+        string? stage2CloneRoot = null;
+        if (V02Contract.SchemaVersion > 8)
+        {
+            stage2CloneRoot = Path.Combine(
+                Path.GetTempPath(),
+                $"screen-guide-stage2-rollback-evidence-{Guid.NewGuid():N}");
+            await RunGitForEvidenceAsync(
+                repositoryRoot,
+                "clone",
+                "--quiet",
+                "--no-hardlinks",
+                repositoryRoot,
+                stage2CloneRoot);
+            await RunGitForEvidenceAsync(
+                stage2CloneRoot,
+                "checkout",
+                "--quiet",
+                "--detach",
+                "v0.4.0-stage2");
+            repositoryRoot = stage2CloneRoot;
+        }
 
+        try
+        {
+            var scriptPath = Path.Combine(
+                repositoryRoot,
+                "scripts",
+                "test-stage1-pre-v8-rollback.ps1");
+            Assert.True(
+                File.Exists(scriptPath),
+                "尚未证明精确 Stage1 能读取 pre-v8 备份并拒绝 v8：验证脚本入口不存在。");
+
+            using var process = new Process
+            {
+                StartInfo = new ProcessStartInfo
+                {
+                    FileName = "pwsh",
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    CreateNoWindow = true
+                }
+            };
+            process.StartInfo.ArgumentList.Add("-NoLogo");
+            process.StartInfo.ArgumentList.Add("-NoProfile");
+            process.StartInfo.ArgumentList.Add("-File");
+            process.StartInfo.ArgumentList.Add(scriptPath);
+            process.StartInfo.ArgumentList.Add("-RepositoryRoot");
+            process.StartInfo.ArgumentList.Add(repositoryRoot);
+            process.StartInfo.ArgumentList.Add("-Scenario");
+            process.StartInfo.ArgumentList.Add(scenario);
+            Assert.True(process.Start(), "无法启动 Stage1 数据库兼容验证脚本。");
+            var standardOutput = process.StandardOutput.ReadToEndAsync();
+            var standardError = process.StandardError.ReadToEndAsync();
+            await process.WaitForExitAsync().WaitAsync(TimeSpan.FromMinutes(3));
+            var output = await standardOutput;
+            _ = await standardError;
+            var resultLine = output
+                .Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries)
+                .SingleOrDefault(line => line.StartsWith(
+                    "STAGE1_PRE_V8_RESULT ",
+                    StringComparison.Ordinal));
+            Assert.False(
+                string.IsNullOrWhiteSpace(resultLine),
+                "精确 Stage1 数据库兼容验证没有返回脱敏结果摘要。");
+            using var document = JsonDocument.Parse(
+                resultLine["STAGE1_PRE_V8_RESULT ".Length..]);
+            var result = document.RootElement.Clone();
+            Assert.True(
+                process.ExitCode == 0,
+                $"精确 Stage1 数据库兼容验证失败：{result.GetProperty("errorCode").GetString()}。");
+            return result;
+        }
+        finally
+        {
+            if (stage2CloneRoot is not null && Directory.Exists(stage2CloneRoot))
+            {
+                Directory.Delete(stage2CloneRoot, recursive: true);
+            }
+        }
+    }
+
+    private static async Task RunGitForEvidenceAsync(
+        string workingDirectory,
+        params string[] arguments)
+    {
         using var process = new Process
         {
             StartInfo = new ProcessStartInfo
             {
-                FileName = "pwsh",
+                FileName = "git",
+                WorkingDirectory = workingDirectory,
                 UseShellExecute = false,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 CreateNoWindow = true
             }
         };
-        process.StartInfo.ArgumentList.Add("-NoLogo");
-        process.StartInfo.ArgumentList.Add("-NoProfile");
-        process.StartInfo.ArgumentList.Add("-File");
-        process.StartInfo.ArgumentList.Add(scriptPath);
-        process.StartInfo.ArgumentList.Add("-RepositoryRoot");
-        process.StartInfo.ArgumentList.Add(repositoryRoot);
-        process.StartInfo.ArgumentList.Add("-Scenario");
-        process.StartInfo.ArgumentList.Add(scenario);
-        Assert.True(process.Start(), "无法启动 Stage1 数据库兼容验证脚本。");
+        process.StartInfo.ArgumentList.Add("-c");
+        process.StartInfo.ArgumentList.Add($"safe.directory={Path.GetFullPath(workingDirectory)}");
+        var gitMetadata = Path.Combine(workingDirectory, ".git");
+        if (File.Exists(gitMetadata))
+        {
+            var gitDirectoryLine = File.ReadAllText(gitMetadata).Trim();
+            const string prefix = "gitdir:";
+            if (gitDirectoryLine.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                process.StartInfo.ArgumentList.Add("-c");
+                process.StartInfo.ArgumentList.Add(
+                    $"safe.directory={Path.GetFullPath(gitDirectoryLine[prefix.Length..].Trim())}");
+            }
+        }
+
+        foreach (var argument in arguments)
+        {
+            process.StartInfo.ArgumentList.Add(argument);
+        }
+
+        Assert.True(process.Start(), "无法创建隔离的 Stage 2 回滚证据目录。");
         var standardOutput = process.StandardOutput.ReadToEndAsync();
         var standardError = process.StandardError.ReadToEndAsync();
-        await process.WaitForExitAsync().WaitAsync(TimeSpan.FromMinutes(3));
-        var output = await standardOutput;
-        _ = await standardError;
-        var resultLine = output
-            .Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries)
-            .SingleOrDefault(line => line.StartsWith(
-                "STAGE1_PRE_V8_RESULT ",
-                StringComparison.Ordinal));
-        Assert.False(
-            string.IsNullOrWhiteSpace(resultLine),
-            "精确 Stage1 数据库兼容验证没有返回脱敏结果摘要。");
-        using var document = JsonDocument.Parse(
-            resultLine["STAGE1_PRE_V8_RESULT ".Length..]);
-        var result = document.RootElement.Clone();
-        Assert.True(
-            process.ExitCode == 0,
-            $"精确 Stage1 数据库兼容验证失败：{result.GetProperty("errorCode").GetString()}。");
-        return result;
+        await process.WaitForExitAsync().WaitAsync(TimeSpan.FromMinutes(1));
+        _ = await standardOutput;
+        var error = await standardError;
+        Assert.True(process.ExitCode == 0, $"隔离 Stage 2 回滚证据准备失败：{error}");
     }
 
     private static string FindRepositoryRoot()

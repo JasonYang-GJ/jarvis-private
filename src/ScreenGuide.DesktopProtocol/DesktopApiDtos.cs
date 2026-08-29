@@ -273,6 +273,63 @@ public sealed record ProjectDto(
     DateTimeOffset AuthorizedAtUtc,
     Guid? AuthorizationId = null);
 
+public sealed record MemoryIdRequestDto(Guid MemoryId);
+
+public sealed record CreateMemoryRequestDto(
+    string Category,
+    string Scope,
+    Guid? ProjectId,
+    string Title,
+    string Body,
+    DateTimeOffset? ExpiresAtUtc)
+{
+    public override string ToString() =>
+        $"CreateMemoryRequestDto {{ Category = {Category}, Scope = {Scope}, ProjectId = {ProjectId}, Content = [REDACTED], ExpiresAtUtc = {ExpiresAtUtc} }}";
+}
+
+public sealed record UpdateMemoryRequestDto(
+    Guid MemoryId,
+    int ExpectedVersion,
+    string Category,
+    string Scope,
+    Guid? ProjectId,
+    string Title,
+    string Body,
+    DateTimeOffset? ExpiresAtUtc)
+{
+    public override string ToString() =>
+        $"UpdateMemoryRequestDto {{ MemoryId = {MemoryId}, ExpectedVersion = {ExpectedVersion}, Category = {Category}, Scope = {Scope}, ProjectId = {ProjectId}, Content = [REDACTED], ExpiresAtUtc = {ExpiresAtUtc} }}";
+}
+
+public sealed record SetMemoryEnabledRequestDto(
+    Guid MemoryId,
+    int ExpectedVersion,
+    bool Enabled);
+
+public sealed record DeleteMemoryRequestDto(
+    Guid MemoryId,
+    int ExpectedVersion,
+    bool Confirmed);
+
+public sealed record MemoryDto(
+    Guid Id,
+    string Category,
+    string Scope,
+    Guid? ProjectId,
+    string Status,
+    string Source,
+    string? Title,
+    string? Body,
+    DateTimeOffset CreatedAtUtc,
+    DateTimeOffset UpdatedAtUtc,
+    DateTimeOffset? ExpiresAtUtc,
+    double Confidence,
+    int Version)
+{
+    public override string ToString() =>
+        $"MemoryDto {{ Id = {Id}, Category = {Category}, Scope = {Scope}, ProjectId = {ProjectId}, Status = {Status}, Source = {Source}, Content = [REDACTED], UpdatedAtUtc = {UpdatedAtUtc}, ExpiresAtUtc = {ExpiresAtUtc}, Version = {Version} }}";
+}
+
 public sealed record TaskSummaryDto(
     Guid Id,
     Guid ProjectId,

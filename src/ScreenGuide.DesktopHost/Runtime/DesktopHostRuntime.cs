@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging;
 using ScreenGuide.Core.Conversations;
 using ScreenGuide.Core.Ai;
 using ScreenGuide.Core.Sessions;
+using ScreenGuide.Core.Memories;
 using ScreenGuide.Core.Tasking;
 using ScreenGuide.DesktopProtocol;
 using ScreenGuide.Evidence;
@@ -15,6 +16,7 @@ public sealed class DesktopHostRuntime(
     IConversationStore conversationStore,
     ISessionStore sessionStore,
     IAiInvocationStore aiInvocationStore,
+    IMemoryStore memoryStore,
     LocalDeviceInitializer deviceInitializer,
     TaskRecoveryService recoveryService,
     TaskCancellationService cancellationService,
@@ -54,6 +56,7 @@ public sealed class DesktopHostRuntime(
             await conversationStore.InitializeAsync(cancellationToken).ConfigureAwait(false);
             await sessionStore.InitializeAsync(cancellationToken).ConfigureAwait(false);
             await aiInvocationStore.InitializeAsync(cancellationToken).ConfigureAwait(false);
+            await memoryStore.InitializeAsync(cancellationToken).ConfigureAwait(false);
             var invocationRecovery = await aiInvocationStore.InterruptRunningAsync(
                 timeProvider.GetUtcNow(),
                 "host_restarted",

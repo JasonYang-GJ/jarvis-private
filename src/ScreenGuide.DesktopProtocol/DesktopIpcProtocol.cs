@@ -8,7 +8,7 @@ namespace ScreenGuide.DesktopProtocol;
 
 public static class DesktopProtocolVersion
 {
-    public const int Current = 8;
+    public const int Current = 9;
 
     public const int MinimumSupported = 1;
 }
@@ -53,6 +53,12 @@ public static class DesktopApiMethods
     public const string SetProviderCredential = "ai.credentials.set";
     public const string DeleteProviderCredential = "ai.credentials.delete";
     public const string CheckAiProviderHealth = "ai.provider.health";
+    public const string ListMemories = "memory.list";
+    public const string GetMemory = "memory.get";
+    public const string CreateMemory = "memory.create";
+    public const string UpdateMemory = "memory.update";
+    public const string SetMemoryEnabled = "memory.set-enabled";
+    public const string DeleteMemory = "memory.delete";
     public const string Shutdown = "system.shutdown";
 }
 

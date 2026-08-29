@@ -5,6 +5,7 @@ using ScreenGuide.Agent.Codex;
 using ScreenGuide.AI.Core;
 using ScreenGuide.Core.Conversations;
 using ScreenGuide.Core.Sessions;
+using ScreenGuide.Core.Memories;
 using ScreenGuide.DesktopHost.Configuration;
 using ScreenGuide.DesktopProtocol;
 
@@ -21,6 +22,7 @@ public sealed class DesktopApiDispatcher(
     ConversationService conversations,
     SessionCoordinator sessions,
     AiSettingsService aiSettings,
+    MemoryService memories,
     IHostApplicationLifetime applicationLifetime)
 {
     public async Task<DesktopApiResponse> DispatchAsync(
@@ -191,6 +193,29 @@ public sealed class DesktopApiDispatcher(
                     DesktopProtocolJson.ToElement(await aiSettings.CheckProviderHealthAsync(
                         Deserialize<ProviderIdRequestDto>(request),
                         cancellationToken).ConfigureAwait(false)),
+                DesktopApiMethods.ListMemories =>
+                    DesktopProtocolJson.ToElement((await memories.ListAsync(cancellationToken)
+                        .ConfigureAwait(false)).Select(MapMemory).ToArray()),
+                DesktopApiMethods.GetMemory =>
+                    DesktopProtocolJson.ToElement(MapMemory(await memories.GetAsync(
+                        Deserialize<MemoryIdRequestDto>(request).MemoryId,
+                        cancellationToken).ConfigureAwait(false))),
+                DesktopApiMethods.CreateMemory =>
+                    DesktopProtocolJson.ToElement(MapMemory(await CreateMemoryAsync(
+                        Deserialize<CreateMemoryRequestDto>(request),
+                        cancellationToken).ConfigureAwait(false))),
+                DesktopApiMethods.UpdateMemory =>
+                    DesktopProtocolJson.ToElement(MapMemory(await UpdateMemoryAsync(
+                        Deserialize<UpdateMemoryRequestDto>(request),
+                        cancellationToken).ConfigureAwait(false))),
+                DesktopApiMethods.SetMemoryEnabled =>
+                    DesktopProtocolJson.ToElement(MapMemory(await SetMemoryEnabledAsync(
+                        Deserialize<SetMemoryEnabledRequestDto>(request),
+                        cancellationToken).ConfigureAwait(false))),
+                DesktopApiMethods.DeleteMemory =>
+                    DesktopProtocolJson.ToElement(MapMemory(await DeleteMemoryAsync(
+                        Deserialize<DeleteMemoryRequestDto>(request),
+                        cancellationToken).ConfigureAwait(false))),
                 DesktopApiMethods.Shutdown => Shutdown(),
                 _ => throw new NotSupportedException("当前 Desktop Host 不支持这个操作。")
             };
@@ -627,6 +652,82 @@ public sealed class DesktopApiDispatcher(
         conversation.LastMessageAtUtc,
         conversation.FailureMessage);
 
+    private async Task<MemoryItem> CreateMemoryAsync(
+        CreateMemoryRequestDto request,
+        CancellationToken cancellationToken) =>
+        await memories.CreateAsync(
+            MemoryDraft.Create(
+                ParseCategory(request.Category),
+                ParseScope(request.Scope, request.ProjectId),
+                request.Title,
+                request.Body,
+                request.ExpiresAtUtc,
+                DateTimeOffset.UtcNow),
+            cancellationToken).ConfigureAwait(false);
+
+    private async Task<MemoryItem> UpdateMemoryAsync(
+        UpdateMemoryRequestDto request,
+        CancellationToken cancellationToken) =>
+        await memories.UpdateAsync(
+            request.MemoryId,
+            request.ExpectedVersion,
+            MemoryDraft.Create(
+                ParseCategory(request.Category),
+                ParseScope(request.Scope, request.ProjectId),
+                request.Title,
+                request.Body,
+                request.ExpiresAtUtc,
+                DateTimeOffset.UtcNow),
+            cancellationToken: cancellationToken).ConfigureAwait(false);
+
+    private Task<MemoryItem> SetMemoryEnabledAsync(
+        SetMemoryEnabledRequestDto request,
+        CancellationToken cancellationToken) =>
+        memories.SetEnabledAsync(
+            request.MemoryId,
+            request.Enabled,
+            request.ExpectedVersion,
+            cancellationToken: cancellationToken);
+
+    private Task<MemoryItem> DeleteMemoryAsync(
+        DeleteMemoryRequestDto request,
+        CancellationToken cancellationToken) =>
+        memories.DeleteAsync(
+            request.MemoryId,
+            request.ExpectedVersion,
+            request.Confirmed,
+            cancellationToken: cancellationToken);
+
+    private static MemoryCategory ParseCategory(string value) =>
+        Enum.TryParse<MemoryCategory>(value, ignoreCase: true, out var category)
+        && Enum.IsDefined(category)
+            ? category
+            : throw new MemoryServiceException(
+                MemoryServiceErrorCodes.InvalidRequest,
+                "长期记忆类别无效。");
+
+    private static MemoryScope ParseScope(string value, Guid? projectId) =>
+        Enum.TryParse<MemoryScopeKind>(value, ignoreCase: true, out var scope)
+            ? MemoryScope.Create(scope, projectId)
+            : throw new MemoryServiceException(
+                MemoryServiceErrorCodes.InvalidRequest,
+                "长期记忆作用域无效。");
+
+    private static MemoryDto MapMemory(MemoryItem item) => new(
+        item.Metadata.Id,
+        item.Metadata.Category.ToString(),
+        item.Metadata.Scope.Kind.ToString(),
+        item.Metadata.Scope.ProjectId,
+        item.Metadata.Status.ToString(),
+        "用户明确保存",
+        item.Title,
+        item.Body,
+        item.Metadata.CreatedAtUtc,
+        item.Metadata.UpdatedAtUtc,
+        item.Metadata.ExpiresAtUtc,
+        item.Metadata.Confidence,
+        item.Metadata.Version);
+
     private JsonElement Shutdown()
     {
         _ = Task.Run(async () =>
@@ -656,6 +757,10 @@ internal static class DesktopApiErrors
     {
         var (code, userMessage) = exception switch
         {
+            MemoryServiceException memoryException =>
+                (memoryException.Code, memoryException.Message),
+            MemoryValidationException =>
+                (MemoryServiceErrorCodes.InvalidRequest, "长期记忆请求不符合要求。"),
             ChatModelException chatModelException =>
                 ($"ai_{SensitiveDataSanitizer.DiagnosticCode(chatModelException.Error.Code, "provider_error")}",
                     SafeAiMessage(chatModelException.Error.UserMessage)),

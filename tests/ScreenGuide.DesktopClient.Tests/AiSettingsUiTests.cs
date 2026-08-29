@@ -6,6 +6,62 @@ namespace ScreenGuide.DesktopClient.Tests;
 public sealed class AiSettingsUiTests
 {
     [Fact]
+    public void SettingsPageExposesExplicitLocalOnlyMemoryCrudWithoutAModelUseToggle()
+    {
+        var xaml = File.ReadAllText(Path.Combine(
+            FindRepositoryRoot(),
+            "src",
+            "ScreenGuide.DesktopClient",
+            "MainWindow.xaml"));
+
+        Assert.Contains("长期记忆（阶段 3）", xaml, StringComparison.Ordinal);
+        Assert.Contains("仅保存在本机；当前不会自动发送给模型。", xaml, StringComparison.Ordinal);
+        Assert.Contains("AutomationProperties.AutomationId=\"MemoryList\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("AutomationProperties.AutomationId=\"MemoryTitle\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("AutomationProperties.AutomationId=\"MemoryBody\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Click=\"SaveMemoryButton_Click\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Click=\"ToggleMemoryButton_Click\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Click=\"DeleteMemoryButton_Click\"", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("将记忆发送给模型", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("自动提取记忆", xaml, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void MemoryProtocolObjectsRedactPlaintextFromDiagnosticStringRepresentations()
+    {
+        const string fakeTitle = "fake-title-sentinel";
+        const string fakeBody = "fake-body-sentinel";
+        var request = new CreateMemoryRequestDto(
+            "UserFact",
+            "Global",
+            null,
+            fakeTitle,
+            fakeBody,
+            null);
+        var result = new MemoryDto(
+            Guid.NewGuid(),
+            "UserFact",
+            "Global",
+            null,
+            "Active",
+            "用户明确保存",
+            fakeTitle,
+            fakeBody,
+            DateTimeOffset.UtcNow,
+            DateTimeOffset.UtcNow,
+            null,
+            1.0,
+            1);
+
+        Assert.DoesNotContain(fakeTitle, request.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain(fakeBody, request.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain(fakeTitle, result.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain(fakeBody, result.ToString(), StringComparison.Ordinal);
+        Assert.Contains("[REDACTED]", request.ToString(), StringComparison.Ordinal);
+        Assert.Contains("[REDACTED]", result.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void SettingsPageExposesAiRoutingPrivacyAndCredentialControls()
     {
         var xaml = File.ReadAllText(Path.Combine(
