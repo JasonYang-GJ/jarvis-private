@@ -130,7 +130,7 @@ V0.3.0 的正式源码与当前阶段 2 候选切片由下面这些内容共同�
   → ConversationService.CancelAsync
   → IConversationProvider.CancelAsync
   → ModelRouter 按 Turn 找到真实 Provider
-  → Codex 进程树终止，或 DeepSeek/Qwen HTTP/SSE 取消
+  → Codex 普通聊天在接触 CLI 前按策略失败关闭，或 DeepSeek/Qwen HTTP/SSE 取消
   → Conversation Turn = Cancelled
   → Session Turn = Cancelled
 ```
@@ -141,7 +141,7 @@ V0.3.0 的正式源码与当前阶段 2 候选切片由下面这些内容共同�
 - Conversation 的取消与成功提交在 SQLite 中争夺唯一终态：取消先把仍在 Running 的 Turn 原子结束，成功只能提交仍在 Running 的 Turn。取消赢得终态后，迟到 Provider 结果不能再插入 Assistant 消息。
 - Session Turn 的确认、授权和取消由每 Turn 串行门协调；SessionStore 的终态和版本条件继续阻止迟到结果把取消改回成功。
 - ModelRouter 在 Turn 开始时冻结路由；设置中途改变只影响下一轮。取消会到达这个 Turn 实际使用的 Provider，不会误取消新 Provider 的其他请求。
-- Codex 普通聊天使用 Windows Job Object 终止进程树；DeepSeek 与 Qwen 取消真实 HTTP 请求和流式读取。三者在取消后都拒绝迟到成功。
+- Codex 普通聊天在接触 CLI 前按 `ProductionDisabled`/`PolicyDisabled` 失败关闭，不启动进程；DeepSeek 与 Qwen 取消真实 HTTP 请求和流式读取。Windows Job Object 进程树取消属于独立 Codex 编程 Agent 的真实 Task 取消边界；被取消的活动调用或任务都拒绝迟到成功。
 - Host 关闭时会取消仍在内存中的前台工作和监视器；重启恢复不会自动重放。
 
 ## 7. 上下文补齐与安全边界
