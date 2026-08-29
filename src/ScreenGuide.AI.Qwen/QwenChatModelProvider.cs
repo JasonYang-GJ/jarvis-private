@@ -267,11 +267,21 @@ public sealed class QwenChatModelProvider : IChatModelProvider
 
             if (!root.TryGetProperty("output", out var output)
                 || output.ValueKind != JsonValueKind.Object
-                || !TryReadExactInt32(output, "total", 1)
                 || !TryReadExactInt32(output, "page_no", 1)
                 || !TryReadExactInt32(output, "page_size", 1)
                 || !output.TryGetProperty("permissions", out var permissions)
-                || permissions.ValueKind != JsonValueKind.Array
+                || permissions.ValueKind != JsonValueKind.Array)
+            {
+                return new HealthPermissionEvidence(false, balanceIssue);
+            }
+
+            if (TryReadExactInt32(output, "total", 0)
+                && permissions.GetArrayLength() == 0)
+            {
+                return new HealthPermissionEvidence(true, false);
+            }
+
+            if (!TryReadExactInt32(output, "total", 1)
                 || permissions.GetArrayLength() != 1)
             {
                 return new HealthPermissionEvidence(false, balanceIssue);

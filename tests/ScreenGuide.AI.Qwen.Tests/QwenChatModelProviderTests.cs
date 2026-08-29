@@ -203,7 +203,7 @@ public sealed class QwenChatModelProviderTests
     }
 
     [Fact]
-    public async Task HealthUsesTheOfficialPermissionEndpointAndAFreshCredentialLease()
+    public async Task HealthUsesTheCompatibilityPermissionEndpointForTheDefaultWorkspaceAndAFreshCredentialLease()
     {
         var credentials = new TestCredentialStore("fake-qwen-key");
         var observed = new List<Uri?>();
@@ -245,6 +245,24 @@ public sealed class QwenChatModelProviderTests
         Assert.Equal(1, handler.SendCount);
     }
 
+    [Fact]
+    public async Task HealthAcceptsEmptyPermissionListForTheUnrestrictedDefaultWorkspace()
+    {
+        var handler = new StubHttpMessageHandler((_, _) => Task.FromResult(PermissionResponse(
+            """{"success":true,"code":null,"message":"","request_id":"FAKE_HEALTH_REQUEST_ID_MUST_NOT_ESCAPE","output":{"total":0,"page_no":1,"page_size":1,"permissions":[]}}""")));
+        await using var provider = new QwenChatModelProvider(
+            new TestCredentialStore("fake-qwen-key"),
+            handler);
+
+        var health = await provider.CheckHealthAsync();
+
+        Assert.Equal(ChatProviderHealthState.Healthy, health.State);
+        Assert.True(health.IsConfigured);
+        Assert.Equal(1, handler.SendCount);
+        Assert.DoesNotContain("FAKE_HEALTH_REQUEST_ID_MUST_NOT_ESCAPE", health.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("fake-qwen-key", health.Message, StringComparison.Ordinal);
+    }
+
     [Theory]
     [MemberData(nameof(InvalidPermissionResponses))]
     public async Task HealthFailsClosedForInvalidPermissionModelOrPaging(string json)
@@ -265,6 +283,7 @@ public sealed class QwenChatModelProviderTests
     [Theory]
     [InlineData("https://dashscope.aliyuncs.com/api/v1/models?model=qwen3.7-plus&page_no=1&page_size=1", 200)]
     [InlineData("https://proxy.invalid/api/v1/models/permissions?model=qwen3.7-plus", 200)]
+    [InlineData("https://workspace-123.cn-beijing.maas.aliyuncs.com/api/v1/models/permissions?model=qwen3.7-plus", 200)]
     [InlineData("https://dashscope.aliyuncs.com/api/v1/models/permissions?model=qwen3.7-plus&authorization_scope=AUTHORIZED&action=INFERENCE&page_no=1&page_size=1", 302)]
     public async Task HealthRejectsOldEndpointOtherHostAndRedirect(string finalUri, int statusCode)
     {
@@ -590,7 +609,8 @@ public sealed class QwenChatModelProviderTests
 
     public static TheoryData<string> InvalidPermissionResponses => new()
     {
-        """{"success":true,"code":"","output":{"total":0,"page_no":1,"page_size":1,"permissions":[]}}""",
+        """{"success":true,"code":"","output":{"total":0,"page_no":1,"page_size":1,"permissions":[{"model":"qwen3.7-plus","permissions":{"inference":true}}]}}""",
+        """{"success":true,"code":"","output":{"total":1,"page_no":1,"page_size":1,"permissions":[]}}""",
         """{"success":true,"code":"","output":{"total":2,"page_no":1,"page_size":1,"permissions":[{"model":"qwen3.7-plus","permissions":{"inference":true}},{"model":"qwen3.7-plus","permissions":{"inference":true}}]}}""",
         """{"success":true,"code":"","output":{"total":1,"page_no":1,"page_size":1,"permissions":[{"model":"qwen-other","permissions":{"inference":true}}]}}""",
         """{"success":true,"code":"","output":{"total":1,"page_no":1,"page_size":1,"permissions":[{"model":"qwen3.7-plus"}]}}""",

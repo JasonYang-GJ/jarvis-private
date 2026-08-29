@@ -598,9 +598,11 @@ public sealed class R4QwenRealAcceptanceRunnerTests
     }
 
     [Theory]
-    [InlineData(true)]
-    [InlineData(false)]
+    [InlineData("authorized-model", true)]
+    [InlineData("default-workspace-empty", true)]
+    [InlineData("wrong-model", false)]
     public async Task HealthOnlyExecutionStopsAfterOneGetWithoutSessionOrModelWork(
+        string responseShape,
         bool healthy)
     {
         using var directory = new TestOwnedDirectory();
@@ -610,9 +612,15 @@ public sealed class R4QwenRealAcceptanceRunnerTests
         var validation = R4QwenValidationOptions.Parse(HealthOnlyArguments());
         var credentials = new FakeCredentialStore("FAKE_QWEN_SECRET_SENTINEL");
         var transport = new HealthFixtureTransport(
-            healthy
-                ? OfficialHealthJson
-                : """{"success":true,"code":null,"output":{"total":0,"page_no":1,"page_size":1,"permissions":[]}}""");
+            responseShape switch
+            {
+                "authorized-model" => OfficialHealthJson,
+                "default-workspace-empty" =>
+                    """{"success":true,"code":null,"output":{"total":0,"page_no":1,"page_size":1,"permissions":[]}}""",
+                "wrong-model" =>
+                    """{"success":true,"code":null,"output":{"total":1,"page_no":1,"page_size":1,"permissions":[{"model":"qwen-other","permissions":{"inference":true}}]}}""",
+                _ => throw new ArgumentOutOfRangeException(nameof(responseShape))
+            });
         _ = await R4IsolatedAiSettingsMaterializer.MaterializeAndVerifyAsync(
             hostOptions.AiSettingsPath);
         using var host = R4QwenRunnerHostComposition.BuildOffline(
@@ -844,7 +852,7 @@ public sealed class R4QwenRealAcceptanceRunnerTests
             new HealthShapeFixture(
                 "empty-permissions",
                 """{"success":true,"code":null,"output":{"total":0,"page_no":1,"page_size":1,"permissions":[]}}""",
-                "Unavailable", true, false, false, "object", 0, false, false, "missing", null, 0, 1, 1),
+                "Healthy", true, false, false, "object", 0, false, false, "missing", null, 0, 1, 1),
             new HealthShapeFixture(
                 "multiple-permissions",
                 """{"success":true,"code":null,"output":{"total":2,"page_no":1,"page_size":1,"permissions":[{"model":"qwen3.7-plus","permissions":{"inference":true}},{"model":"qwen3.7-plus","permissions":{"inference":true}}]}}""",
