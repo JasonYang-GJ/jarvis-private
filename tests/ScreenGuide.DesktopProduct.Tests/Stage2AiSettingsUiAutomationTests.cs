@@ -532,6 +532,343 @@ public sealed class Stage2AiSettingsUiAutomationTests
 
     [Fact]
     [Trait("Category", "DesktopAcceptance")]
+    public async Task ActualReleaseClientProvidesVisibleStage3MemoryConsentFlowOffline()
+    {
+        const string initialTitle = "离线验收偏好";
+        const string initialBody = "离线验收正文，不得发送到真实网络。";
+        const string updatedTitle = "离线验收偏好已修正";
+        const string updatedBody = "离线修正正文，只允许发送给进程内 Fake Provider。";
+        const string firstQuestion = "请按我选择的记忆回答本轮离线问题。";
+        const string invalidatedQuestion = "这次确认必须在输入变化后失效。";
+        var testRoot = Path.Combine(
+            Path.GetTempPath(),
+            $"screen-guide-stage3-memory-ui-{Guid.NewGuid():N}");
+        var dataRoot = Path.Combine(testRoot, "user-data");
+        Directory.CreateDirectory(dataRoot);
+        await WriteCompletedOnboardingSettingsAsync(dataRoot);
+
+        var provider = RecordingChatProvider.DeepSeek();
+        Process? clientProcess = null;
+        IHost? host = null;
+        try
+        {
+            var binaries = LocateReleaseBinaries();
+            var pipeName = $"ScreenGuide.Stage3MemoryUi.{Guid.NewGuid():N}";
+            var options = new DesktopHostOptions(dataRoot, binaries.FakeCodexPath, pipeName);
+            host = DesktopHostFactory.Build(
+                [],
+                options,
+                services =>
+                {
+                    services.RemoveAll<IChatModelProvider>();
+                    services.AddSingleton<IChatModelProvider>(provider);
+                });
+            await host.StartAsync();
+
+            var api = new DesktopApiClient(pipeName, TimeSpan.FromSeconds(5));
+            await WaitUntilAsync(() => api.PingAsync(), TimeSpan.FromSeconds(20));
+            _ = await api.SetChatRouteAsync(new SetChatRouteRequestDto(
+                "deepseek",
+                "deepseek-v4-pro"));
+            clientProcess = StartClient(binaries, dataRoot, pipeName);
+            var clientWindow = await WaitForMainWindowAsync(
+                clientProcess,
+                dataRoot,
+                TimeSpan.FromSeconds(15));
+            var automationRoot = AutomationElement.FromHandle(clientWindow)
+                ?? throw new InvalidOperationException("无法连接实际 DesktopClient 的 WPF 自动化树。");
+
+            Invoke(await WaitForElementByNameAsync(
+                automationRoot,
+                "设置",
+                ControlType.Button,
+                TimeSpan.FromSeconds(10)));
+            _ = await WaitForElementByAutomationIdAsync(
+                automationRoot,
+                "MemoryLocalOnlyNotice",
+                TimeSpan.FromSeconds(10));
+            SetElementValue(
+                await WaitForElementByAutomationIdAsync(
+                    automationRoot,
+                    "MemoryTitle",
+                    TimeSpan.FromSeconds(10)),
+                initialTitle);
+            SetElementValue(
+                await WaitForElementByAutomationIdAsync(
+                    automationRoot,
+                    "MemoryBody",
+                    TimeSpan.FromSeconds(10)),
+                initialBody);
+            Invoke(await WaitForElementByAutomationIdAsync(
+                automationRoot,
+                "SaveMemory",
+                TimeSpan.FromSeconds(10)));
+
+            MemoryDto? memory = null;
+            await WaitUntilAsync(
+                async () =>
+                {
+                    memory = (await api.ListMemoriesAsync()).SingleOrDefault(item =>
+                        string.Equals(item.Title, initialTitle, StringComparison.Ordinal));
+                    return memory is not null;
+                },
+                TimeSpan.FromSeconds(10));
+            Assert.Equal("Active", memory!.Status);
+            Assert.Equal(initialBody, memory.Body);
+            var memoryId = memory.Id;
+            AssertAutomationTreeContains(
+                await WaitForElementByAutomationIdAsync(
+                    automationRoot,
+                    "MemoryList",
+                    TimeSpan.FromSeconds(10)),
+                initialTitle);
+            AssertNoPlaintextCanary(dataRoot, initialBody);
+
+            SetElementValue(
+                await WaitForElementByAutomationIdAsync(
+                    automationRoot,
+                    "MemoryTitle",
+                    TimeSpan.FromSeconds(10)),
+                updatedTitle);
+            SetElementValue(
+                await WaitForElementByAutomationIdAsync(
+                    automationRoot,
+                    "MemoryBody",
+                    TimeSpan.FromSeconds(10)),
+                updatedBody);
+            Invoke(await WaitForElementByAutomationIdAsync(
+                automationRoot,
+                "SaveMemory",
+                TimeSpan.FromSeconds(10)));
+            await WaitUntilAsync(
+                async () =>
+                {
+                    memory = await api.GetMemoryAsync(memoryId);
+                    return memory.Version == 2
+                           && string.Equals(memory.Title, updatedTitle, StringComparison.Ordinal)
+                           && string.Equals(memory.Body, updatedBody, StringComparison.Ordinal);
+                },
+                TimeSpan.FromSeconds(10));
+
+            Invoke(await WaitForElementByAutomationIdAsync(
+                automationRoot,
+                "ToggleMemory",
+                TimeSpan.FromSeconds(10)));
+            await WaitUntilAsync(
+                async () => string.Equals(
+                    (await api.GetMemoryAsync(memoryId)).Status,
+                    "Disabled",
+                    StringComparison.Ordinal),
+                TimeSpan.FromSeconds(10));
+            Invoke(await WaitForElementByAutomationIdAsync(
+                automationRoot,
+                "ToggleMemory",
+                TimeSpan.FromSeconds(10)));
+            await WaitUntilAsync(
+                async () => string.Equals(
+                    (await api.GetMemoryAsync(memoryId)).Status,
+                    "Active",
+                    StringComparison.Ordinal),
+                TimeSpan.FromSeconds(10));
+            memory = await api.GetMemoryAsync(memoryId);
+
+            SetElementValue(
+                await WaitForElementByAutomationIdAsync(
+                    automationRoot,
+                    "MemoryPreviewQuery",
+                    TimeSpan.FromSeconds(10)),
+                "离线 修正");
+            Invoke(await WaitForElementByAutomationIdAsync(
+                automationRoot,
+                "RunMemoryPreview",
+                TimeSpan.FromSeconds(10)));
+            var previewList = await WaitForElementByAutomationIdAsync(
+                automationRoot,
+                "MemoryPreviewResults",
+                TimeSpan.FromSeconds(10));
+            await WaitUntilAsync(
+                () => Task.FromResult(previewList.FindAll(
+                        TreeScope.Descendants,
+                        Condition.TrueCondition)
+                    .Cast<AutomationElement>()
+                    .Any(item => item.Current.Name.Contains(
+                        updatedTitle,
+                        StringComparison.Ordinal))),
+                TimeSpan.FromSeconds(10));
+            Assert.Empty(provider.Requests);
+
+            Invoke(await WaitForElementByNameAsync(
+                automationRoot,
+                "对话",
+                ControlType.Button,
+                TimeSpan.FromSeconds(10)));
+            Invoke(await WaitForElementByAutomationIdAsync(
+                automationRoot,
+                "NewConversation",
+                TimeSpan.FromSeconds(10)));
+            _ = await WaitForSessionAsync(
+                api,
+                snapshot => snapshot is { Title: "新话题" },
+                TimeSpan.FromSeconds(10));
+            var (_, memorySelection) = await WaitForSelectableListItemAsync(
+                new AndCondition(
+                    new PropertyCondition(AutomationElement.ProcessIdProperty, clientProcess.Id),
+                    new PropertyCondition(AutomationElement.NameProperty, updatedTitle),
+                    new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.ListItem)),
+                TimeSpan.FromSeconds(10));
+            memorySelection.Select();
+            SetElementValue(
+                await WaitForElementByAutomationIdAsync(
+                    automationRoot,
+                    "ConversationInput",
+                    TimeSpan.FromSeconds(10)),
+                firstQuestion);
+            Invoke(await WaitForElementByAutomationIdAsync(
+                automationRoot,
+                "SendConversation",
+                TimeSpan.FromSeconds(10)));
+
+            var waiting = await WaitForSessionAsync(
+                api,
+                snapshot => snapshot?.ForegroundTurn?.Phase == "WaitingForMemoryOutboundConsent"
+                            && snapshot.MemoryOutboundConsents?.Count == 1,
+                TimeSpan.FromSeconds(10));
+            var firstTurnId = waiting.ForegroundTurn!.Id;
+            var firstConsent = Assert.Single(waiting.MemoryOutboundConsents!);
+            Assert.Equal("deepseek", firstConsent.ProviderId);
+            Assert.Equal("deepseek-v4-pro", firstConsent.ModelId);
+            Assert.Equal("https://api.deepseek.com", firstConsent.DestinationOrigin);
+            await Task.Delay(TimeSpan.FromSeconds(1));
+            var stableWaiting = await api.GetCurrentSessionAsync();
+            Assert.Equal(
+                "WaitingForMemoryOutboundConsent",
+                stableWaiting?.ForegroundTurn?.Phase);
+            Assert.Single(stableWaiting!.MemoryOutboundConsents!);
+            var confirmMemoryOutbound = await WaitForRenderedElementByAutomationIdAsync(
+                automationRoot,
+                "ConfirmMemoryOutbound",
+                TimeSpan.FromSeconds(20));
+            AssertAutomationTreeContains(automationRoot, "deepseek-v4-pro");
+            AssertAutomationTreeContains(automationRoot, "https://api.deepseek.com");
+            AssertAutomationTreeContains(automationRoot, updatedTitle);
+            AssertAutomationTreeContains(automationRoot, updatedBody);
+            Assert.Empty(provider.Requests);
+
+            Invoke(confirmMemoryOutbound);
+            _ = await WaitForTurnPhaseAsync(
+                api,
+                firstTurnId,
+                "Completed",
+                TimeSpan.FromSeconds(10));
+            var firstRequest = Assert.Single(
+                provider.Requests,
+                request => request.TurnId == firstTurnId);
+            Assert.Equal("deepseek", firstRequest.ProviderId);
+            Assert.Equal("deepseek-v4-pro", firstRequest.ModelId);
+            Assert.Equal("chat.general", firstRequest.PromptId);
+            Assert.StartsWith(
+                "{\"type\":\"USER_SELECTED_MEMORY_CONTEXT_V1\"",
+                firstRequest.Messages[0].Content,
+                StringComparison.Ordinal);
+            using (var memoryContext = JsonDocument.Parse(firstRequest.Messages[0].Content))
+            {
+                var outboundItem = Assert.Single(
+                    memoryContext.RootElement.GetProperty("items").EnumerateArray());
+                Assert.Equal(updatedTitle, outboundItem.GetProperty("title").GetString());
+                Assert.Equal(updatedBody, outboundItem.GetProperty("body").GetString());
+            }
+
+            Assert.Equal(firstQuestion, firstRequest.Messages[1].Content);
+
+            Invoke(await WaitForElementByAutomationIdAsync(
+                automationRoot,
+                "NewConversation",
+                TimeSpan.FromSeconds(10)));
+            _ = await WaitForSessionAsync(
+                api,
+                snapshot => snapshot is { Title: "新话题" }
+                            && snapshot.SessionId != waiting.SessionId,
+                TimeSpan.FromSeconds(10));
+            var (_, invalidationSelection) = await WaitForSelectableListItemAsync(
+                new AndCondition(
+                    new PropertyCondition(AutomationElement.ProcessIdProperty, clientProcess.Id),
+                    new PropertyCondition(AutomationElement.NameProperty, updatedTitle),
+                    new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.ListItem)),
+                TimeSpan.FromSeconds(10));
+            invalidationSelection.Select();
+            var conversationInput = await WaitForElementByAutomationIdAsync(
+                automationRoot,
+                "ConversationInput",
+                TimeSpan.FromSeconds(10));
+            SetElementValue(conversationInput, invalidatedQuestion);
+            Invoke(await WaitForElementByAutomationIdAsync(
+                automationRoot,
+                "SendConversation",
+                TimeSpan.FromSeconds(10)));
+            var invalidationWaiting = await WaitForSessionAsync(
+                api,
+                snapshot => snapshot?.ForegroundTurn?.Phase == "WaitingForMemoryOutboundConsent"
+                            && snapshot.MemoryOutboundConsents?.Count == 1,
+                TimeSpan.FromSeconds(10));
+            var invalidatedTurnId = invalidationWaiting.ForegroundTurn!.Id;
+            _ = Assert.Single(invalidationWaiting.MemoryOutboundConsents!);
+            _ = await WaitForRenderedElementByAutomationIdAsync(
+                automationRoot,
+                "ConfirmMemoryOutbound",
+                TimeSpan.FromSeconds(20));
+            SetElementValue(conversationInput, "输入变化，撤销上一份确认快照。");
+            _ = await WaitForTurnPhaseAsync(
+                api,
+                invalidatedTurnId,
+                "Cancelled",
+                TimeSpan.FromSeconds(10));
+            Assert.DoesNotContain(
+                provider.Requests,
+                request => request.TurnId == invalidatedTurnId);
+            Assert.Single(provider.Requests);
+
+            Invoke(await WaitForElementByNameAsync(
+                automationRoot,
+                "设置",
+                ControlType.Button,
+                TimeSpan.FromSeconds(10)));
+            var (_, memoryListSelection) = await WaitForSelectableListItemAsync(
+                new AndCondition(
+                    new PropertyCondition(AutomationElement.ProcessIdProperty, clientProcess.Id),
+                    new PropertyCondition(AutomationElement.NameProperty, updatedTitle),
+                    new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.ListItem)),
+                TimeSpan.FromSeconds(10));
+            memoryListSelection.Select();
+            Invoke(await WaitForElementByAutomationIdAsync(
+                automationRoot,
+                "DeleteMemory",
+                TimeSpan.FromSeconds(10)));
+            var deleteDialog = await WaitForTopLevelAutomationWindowAsync(
+                clientProcess.Id,
+                "删除长期记忆",
+                TimeSpan.FromSeconds(10));
+            await SendDialogCommandAsync(deleteDialog, "6", TimeSpan.FromSeconds(10));
+            await WaitUntilAsync(
+                async () =>
+                    (await api.ListMemoriesAsync()).All(item => item.Id != memoryId),
+                TimeSpan.FromSeconds(10));
+            AssertNoPlaintextCanary(dataRoot, updatedBody);
+        }
+        finally
+        {
+            await StopProcessAsync(clientProcess, entireProcessTree: false);
+            if (host is not null)
+            {
+                await host.StopAsync().WaitAsync(TimeSpan.FromSeconds(10));
+                host.Dispose();
+            }
+
+            await DeleteDirectoryWithRetryAsync(testRoot);
+        }
+    }
+
+    [Fact]
+    [Trait("Category", "DesktopAcceptance")]
     public async Task ActualReleaseMainWindowVoiceBargeInCancelsOldTurnAndRejectsLateReply()
     {
         var harnessPath = LocateReleaseVoiceHarness();
@@ -849,6 +1186,66 @@ public sealed class Stage2AiSettingsUiAutomationTests
             root,
             new PropertyCondition(AutomationElement.AutomationIdProperty, automationId),
             timeout);
+
+    private static async Task<AutomationElement> WaitForRenderedElementByAutomationIdAsync(
+        AutomationElement root,
+        string automationId,
+        TimeSpan timeout)
+    {
+        AutomationElement? match = null;
+        var lastState = "automation element not found";
+        try
+        {
+            await WaitUntilAsync(
+                () =>
+                {
+                    try
+                    {
+                        match = root.FindFirst(
+                            TreeScope.Descendants,
+                            new PropertyCondition(
+                                AutomationElement.AutomationIdProperty,
+                                automationId));
+                        if (match is null)
+                        {
+                            lastState = "automation element not found";
+                            return Task.FromResult(false);
+                        }
+
+                        var bounds = match.Current.BoundingRectangle;
+                        lastState = $"enabled={match.Current.IsEnabled}, offscreen={match.Current.IsOffscreen}, bounds={bounds}";
+                        return Task.FromResult(
+                            match.Current.IsEnabled
+                            && bounds.Width > 0
+                            && bounds.Height > 0);
+                    }
+                    catch (Exception exception) when (
+                        exception is ElementNotAvailableException or COMException)
+                    {
+                        lastState = exception.GetType().Name;
+                        return Task.FromResult(false);
+                    }
+                },
+                timeout);
+        }
+        catch (TimeoutException exception)
+        {
+            throw new TimeoutException(
+                $"UI element '{automationId}' did not render: {lastState}.",
+                exception);
+        }
+
+        return match!;
+    }
+
+    private static void SetElementValue(AutomationElement element, string value)
+    {
+        Assert.True(element.Current.IsEnabled, $"控件 {element.Current.AutomationId} 当前不可用。");
+        Assert.True(
+            element.TryGetCurrentPattern(ValuePattern.Pattern, out var rawPattern),
+            $"控件 {element.Current.AutomationId} 不支持 ValuePattern。");
+        ((ValuePattern)rawPattern).SetValue(value);
+    }
 
     private static async Task<AutomationElement> WaitForElementByNameAsync(
         AutomationElement root,

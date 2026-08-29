@@ -4,12 +4,12 @@
 
 ## 当前状态
 
-- 当前源码与功能基线：V0.4.0 / V2 阶段 2，标签 `v0.4.0-stage2` 指向 `33b5859dcaa697bacd5edc5036a58d162b723a0e`，annotated tag object 为 `47a2b3b70fc22904954e2291470e809e58303eca`。干净标签源码构建安装包 SHA-256 为 `222DC720E677202BBCAEC6D507F48ACFA8B2FCA31535FF7B03010DF80EE7DEE9`。完整同 AppId 安装生命周期尚待干净机验收，因此安装包未获对外分发放行。
+- 当前源码与功能基线候选：V0.5.0 / V2 阶段 3；S3-R1/R2/R3 已集成并通过离线 Release 门禁。正式标签与标签源码产物身份将在最终冻结证据提交中回填。上一正式标签 `v0.4.0-stage2` 继续指向 `33b5859dcaa697bacd5edc5036a58d162b723a0e`。
 - V2 阶段 1“统一会话中枢”已经通过；363/363 自动化和实际 Release DesktopClient + DesktopHost 的真实桌面验收均通过。
 - V0.2.1 标签 `v0.2.1-baseline` 保留为上一版回滚点；回滚必须同时使用 pre-v7 备份或隔离数据目录。
 - V2 阶段 2“可替换 AI 大脑与模型路由”已通过：统一 Chat Model、Provider Registry、Model Router、Prompt Registry、DPAPI、安全停用的 Codex 普通聊天适配器、DeepSeek/千问普通聊天 Provider、设置 UI/IPC、语义建议和 schema v8 AI 调用审计。
 - 阶段 2 普通聊天发布目标是 DeepSeek + 千问；千问是手动备用，无自动 fallback/retry/resend。DeepSeek 真实证据已冻结，Qwen 真实 Health/聊天/取消和普通聊天选 Qwen 时的真实 Codex 编程隔离均已通过。Codex 普通聊天保持 `ProductionDisabled`/`PolicyDisabled`，不是发布目标。
-- S3-R1 本机加密记忆账本与 S3-R2 确定性本地预览已集成；S3-R3 正在验证 schema/protocol v10、chat.general@2 和逐 Turn 完整出站确认。默认 0 条，只有用户单次确认的普通聊天 Turn 才最多发送一次。
+- S3-R1 本机加密记忆账本、S3-R2 确定性本地预览与 S3-R3 schema/protocol v10、chat.general@2 和逐 Turn 完整出站确认均已集成。默认 0 条，只有用户单次确认的普通聊天 Turn 才最多发送一次。
 
 ## 长期架构决策
 
@@ -64,7 +64,7 @@
 - 普通聊天选为 Qwen 时，真实 Codex 编程回归仅 1 Task/1 attempt，指定文件为唯一 Git 变化，指定 `dotnet test` 通过，任务时窗内 `ai_invocations=0`。
 - 最终标签源码 locked restore、Client/Host win-x64 publish 和安装包编译通过；发布目录 538 个文件，Client/Host ProductVersion 均绑定 `33b5859d...`，安装包 64,128,304 bytes 且未签名。
 
-## 阶段 3 R1 / R2 / R3 候选决策
+## 阶段 3 R1 / R2 / R3 冻结决策
 
 1. 记忆类别只允许 UserFact、UserPreference、ProjectNote、Decision；作用域只允许 Global 或精确已授权 Project ID；来源仅 `UserExplicit`，置信度固定 1.0。
 2. 标题和正文使用专用 DPAPI CurrentUser 保护器后存入 SQLite，不能复用 Provider 凭据存储；数据库、日志和错误证据不保存明文。
@@ -95,7 +95,7 @@
 
 ## 尚未解决
 
-- S3-R2 只有显式本机预览；没有自动提取、模型注入、后台/语义检索、RAG、向量数据库或跨 Session 自动个性化。
+- 阶段 3 只有显式本机预览与逐 Turn 完整确认后的单次发送；没有自动提取、自动模型注入、后台/语义检索、RAG、向量数据库或跨 Session 自动个性化。
 - 固定 Prompt 评测集已建立，但真实模型质量、Token/成本对比和长期回归趋势尚未形成发布证据。
 - Codex 普通聊天只保留 `codex-default` 描述并在生产策略下失败关闭，不提供真实普通聊天模型或 Usage；独立 Codex 编程 Agent 继续保留。
 - Provider 切换会把同一 Conversation 既有历史发送到新的数据目的地；UI 已提示，真实用户是否理解仍需验收。
@@ -104,7 +104,7 @@
 - Session 快照仍随完整会话历史增长；`SessionCoordinator.cs`、`MainWindow.xaml.cs` 和部分 SQLite Store 较大。
 - 单窗口授权已比较句柄、进程名和标题，但尚未保存进程 ID / 启动时间；同程序同标题窗口的极端句柄复用风险留待后续加固。
 - 安装包无数字签名；语音模型分发与许可证待定。
-- 阶段 3 的 S3-R1/R2 已集成，S3-R3 逐 Turn 出站确认仍是候选；自动/语义检索、画像或其他模型使用仍需新的独立批准。
+- 阶段 3 的 S3-R1/R2/R3 已集成；自动/语义检索、画像或其他模型使用仍需新的独立批准。
 
 ## 更新规则
 

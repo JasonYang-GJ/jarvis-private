@@ -23,7 +23,7 @@
             <StackPanel Grid.Row="1">
                 <Button x:Name="DashboardNavButton" Content="首页" Tag="Selected" Style="{StaticResource NavButton}"
                         Click="NavigationButton_Click" CommandParameter="Dashboard" />
-                <Button x:Name="ConversationsNavButton" Content="对话" Visibility="Collapsed" Style="{StaticResource NavButton}"
+                <Button x:Name="ConversationsNavButton" Content="对话" Style="{StaticResource NavButton}"
                         Click="NavigationButton_Click" CommandParameter="Conversations" />
                 <Button x:Name="ProjectsNavButton" Content="项目" Style="{StaticResource NavButton}"
                         Click="NavigationButton_Click" CommandParameter="Projects" />
@@ -344,6 +344,7 @@
                                 <RowDefinition Height="*" />
                             </Grid.RowDefinitions>
                             <Button Content="新对话" Style="{StaticResource PrimaryButton}"
+                                    AutomationProperties.AutomationId="NewConversation"
                                     HorizontalAlignment="Stretch" Click="NewConversationButton_Click" />
                             <ListBox x:Name="ConversationListBox" Grid.Row="2" BorderThickness="0"
                                      SelectionChanged="ConversationListBox_SelectionChanged">
@@ -484,6 +485,11 @@
                                                  SelectionMode="Extended" BorderBrush="{StaticResource LineBrush}"
                                                  SelectionChanged="ConversationMemorySelectionList_SelectionChanged"
                                                  AutomationProperties.AutomationId="ConversationMemorySelection">
+                                            <ListBox.ItemContainerStyle>
+                                                <Style TargetType="ListBoxItem">
+                                                    <Setter Property="AutomationProperties.Name" Value="{Binding Title}" />
+                                                </Style>
+                                            </ListBox.ItemContainerStyle>
                                             <ListBox.ItemTemplate>
                                                 <DataTemplate>
                                                     <StackPanel Margin="4,3">
@@ -496,7 +502,8 @@
                                     </StackPanel>
                                     <TextBox Grid.Row="2" x:Name="ConversationInputTextBox" MinHeight="74" MaxHeight="150"
                                              AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto"
-                                             IsEnabled="False" TextChanged="ConversationInputTextBox_TextChanged" />
+                                             IsEnabled="False" TextChanged="ConversationInputTextBox_TextChanged"
+                                             AutomationProperties.AutomationId="ConversationInput" />
                                     <Grid Grid.Row="4">
                                         <TextBlock Text="记忆只有在你查看完整内容并确认后，才会发送给本 Turn 冻结的 Provider"
                                                    Foreground="{StaticResource MutedBrush}" FontSize="11"
@@ -507,7 +514,8 @@
                                                     Margin="0,0,8,0" Click="StopConversationButton_Click" />
                                             <Button x:Name="SendConversationButton" Content="发送"
                                                     Style="{StaticResource PrimaryButton}" IsEnabled="False"
-                                                    Click="SendConversationButton_Click" />
+                                                    Click="SendConversationButton_Click"
+                                                    AutomationProperties.AutomationId="SendConversation" />
                                         </StackPanel>
                                     </Grid>
                                 </Grid>
@@ -902,6 +910,11 @@
                                         <ListBox x:Name="MemoryListBox" MinHeight="230"
                                                  SelectionChanged="MemoryListBox_SelectionChanged"
                                                  AutomationProperties.AutomationId="MemoryList">
+                                            <ListBox.ItemContainerStyle>
+                                                <Style TargetType="ListBoxItem">
+                                                    <Setter Property="AutomationProperties.Name" Value="{Binding Title}" />
+                                                </Style>
+                                            </ListBox.ItemContainerStyle>
                                             <ListBox.ItemTemplate>
                                                 <DataTemplate>
                                                     <StackPanel Margin="3,5">
@@ -977,7 +990,7 @@
                                         </StackPanel>
                                     </StackPanel>
                                 </Grid>
-                                <Border BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,1,0,0"
+                                <Border BorderBrush="{StaticResource LineBrush}" BorderThickness="0,1,0,0"
                                         Margin="0,18,0,0" Padding="0,16,0,0">
                                     <StackPanel>
                                         <TextBlock Text="本地相关记忆预览" FontSize="15" FontWeight="SemiBold" />

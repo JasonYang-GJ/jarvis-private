@@ -2,18 +2,20 @@
 
 本项目从 V0.2.1 起采用可追溯版本记录。更早内容以历史报告和 Git 历史为准。
 
-## Unreleased - V2 阶段 3 R3 候选
+## 0.5.0 - 2026-08-30（V2 阶段 3：冻结候选）
+
+> S3-R1/R2/R3 已集成并通过离线 Release 门禁；正式标签与标签源码产物身份将在最终冻结证据提交中回填。
 
 - S3-R3 新增逐 Turn 长期记忆选择和完整出站确认：默认 0 条，用户查看 Provider、模型、HTTPS 去向、项目绑定及完整正文后，单次确认最多发送一次。
 - 新增 `chat.general@2` 和严格 `USER_SELECTED_MEMORY_CONTEXT_V1` User JSON；记忆是不可信参考数据，不能覆盖当前输入、安全、身份、目标、工具、权限、授权或确认，且 `intent.semantic` 永不接收记忆。
-- SQLite/IPC 候选合同升级到 v10；v9 → v10 建立唯一 pre-v10 备份并原子迁移。审计只保留安全引用、路由、Prompt 身份、计数和 manifest，不保存记忆正文或临时出站 block。
+- SQLite/IPC 合同升级到 v10；v9 → v10 建立唯一 pre-v10 备份并原子迁移。审计只保留安全引用、路由、Prompt 身份、计数和 manifest，不保存记忆正文或临时出站 block。
 - 取消、变化、过期或重启会让确认失效；确认消费后禁止 retry、fallback 或 resend。
 
 - 新增与 Conversation、Session/Turn、编程 Task、Provider Thread 和 `ai_invocations` 分离的本机长期记忆账本。
 - 设置页新增“长期记忆（阶段 3）”，仅支持用户显式新增、查看、修正、启停和确认删除，并明确“仅保存在本机；当前不会自动发送给模型”。
 - 标题/正文通过专用 Windows DPAPI `CurrentUser` 保护后持久化；项目作用域只接受精确已授权项目，修正/启停/删除使用版本冲突保护，删除清除密文并保留无内容墓碑。
-- SQLite 候选合同升级到 schema v9，Desktop IPC 候选合同升级到 protocol v9；v8 → v9 前生成 pre-v9 备份并原子迁移。V0.4.0 Stage 2 回滚必须使用 pre-v9 备份或隔离数据目录。
-- 本切片不自动提取、后台检索或向模型发送记忆，不包含 RAG、向量数据库、用户画像、权限授予或 Stage 3 完成声明。
+- SQLite 合同先升级到 schema v9，Desktop IPC 合同升级到 protocol v9；v8 → v9 前生成 pre-v9 备份并原子迁移。V0.4.0 Stage 2 回滚必须使用匹配的 pre-v10/pre-v9 备份或隔离数据目录。
+- 本阶段不自动提取或后台检索记忆，不包含 RAG、向量数据库、用户画像或权限授予；只有逐 Turn 完整确认路径允许单次发送用户选中的记忆。
 - S3-R2 设置页新增用户显式触发的“本地相关记忆预览”：只读取 Active、未到期的 Global/精确已授权项目候选，以固定短语/词/双字组规则排序，最多展示 8 条和 4,000 字符。
 - S3-R2 预览查询和搜索替身不持久化，操作不修改记忆，也不调用 Prompt、Provider、Session、Conversation 或 `ai_invocations`；S3-R3 的出站必须另行逐 Turn 选择并确认。
 

@@ -1473,10 +1473,17 @@ public partial class MainWindow : Window
                     session.SessionId,
                     MemoryItems: memoryItems),
                 _lifetime.Token);
-            ConversationInputTextBox.Clear();
             _isRenderingMemoryConsent = true;
-            ConversationMemorySelectionList.UnselectAll();
-            _isRenderingMemoryConsent = false;
+            try
+            {
+                ConversationInputTextBox.Clear();
+                ConversationMemorySelectionList.UnselectAll();
+            }
+            finally
+            {
+                _isRenderingMemoryConsent = false;
+            }
+
             await RefreshSessionAsync();
         });
     }
@@ -2012,6 +2019,11 @@ public partial class MainWindow : Window
 
     private void UpdateMemoryScopeEditor()
     {
+        if (MemoryProjectComboBox is null)
+        {
+            return;
+        }
+
         var projectScoped = SelectedTag(MemoryScopeComboBox) == "Project";
         MemoryProjectComboBox.Visibility = projectScoped ? Visibility.Visible : Visibility.Collapsed;
         if (projectScoped)

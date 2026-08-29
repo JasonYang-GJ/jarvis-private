@@ -1,6 +1,6 @@
 # 元枢 V2 阶段 3 可控长期记忆设计（S3-R1 / S3-R2 / S3-R3）
 
-> 状态：S3-R1/R2 已集成，S3-R3 逐 Turn 出站确认候选；不是完整阶段 3，也不是正式发布基线。更新时间：2026-08-30。
+> 状态：S3-R1/R2/R3 已集成并通过离线 Release 门禁；V0.5.0 正式标签与标签源码产物身份待最终冻结证据回填。更新时间：2026-08-30。
 
 ## 1. 本切片解决什么
 
@@ -38,7 +38,7 @@ DPAPI CurrentUser 保护静态数据，但不抵御已经取得同一 Windows �
 
 ## 4. 存储与迁移
 
-当前候选 SQLite 合同为 schema v10。v9 新增 `memory_items`；v10 不改记忆正文表，只给 Session Turn、Conversation Turn 和 `ai_invocations` 增加安全 consent/derived/audit 元数据，不保存临时出站 block、标题、正文、query 或 plaintext hash。
+当前 SQLite 合同为 schema v10。v9 新增 `memory_items`；v10 不改记忆正文表，只给 Session Turn、Conversation Turn 和 `ai_invocations` 增加安全 consent/derived/audit 元数据，不保存临时出站 block、标题、正文、query 或 plaintext hash。
 
 迁移备份按打开时的原始版本生成：
 

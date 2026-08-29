@@ -1,6 +1,6 @@
-# 元枢当前架构（V0.4.0 冻结基线 / V2 阶段 3 R3 候选 As-Built）
+# 元枢当前架构（V0.5.0 / V2 阶段 3 冻结候选 As-Built）
 
-> 本文描述 V0.4.0 Stage 2 冻结结构、已集成 S3-R1/R2 及其上的 S3-R3 当前候选。更新时间：2026-08-30。
+> 本文描述已集成并通过离线 Release 门禁的 S3-R1/R2/R3 当前结构。V0.5.0 正式标签与标签源码产物身份将在最终冻结证据提交中回填。更新时间：2026-08-30。
 
 ## 1. 运行结构
 
@@ -234,10 +234,11 @@ Codex 普通聊天适配器由 `CodexChatModelProvider` 承载，但生产策略
 
 - .NET SDK 由 `global.json` 固定到 10.0.400，允许同补丁线更新。
 - 普通依赖与 win-x64 发布依赖使用锁文件，发布脚本在 locked mode 下恢复。
-- `scripts/build-desktop-release.ps1` 是发布入口；阶段 2 版本号为 V0.4.0，安装产物身份记录在 `docs/baselines/V0.4.0_STAGE2.md`。
+- `scripts/build-desktop-release.ps1` 是发布入口；阶段 3 版本号为 V0.5.0，安装产物身份记录在 `docs/baselines/V0.5.0_STAGE3.md`。
 - V0.3.0 冻结证据保持不变：全量自动化 363/363；实际 Release DesktopClient + DesktopHost + 真实 Codex Provider + 真实 Windows Notepad 已完成阶段 1 的 10 轮连续对话、3 次真取消和项目/文件/单窗口场景，证据目录为 `%LOCALAPPDATA%\ScreenGuide\Experiments\DesktopV01\20260823-184833`。
 - 阶段 2 离线 Release 定向 QA 173/173 通过；集成后 Qwen 56/56、R4 Runner 61/61、设置/无 fallback/工作负载隔离 3/3 通过。R1/R2/R3 已通过证据被复用，没有机械重跑全矩阵。
 - 阶段 2 普通聊天发布目标是 DeepSeek + 千问。DeepSeek 既有真实证据已冻结；Qwen 真实 Health、Ordinary Chat 和 Cancellation 通过。Codex 普通聊天不属于发布目标，普通聊天选 Qwen 时的独立真实 Codex 编程 Task 回归已通过。
+- 阶段 3 离线 Release 定向门禁 90/90 通过；实际 Release WPF Client + DesktopHost 通过 Stage 2 路由回归和 Stage 3 记忆 CRUD、预览、完整出站确认、单次发送、输入变化失效与删除流程，Provider 为进程内 Fake，网络、真实凭据和真实 Provider 请求均为 0。
 - 阶段 2 标签 `v0.4.0-stage2` 指向 `33b5859dcaa697bacd5edc5036a58d162b723a0e`，annotated tag object 为 `47a2b3b70fc22904954e2291470e809e58303eca`。独立干净标签源码 locked restore 和 Release build 通过，发布目录 538 个文件；Client/Host ProductVersion 均为 `0.4.0+33b5859dcaa697bacd5edc5036a58d162b723a0e`，FileVersion 均为 `0.4.0.0`。
 - V0.4.0 安装包 `artifacts/release/元枢-V0.4.0-安装包.exe` 为 64,128,304 bytes，SHA-256 为 `222DC720E677202BBCAEC6D507F48ACFA8B2FCA31535FF7B03010DF80EE7DEE9`，未签名。标签后的仅文档证据提交不改变标签源码或二进制来源。
 - 阶段 1 标签 `v0.3.0-stage1` 继续指向源码提交 `0a8cd9e164c35b86f67ffd94b9e0f17c312a2576`，annotated tag object 为 `9fc790ade57fa2d3c18bc5ee84e8dc9e7018aa89`。
@@ -256,6 +257,6 @@ Codex 普通聊天适配器由 `CodexChatModelProvider` 承载，但生产策略
 - 每轮重建完整 Conversation 历史并以字符上限保护；Token 预算、摘要和上下文裁剪尚未实现。
 - DPAPI 保护静态密文，但不抵御已取得同一 Windows 用户权限、管理员权限或运行时内存读取能力的恶意程序。
 - 语义意图只覆盖有限候选句式，保守回退是有意安全选择；不能把它宣传为完整自然语言操作理解。
-- S3-R3 只支持逐 Turn 明确选择、完整可见确认和单次普通聊天发送；没有自动注入、RAG、向量库、后台检索或跨 Session 自动个性化。Conversation 历史和 `ai_invocations` 仍不是长期记忆。
+- 阶段 3 只支持逐 Turn 明确选择、完整可见确认和单次普通聊天发送；没有自动注入、RAG、向量库、后台检索或跨 Session 自动个性化。Conversation 历史和 `ai_invocations` 仍不是长期记忆。
 - schema v10 对 v9/V0.4.0 schema v8 向前不兼容；回滚必须保留 v10 主库并管理 pre-v10/pre-v9 备份，Stage 1 回滚仍需对应 pre-v8 备份。
 - 安装包未签名，语音模型未纳入可分发方案。
