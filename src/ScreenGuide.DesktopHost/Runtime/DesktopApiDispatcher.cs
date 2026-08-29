@@ -698,20 +698,25 @@ public sealed class DesktopApiDispatcher(
             request.Confirmed,
             cancellationToken: cancellationToken);
 
-    private static MemoryCategory ParseCategory(string value) =>
-        Enum.TryParse<MemoryCategory>(value, ignoreCase: true, out var category)
-        && Enum.IsDefined(category)
-            ? category
-            : throw new MemoryServiceException(
-                MemoryServiceErrorCodes.InvalidRequest,
-                "长期记忆类别无效。");
+    private static MemoryCategory ParseCategory(string value) => value switch
+    {
+        "UserFact" => MemoryCategory.UserFact,
+        "UserPreference" => MemoryCategory.UserPreference,
+        "ProjectNote" => MemoryCategory.ProjectNote,
+        "Decision" => MemoryCategory.Decision,
+        _ => throw new MemoryServiceException(
+            MemoryServiceErrorCodes.InvalidRequest,
+            "长期记忆类别无效。")
+    };
 
-    private static MemoryScope ParseScope(string value, Guid? projectId) =>
-        Enum.TryParse<MemoryScopeKind>(value, ignoreCase: true, out var scope)
-            ? MemoryScope.Create(scope, projectId)
-            : throw new MemoryServiceException(
-                MemoryServiceErrorCodes.InvalidRequest,
-                "长期记忆作用域无效。");
+    private static MemoryScope ParseScope(string value, Guid? projectId) => value switch
+    {
+        "Global" => MemoryScope.Create(MemoryScopeKind.Global, projectId),
+        "Project" => MemoryScope.Create(MemoryScopeKind.Project, projectId),
+        _ => throw new MemoryServiceException(
+            MemoryServiceErrorCodes.InvalidRequest,
+            "长期记忆作用域无效。")
+    };
 
     private static MemoryDto MapMemory(MemoryItem item) => new(
         item.Metadata.Id,

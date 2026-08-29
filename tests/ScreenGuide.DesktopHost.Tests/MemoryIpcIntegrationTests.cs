@@ -114,6 +114,52 @@ public sealed class MemoryIpcIntegrationTests
         await host.StopAsync();
     }
 
+    [Theory]
+    [InlineData("0", "Global", false)]
+    [InlineData("UserFact", "0", false)]
+    [InlineData("UserFact", "1", true)]
+    [InlineData("userfact", "Global", false)]
+    [InlineData(" UserFact", "Global", false)]
+    [InlineData("UserFact", "global", false)]
+    [InlineData("UserFact", "Global ", false)]
+    [InlineData("Unknown", "Global", false)]
+    [InlineData("UserFact", "Unknown", false)]
+    [InlineData("", "Global", false)]
+    [InlineData("UserFact", "", false)]
+    public async Task MemoryCreateRejectsNonCanonicalCategoryAndScopeTokensWithoutMutationOrContentEcho(
+        string category,
+        string scope,
+        bool useAuthorizedProject)
+    {
+        await using var environment = DesktopHostTestEnvironment.Create();
+        var (_, project, _) = await environment.SeedProjectsAsync();
+        using var host = environment.BuildHost(services =>
+            services.AddSingleton<IMemoryContentProtector, FakeMemoryContentProtector>());
+        await host.StartAsync();
+        IDesktopApiClient client = new DesktopApiClient(environment.Options.PipeName);
+        const string privateTitle = "canonical-token-private-title";
+        const string privateBody = "canonical-token-private-body";
+
+        var exception = await Record.ExceptionAsync(() => client.CreateMemoryAsync(
+            new CreateMemoryRequestDto(
+                category,
+                scope,
+                useAuthorizedProject ? project.Id : null,
+                privateTitle,
+                privateBody,
+                null)));
+        var rows = await client.ListMemoriesAsync();
+
+        Assert.Empty(rows);
+        var failure = Assert.IsType<DesktopApiException>(exception);
+        Assert.Equal("memory.invalid_request", failure.Error.Code);
+        Assert.DoesNotContain(privateTitle, failure.Error.UserMessage, StringComparison.Ordinal);
+        Assert.DoesNotContain(privateBody, failure.Error.UserMessage, StringComparison.Ordinal);
+        Assert.DoesNotContain(privateTitle, failure.Error.TechnicalDetail ?? string.Empty, StringComparison.Ordinal);
+        Assert.DoesNotContain(privateBody, failure.Error.TechnicalDetail ?? string.Empty, StringComparison.Ordinal);
+        await host.StopAsync();
+    }
+
     private sealed class FakeMemoryContentProtector : IMemoryContentProtector
     {
         public byte[] Protect(string plaintext) =>
