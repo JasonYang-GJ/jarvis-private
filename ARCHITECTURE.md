@@ -1,6 +1,6 @@
-# 元枢当前架构（V0.4.0 冻结基线 / V2 阶段 3 R1 候选 As-Built）
+# 元枢当前架构（V0.4.0 冻结基线 / V2 阶段 3 R2 候选 As-Built）
 
-> 本文描述 V0.4.0 Stage 2 冻结结构及其上的 S3-R1 当前候选。更新时间：2026-08-29。阶段 3 记忆边界见 `docs/V2_STAGE3_CONTROLLABLE_MEMORY_DESIGN.md`；V0.4.0 精确身份仍见 `docs/baselines/V0.4.0_STAGE2.md`。
+> 本文描述 V0.4.0 Stage 2 冻结结构、已集成 S3-R1 及其上的 S3-R2 当前候选。更新时间：2026-08-30。阶段 3 记忆边界见 `docs/V2_STAGE3_CONTROLLABLE_MEMORY_DESIGN.md`；V0.4.0 精确身份仍见 `docs/baselines/V0.4.0_STAGE2.md`。
 
 ## 1. 运行结构
 
@@ -13,7 +13,7 @@ DesktopClient（WPF）
   ├─ 新话题、停止、项目/文件选择、窗口同意或拒绝
   ├─ 不直接访问 SQLite、Codex 或 Windows 动作
   ├─ 设置页：普通聊天 Provider/Model、数据去向、凭据和健康状态
-  ├─ 设置页：用户显式管理的本机长期记忆（不自动发给模型）
+  ├─ 设置页：用户显式管理的本机长期记忆及主动本地预览（不自动发给模型）
   └─ 编程 Agent 独立显示为 Codex
   ↓ 当前用户 Named Pipe，protocol v9
 DesktopHost
@@ -213,11 +213,13 @@ Codex 普通聊天适配器由 `CodexChatModelProvider` 承载，但生产策略
 
 确定性 Planner 仍是第一入口。只有它仍判断为普通聊天且文字命中有限候选条件时，`ModelSemanticIntentSuggester` 才把当前用户文字交给当前 Chat Provider。输出必须是严格五字段结构，并经过枚举、长度、置信度（至少 0.80）、歧义和缺失上下文组合校验。模型 target 不被采用；Host 只把通过门槛的意图类型重新交给确定性 Planner，并用真实本机上下文重算目标、上下文、确认和权限。失败、非法输出或低置信度都回到保守路径。
 
-电脑动作继续采用确定性 Intent Planner + Capability Policy + 白名单 Skill，不是开放式模型 Tool Calling。S3-R1 只新增用户显式管理的本机加密记忆账本；它不参与模型 Prompt、语义建议、动作授权或 Session 状态。当前仍没有 RAG、向量数据库、自动画像或复杂多 Agent 产品编排。
+电脑动作继续采用确定性 Intent Planner + Capability Policy + 白名单 Skill，不是开放式模型 Tool Calling。S3-R1 新增用户显式管理的本机加密记忆账本，S3-R2 只增加用户主动触发的确定性本地预览；两者都不参与模型 Prompt、语义建议、动作授权或 Session 状态。当前仍没有 RAG、向量数据库、自动画像或复杂多 Agent 产品编排。
 
 ### 本机长期记忆账本
 
-`MemoryService` 是显式记忆 CRUD 的唯一验证与编排入口。领域只允许四类记忆、全局或精确已授权项目作用域、`UserExplicit` 来源、固定置信度 1.0 和乐观并发版本。`SqliteMemoryStore` 与 Conversation、Session、Task、Provider Thread、`ai_invocations` 分表且不复用其状态。`WindowsDpapiMemoryContentProtector` 使用独立的 CurrentUser purpose/entropy/version 保护标题和正文；凭据 Store 与记忆 Protector 互不复用。停用、到期和删除记录不是未来检索候选；当前版本尚不存在任何自动检索入口。
+`MemoryService` 是显式记忆 CRUD 和本地预览的唯一验证与编排入口。领域只允许四类记忆、全局或精确已授权项目作用域、`UserExplicit` 来源、固定置信度 1.0 和乐观并发版本。`SqliteMemoryStore` 与 Conversation、Session、Task、Provider Thread、`ai_invocations` 分表且不复用其状态。`WindowsDpapiMemoryContentProtector` 使用独立的 CurrentUser purpose/entropy/version 保护标题和正文；凭据 Store 与记忆 Protector 互不复用。
+
+预览候选由 Store 在解密前限定为 Active、未到期的 Global 加可选精确已授权项目，最多 200 条。Core 的纯排序器只在内存中用规范化短语、词和字母数字双字组计算固定分数，按分数/更新时间/Guid 排序，并把结果限制为 8 条和 4,000 字符。查询、索引及规范化替身均不持久化；预览不修改记忆，不触发 Provider、Prompt 或 `ai_invocations`。
 
 ## 10. 数据、迁移与恢复
 
@@ -254,6 +256,6 @@ Codex 普通聊天适配器由 `CodexChatModelProvider` 承载，但生产策略
 - 每轮重建完整 Conversation 历史并以字符上限保护；Token 预算、摘要和上下文裁剪尚未实现。
 - DPAPI 保护静态密文，但不抵御已取得同一 Windows 用户权限、管理员权限或运行时内存读取能力的恶意程序。
 - 语义意图只覆盖有限候选句式，保守回退是有意安全选择；不能把它宣传为完整自然语言操作理解。
-- S3-R1 记忆只支持显式 CRUD；没有模型注入、RAG、向量库或自动跨 Session 检索。Conversation 历史和 `ai_invocations` 仍不是长期记忆。
+- S3-R2 只支持显式本机预览；没有模型注入、RAG、向量库、自动/后台检索或跨 Session 自动个性化。Conversation 历史和 `ai_invocations` 仍不是长期记忆。
 - schema v9 对 V0.4.0 的 schema v8 向前不兼容；Stage 2 回滚必须管理 pre-v9 备份，Stage 1 回滚仍需对应 pre-v8 备份。
 - 安装包未签名，语音模型未纳入可分发方案。

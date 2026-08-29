@@ -46,6 +46,57 @@ public sealed class MemoryService(
         }
     }
 
+    public async Task<MemoryPreviewResult> PreviewAsync(
+        string query,
+        Guid? projectId,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            _ = MemoryPreviewRanker.CanonicalizeQuery(query);
+            if (projectId == Guid.Empty)
+            {
+                throw new MemoryValidationException("项目 ID 无效。");
+            }
+        }
+        catch (MemoryValidationException exception)
+        {
+            throw InvalidRequest("本地记忆预览请求不符合要求。", exception);
+        }
+
+        if (projectId is { } exactProjectId)
+        {
+            await ValidateProjectScopeAsync(
+                MemoryScope.ForProject(exactProjectId),
+                cancellationToken).ConfigureAwait(false);
+        }
+
+        IReadOnlyList<ProtectedMemoryItem> protectedItems;
+        try
+        {
+            protectedItems = await store.ListRetrievalCandidatesAsync(
+                timeProvider.GetUtcNow(),
+                projectId,
+                cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (IsStorageFailure(exception))
+        {
+            throw StorageFailure(exception);
+        }
+
+        MemoryItem[] items;
+        try
+        {
+            items = protectedItems.Select(Unprotect).ToArray();
+        }
+        catch (Exception exception) when (IsProtectionFailure(exception))
+        {
+            throw ProtectionFailure(exception);
+        }
+
+        return MemoryPreviewRanker.Preview(query, items, projectId);
+    }
+
     public async Task<MemoryItem> GetAsync(
         Guid id,
         CancellationToken cancellationToken = default)
@@ -349,8 +400,9 @@ public sealed class MemoryService(
         && exception is not MemoryServiceException;
 
     private static MemoryServiceException InvalidRequest(
-        string message = "长期记忆请求不符合要求。") =>
-        new(MemoryServiceErrorCodes.InvalidRequest, message);
+        string message = "长期记忆请求不符合要求。",
+        Exception? innerException = null) =>
+        new(MemoryServiceErrorCodes.InvalidRequest, message, innerException);
 
     private static MemoryServiceException NotFound() =>
         new(MemoryServiceErrorCodes.NotFound, "没有找到这条长期记忆。");

@@ -14,6 +14,11 @@ public interface IMemoryStore : IAsyncDisposable
     Task<IReadOnlyList<ProtectedMemoryItem>> ListAsync(
         CancellationToken cancellationToken = default);
 
+    Task<IReadOnlyList<ProtectedMemoryItem>> ListRetrievalCandidatesAsync(
+        DateTimeOffset nowUtc,
+        Guid? projectId,
+        CancellationToken cancellationToken = default);
+
     Task<ProtectedMemoryItem?> GetAsync(
         Guid id,
         CancellationToken cancellationToken = default);

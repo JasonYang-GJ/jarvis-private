@@ -54,6 +54,7 @@ public static class DesktopApiMethods
     public const string DeleteProviderCredential = "ai.credentials.delete";
     public const string CheckAiProviderHealth = "ai.provider.health";
     public const string ListMemories = "memory.list";
+    public const string PreviewMemories = "memory.preview";
     public const string GetMemory = "memory.get";
     public const string CreateMemory = "memory.create";
     public const string UpdateMemory = "memory.update";

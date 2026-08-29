@@ -7,6 +7,8 @@ namespace ScreenGuide.Persistence.Sqlite;
 
 public sealed class SqliteMemoryStore : IMemoryStore
 {
+    public const int MaximumRetrievalCandidates = 200;
+
     private readonly string _connectionString;
 
     public SqliteMemoryStore(string databasePath)
@@ -60,6 +62,54 @@ public sealed class SqliteMemoryStore : IMemoryStore
             ORDER BY updated_at_utc DESC, id;
             """;
         var items = new List<ProtectedMemoryItem>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            items.Add(Read(reader));
+        }
+
+        return items;
+    }
+
+    public async Task<IReadOnlyList<ProtectedMemoryItem>> ListRetrievalCandidatesAsync(
+        DateTimeOffset nowUtc,
+        Guid? projectId,
+        CancellationToken cancellationToken = default)
+    {
+        if (projectId == Guid.Empty)
+        {
+            throw new MemoryValidationException("项目 ID 无效。");
+        }
+
+        await using var connection = await OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+        await using var command = connection.CreateCommand();
+        command.CommandText = projectId is null
+            ? """
+                SELECT * FROM memory_items
+                WHERE status = 'Active'
+                  AND (expires_at_utc IS NULL OR expires_at_utc > $nowUtc)
+                  AND scope_kind = 'Global'
+                ORDER BY updated_at_utc DESC, id
+                LIMIT 200;
+                """
+            : """
+                SELECT * FROM memory_items
+                WHERE status = 'Active'
+                  AND (expires_at_utc IS NULL OR expires_at_utc > $nowUtc)
+                  AND (
+                       scope_kind = 'Global'
+                       OR (scope_kind = 'Project' AND project_id = $projectId)
+                  )
+                ORDER BY updated_at_utc DESC, id
+                LIMIT 200;
+                """;
+        command.Parameters.AddWithValue("$nowUtc", ToDb(nowUtc));
+        if (projectId is { } exactProjectId)
+        {
+            command.Parameters.AddWithValue("$projectId", exactProjectId.ToString("D"));
+        }
+
+        var items = new List<ProtectedMemoryItem>(MaximumRetrievalCandidates);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
         while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
         {

@@ -62,6 +62,34 @@ public sealed class AiSettingsUiTests
     }
 
     [Fact]
+    public void SettingsPageExposesExplicitLocalMemoryPreviewWithoutAModelUseControl()
+    {
+        var repositoryRoot = FindRepositoryRoot();
+        var xaml = File.ReadAllText(Path.Combine(
+            repositoryRoot,
+            "src",
+            "ScreenGuide.DesktopClient",
+            "MainWindow.xaml"));
+        var code = File.ReadAllText(Path.Combine(
+            repositoryRoot,
+            "src",
+            "ScreenGuide.DesktopClient",
+            "MainWindow.xaml.cs"));
+
+        Assert.Contains("本地相关记忆预览", xaml, StringComparison.Ordinal);
+        Assert.Contains("只在本机匹配；不会发送给模型。", xaml, StringComparison.Ordinal);
+        Assert.Contains("AutomationProperties.AutomationId=\"MemoryPreviewQuery\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("AutomationProperties.AutomationId=\"MemoryPreviewProject\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("AutomationProperties.AutomationId=\"RunMemoryPreview\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("AutomationProperties.AutomationId=\"MemoryPreviewResults\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Click=\"RunMemoryPreviewButton_Click\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("TextChanged=\"MemoryPreviewQueryTextBox_TextChanged\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("PreviewMemoriesAsync", code, StringComparison.Ordinal);
+        Assert.DoesNotContain("MemoryPreviewUseInChat", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("MemoryPreviewAuto", xaml, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void SettingsPageExposesAiRoutingPrivacyAndCredentialControls()
     {
         var xaml = File.ReadAllText(Path.Combine(

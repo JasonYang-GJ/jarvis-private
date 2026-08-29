@@ -160,6 +160,10 @@ public interface IDesktopApiClient
     Task<IReadOnlyList<MemoryDto>> ListMemoriesAsync(
         CancellationToken cancellationToken = default);
 
+    Task<MemoryPreviewResponseDto> PreviewMemoriesAsync(
+        MemoryPreviewRequestDto request,
+        CancellationToken cancellationToken = default);
+
     Task<MemoryDto> GetMemoryAsync(
         Guid memoryId,
         CancellationToken cancellationToken = default);
@@ -521,6 +525,14 @@ public sealed class DesktopApiClient(
             DesktopApiMethods.ListMemories,
             new EmptyRequest(),
             cancellationToken).ConfigureAwait(false);
+
+    public Task<MemoryPreviewResponseDto> PreviewMemoriesAsync(
+        MemoryPreviewRequestDto request,
+        CancellationToken cancellationToken = default) =>
+        CallAsync<MemoryPreviewRequestDto, MemoryPreviewResponseDto>(
+            DesktopApiMethods.PreviewMemories,
+            request,
+            cancellationToken);
 
     public Task<MemoryDto> GetMemoryAsync(
         Guid memoryId,

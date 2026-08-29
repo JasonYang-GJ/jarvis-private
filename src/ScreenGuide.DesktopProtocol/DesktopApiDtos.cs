@@ -275,6 +275,12 @@ public sealed record ProjectDto(
 
 public sealed record MemoryIdRequestDto(Guid MemoryId);
 
+public sealed record MemoryPreviewRequestDto(string Query, Guid? ProjectId)
+{
+    public override string ToString() =>
+        $"MemoryPreviewRequestDto {{ ProjectId = {ProjectId}, Query = [REDACTED] }}";
+}
+
 public sealed record CreateMemoryRequestDto(
     string Category,
     string Scope,
@@ -328,6 +334,25 @@ public sealed record MemoryDto(
 {
     public override string ToString() =>
         $"MemoryDto {{ Id = {Id}, Category = {Category}, Scope = {Scope}, ProjectId = {ProjectId}, Status = {Status}, Source = {Source}, Content = [REDACTED], UpdatedAtUtc = {UpdatedAtUtc}, ExpiresAtUtc = {ExpiresAtUtc}, Version = {Version} }}";
+}
+
+public sealed record MemoryPreviewMatchDto(
+    MemoryDto Item,
+    int Score,
+    string[] Explanations)
+{
+    public override string ToString() =>
+        $"MemoryPreviewMatchDto {{ MemoryId = {Item.Id}, Score = {Score}, Explanations = [{string.Join(",", Explanations)}], Content = [REDACTED] }}";
+}
+
+public sealed record MemoryPreviewResponseDto(
+    MemoryPreviewMatchDto[] Items,
+    int CandidateCount,
+    int SelectedCount,
+    int TotalCharacters)
+{
+    public override string ToString() =>
+        $"MemoryPreviewResponseDto {{ CandidateCount = {CandidateCount}, SelectedCount = {SelectedCount}, TotalCharacters = {TotalCharacters}, Content = [REDACTED] }}";
 }
 
 public sealed record TaskSummaryDto(

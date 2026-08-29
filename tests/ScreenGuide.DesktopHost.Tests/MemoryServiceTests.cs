@@ -206,6 +206,60 @@ public sealed class MemoryServiceTests
         Assert.Equal(1, unchanged?.Metadata.Version);
     }
 
+    [Fact]
+    public async Task PreviewUsesBoundedStoreCandidatesAndRejectsRevokedProjectBeforeDecrypting()
+    {
+        var protector = new CountingMemoryContentProtector();
+        await using var environment = await MemoryEnvironment.CreateAsync(protector);
+        _ = await environment.Service.CreateAsync(MemoryDraft.Create(
+            MemoryCategory.UserPreference,
+            MemoryScope.Global,
+            "全局预算",
+            "控制支出",
+            null,
+            Now));
+        _ = await environment.Service.CreateAsync(MemoryDraft.Create(
+            MemoryCategory.ProjectNote,
+            MemoryScope.ForProject(environment.Project.Id),
+            "项目预算",
+            "本月计划",
+            null,
+            Now));
+
+        protector.ResetUnprotectCount();
+        var globalOnly = await environment.Service.PreviewAsync("预算", projectId: null);
+        Assert.Equal(1, globalOnly.CandidateCount);
+        Assert.Equal(1, globalOnly.SelectedCount);
+        Assert.Equal(MemoryScopeKind.Global, Assert.Single(globalOnly.Matches).Item.Metadata.Scope.Kind);
+        Assert.Equal(2, protector.UnprotectCount);
+
+        protector.ResetUnprotectCount();
+        var withProject = await environment.Service.PreviewAsync("预算", environment.Project.Id);
+        Assert.Equal(2, withProject.CandidateCount);
+        Assert.Equal(2, withProject.SelectedCount);
+        Assert.Equal(environment.Project.Id, withProject.Matches[0].Item.Metadata.Scope.ProjectId);
+        Assert.Contains("project_scope", withProject.Matches[0].Explanations);
+        Assert.Equal(4, protector.UnprotectCount);
+
+        protector.ResetUnprotectCount();
+        var missing = await Assert.ThrowsAsync<MemoryServiceException>(() =>
+            environment.Service.PreviewAsync("预算", Guid.NewGuid()));
+        Assert.Equal(MemoryServiceErrorCodes.InvalidRequest, missing.Code);
+        Assert.Equal(0, protector.UnprotectCount);
+
+        await environment.TaskStore.SetProjectAuthorizationAsync(environment.Project with
+        {
+            AuthorizationState = ProjectAuthorizationState.Revoked,
+            RevokedAtUtc = Now,
+            UpdatedAtUtc = Now
+        });
+        protector.ResetUnprotectCount();
+        var revoked = await Assert.ThrowsAsync<MemoryServiceException>(() =>
+            environment.Service.PreviewAsync("预算", environment.Project.Id));
+        Assert.Equal(MemoryServiceErrorCodes.InvalidRequest, revoked.Code);
+        Assert.Equal(0, protector.UnprotectCount);
+    }
+
     private sealed class MemoryEnvironment : IAsyncDisposable
     {
         private readonly string _root;
@@ -215,7 +269,8 @@ public sealed class MemoryServiceTests
             string databasePath,
             SqliteTaskStore taskStore,
             SqliteMemoryStore memoryStore,
-            ProjectRecord project)
+            ProjectRecord project,
+            IMemoryContentProtector protector)
         {
             _root = root;
             DatabasePath = databasePath;
@@ -224,7 +279,7 @@ public sealed class MemoryServiceTests
             Project = project;
             Service = new MemoryService(
                 memoryStore,
-                new FakeMemoryContentProtector(),
+                protector,
                 taskStore,
                 new FixedTimeProvider(Now));
         }
@@ -239,7 +294,8 @@ public sealed class MemoryServiceTests
 
         public MemoryService Service { get; }
 
-        public static async Task<MemoryEnvironment> CreateAsync()
+        public static async Task<MemoryEnvironment> CreateAsync(
+            IMemoryContentProtector? protector = null)
         {
             var root = Path.Combine(Path.GetTempPath(), $"screen-guide-memory-host-{Guid.NewGuid():N}");
             var databasePath = Path.Combine(root, "state", "tasking.db");
@@ -270,7 +326,13 @@ public sealed class MemoryServiceTests
             await taskStore.SetProjectAuthorizationAsync(project);
             var memoryStore = new SqliteMemoryStore(databasePath);
             await memoryStore.InitializeAsync();
-            return new MemoryEnvironment(root, databasePath, taskStore, memoryStore, project);
+            return new MemoryEnvironment(
+                root,
+                databasePath,
+                taskStore,
+                memoryStore,
+                project,
+                protector ?? new FakeMemoryContentProtector());
         }
 
         public async ValueTask DisposeAsync()
@@ -315,6 +377,23 @@ public sealed class MemoryServiceTests
 
             return Encoding.UTF8.GetString(bytes);
         }
+    }
+
+    private sealed class CountingMemoryContentProtector : IMemoryContentProtector
+    {
+        private readonly FakeMemoryContentProtector _inner = new();
+
+        public int UnprotectCount { get; private set; }
+
+        public byte[] Protect(string plaintext) => _inner.Protect(plaintext);
+
+        public string Unprotect(ReadOnlySpan<byte> protectedContent)
+        {
+            UnprotectCount++;
+            return _inner.Unprotect(protectedContent);
+        }
+
+        public void ResetUnprotectCount() => UnprotectCount = 0;
     }
 
     private sealed class FixedTimeProvider(DateTimeOffset now) : TimeProvider

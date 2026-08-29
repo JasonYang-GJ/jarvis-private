@@ -916,6 +916,51 @@
                                         </StackPanel>
                                     </StackPanel>
                                 </Grid>
+                                <Border BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,1,0,0"
+                                        Margin="0,18,0,0" Padding="0,16,0,0">
+                                    <StackPanel>
+                                        <TextBlock Text="本地相关记忆预览" FontSize="15" FontWeight="SemiBold" />
+                                        <TextBlock Text="只在本机匹配；不会发送给模型。"
+                                                   Foreground="{StaticResource MutedBrush}" Margin="0,5,0,10"
+                                                   TextWrapping="Wrap" />
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="12" />
+                                                <ColumnDefinition Width="210" />
+                                                <ColumnDefinition Width="12" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBox x:Name="MemoryPreviewQueryTextBox" MaxLength="500"
+                                                     VerticalContentAlignment="Center"
+                                                     TextChanged="MemoryPreviewQueryTextBox_TextChanged"
+                                                     AutomationProperties.AutomationId="MemoryPreviewQuery" />
+                                            <ComboBox x:Name="MemoryPreviewProjectComboBox" Grid.Column="2"
+                                                      DisplayMemberPath="Name"
+                                                      SelectionChanged="MemoryPreviewProjectComboBox_SelectionChanged"
+                                                      AutomationProperties.AutomationId="MemoryPreviewProject" />
+                                            <Button Grid.Column="4" Content="预览匹配" Style="{StaticResource SecondaryButton}"
+                                                    Click="RunMemoryPreviewButton_Click"
+                                                    AutomationProperties.AutomationId="RunMemoryPreview" />
+                                        </Grid>
+                                        <TextBlock x:Name="MemoryPreviewSummaryText"
+                                                   Foreground="{StaticResource MutedBrush}" Margin="0,9,0,0"
+                                                   TextWrapping="Wrap" />
+                                        <ListBox x:Name="MemoryPreviewResultsListBox" MaxHeight="260" Margin="0,8,0,0"
+                                                 AutomationProperties.AutomationId="MemoryPreviewResults">
+                                            <ListBox.ItemTemplate>
+                                                <DataTemplate>
+                                                    <StackPanel Margin="3,5">
+                                                        <TextBlock Text="{Binding Title}" FontWeight="SemiBold"
+                                                                   TextTrimming="CharacterEllipsis" />
+                                                        <TextBlock Text="{Binding Summary}" Foreground="{StaticResource MutedBrush}"
+                                                                   FontSize="11" Margin="0,2,0,0" TextWrapping="Wrap" />
+                                                    </StackPanel>
+                                                </DataTemplate>
+                                            </ListBox.ItemTemplate>
+                                        </ListBox>
+                                    </StackPanel>
+                                </Border>
                             </StackPanel>
                         </Border>
                         <Border Style="{StaticResource SurfaceBorder}" Padding="20" Margin="0,0,0,12">

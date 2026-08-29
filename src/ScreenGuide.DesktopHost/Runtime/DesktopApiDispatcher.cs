@@ -196,6 +196,10 @@ public sealed class DesktopApiDispatcher(
                 DesktopApiMethods.ListMemories =>
                     DesktopProtocolJson.ToElement((await memories.ListAsync(cancellationToken)
                         .ConfigureAwait(false)).Select(MapMemory).ToArray()),
+                DesktopApiMethods.PreviewMemories =>
+                    DesktopProtocolJson.ToElement(MapMemoryPreview(await PreviewMemoriesAsync(
+                        Deserialize<MemoryPreviewRequestDto>(request),
+                        cancellationToken).ConfigureAwait(false))),
                 DesktopApiMethods.GetMemory =>
                     DesktopProtocolJson.ToElement(MapMemory(await memories.GetAsync(
                         Deserialize<MemoryIdRequestDto>(request).MemoryId,
@@ -665,6 +669,11 @@ public sealed class DesktopApiDispatcher(
                 DateTimeOffset.UtcNow),
             cancellationToken).ConfigureAwait(false);
 
+    private Task<MemoryPreviewResult> PreviewMemoriesAsync(
+        MemoryPreviewRequestDto request,
+        CancellationToken cancellationToken) =>
+        memories.PreviewAsync(request.Query, request.ProjectId, cancellationToken);
+
     private async Task<MemoryItem> UpdateMemoryAsync(
         UpdateMemoryRequestDto request,
         CancellationToken cancellationToken) =>
@@ -732,6 +741,15 @@ public sealed class DesktopApiDispatcher(
         item.Metadata.ExpiresAtUtc,
         item.Metadata.Confidence,
         item.Metadata.Version);
+
+    private static MemoryPreviewResponseDto MapMemoryPreview(MemoryPreviewResult result) => new(
+        result.Matches.Select(match => new MemoryPreviewMatchDto(
+            MapMemory(match.Item),
+            match.Score,
+            match.Explanations.ToArray())).ToArray(),
+        result.CandidateCount,
+        result.SelectedCount,
+        result.TotalCharacters);
 
     private JsonElement Shutdown()
     {

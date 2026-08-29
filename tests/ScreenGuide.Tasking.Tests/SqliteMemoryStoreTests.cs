@@ -127,20 +127,94 @@ public sealed class SqliteMemoryStoreTests
         Assert.Equal(4, idempotentDelete.Current?.Metadata.Version);
     }
 
+    [Fact]
+    public async Task RetrievalCandidateReadReturnsOnlyActiveUnexpiredGlobalAndExactProjectWithoutMutation()
+    {
+        await using var environment = await TaskStoreTestEnvironment.CreateAsync();
+        await using var store = new SqliteMemoryStore(environment.DatabasePath);
+        await store.InitializeAsync();
+        var global = NewProtectedItem(
+            Guid.Parse("00000000-0000-0000-0000-000000000010"),
+            version: 1,
+            updatedAtUtc: Now.AddMinutes(1));
+        var project = NewProtectedItem(
+            Guid.Parse("00000000-0000-0000-0000-000000000011"),
+            version: 1,
+            scope: MemoryScope.ForProject(environment.Project.Id),
+            updatedAtUtc: Now.AddMinutes(2));
+        var expired = NewProtectedItem(
+            Guid.NewGuid(),
+            version: 1,
+            expiresAtUtc: Now);
+        var disabled = NewProtectedItem(Guid.NewGuid(), version: 1);
+        var deleted = NewProtectedItem(Guid.NewGuid(), version: 1);
+        await store.CreateAsync(global);
+        await store.CreateAsync(project);
+        await store.CreateAsync(expired);
+        await store.CreateAsync(disabled);
+        await store.CreateAsync(deleted);
+        _ = await store.SetEnabledAsync(disabled.Metadata.Id, false, 1, Now.AddMinutes(3));
+        _ = await store.DeleteAsync(deleted.Metadata.Id, 1, Now.AddMinutes(3));
+
+        var globalOnly = await store.ListRetrievalCandidatesAsync(Now, projectId: null);
+        var withProject = await store.ListRetrievalCandidatesAsync(Now, environment.Project.Id);
+        var persistedGlobal = await store.GetAsync(global.Metadata.Id);
+        var persistedProject = await store.GetAsync(project.Metadata.Id);
+
+        Assert.Equal([global.Metadata.Id], globalOnly.Select(item => item.Metadata.Id));
+        Assert.Equal(
+            [project.Metadata.Id, global.Metadata.Id],
+            withProject.Select(item => item.Metadata.Id));
+        Assert.Equal(1, persistedGlobal?.Metadata.Version);
+        Assert.Equal(global.Metadata.UpdatedAtUtc, persistedGlobal?.Metadata.UpdatedAtUtc);
+        Assert.Equal(1, persistedProject?.Metadata.Version);
+        Assert.Equal(project.Metadata.UpdatedAtUtc, persistedProject?.Metadata.UpdatedAtUtc);
+    }
+
+    [Fact]
+    public async Task RetrievalCandidateReadCapsAtTwoHundredAndUsesStableStoreOrder()
+    {
+        await using var environment = await TaskStoreTestEnvironment.CreateAsync();
+        await using var store = new SqliteMemoryStore(environment.DatabasePath);
+        await store.InitializeAsync();
+        var items = Enumerable.Range(1, 205)
+            .Select(index => NewProtectedItem(
+                Guid.Parse($"00000000-0000-0000-0000-{index:D12}"),
+                version: 1,
+                updatedAtUtc: Now.AddMinutes(index)))
+            .ToArray();
+        foreach (var item in items)
+        {
+            await store.CreateAsync(item);
+        }
+
+        var candidates = await store.ListRetrievalCandidatesAsync(Now, projectId: null);
+
+        Assert.Equal(SqliteMemoryStore.MaximumRetrievalCandidates, candidates.Count);
+        Assert.Equal(
+            items.OrderByDescending(item => item.Metadata.UpdatedAtUtc)
+                .Take(SqliteMemoryStore.MaximumRetrievalCandidates)
+                .Select(item => item.Metadata.Id),
+            candidates.Select(item => item.Metadata.Id));
+    }
+
     private static ProtectedMemoryItem NewProtectedItem(
         Guid id,
         int version,
         byte[]? title = null,
-        byte[]? body = null) => new(
+        byte[]? body = null,
+        MemoryScope? scope = null,
+        DateTimeOffset? updatedAtUtc = null,
+        DateTimeOffset? expiresAtUtc = null) => new(
         MemoryMetadata.Create(
             id,
             MemoryCategory.ProjectNote,
-            MemoryScope.Global,
+            scope ?? MemoryScope.Global,
             MemoryStatus.Active,
             MemorySourceKind.UserExplicit,
             Now,
-            Now.AddMinutes(version - 1),
-            Now.AddDays(1),
+            updatedAtUtc ?? Now.AddMinutes(version - 1),
+            expiresAtUtc ?? Now.AddDays(1),
             1.0,
             version),
         title ?? [1, 2, 3],

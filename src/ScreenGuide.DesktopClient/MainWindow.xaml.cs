@@ -262,7 +262,19 @@ public partial class MainWindow : Window
             .ToArray();
         PreserveProjectSelection(NewTaskProjectComboBox, authorized);
         PreserveProjectSelection(MemoryProjectComboBox, authorized);
+        PreserveMemoryPreviewProjectSelection(authorized);
         NewTaskSubmitButton.IsEnabled = authorized.Length > 0 && _isHostOnline;
+    }
+
+    private void PreserveMemoryPreviewProjectSelection(ProjectDto[] projects)
+    {
+        var selectedId = (MemoryPreviewProjectComboBox.SelectedItem as MemoryPreviewProjectOption)?.ProjectId;
+        var options = new[] { new MemoryPreviewProjectOption(null, "仅全局记忆") }
+            .Concat(projects.Select(project => new MemoryPreviewProjectOption(project.Id, project.Name)))
+            .ToArray();
+        MemoryPreviewProjectComboBox.ItemsSource = options;
+        MemoryPreviewProjectComboBox.SelectedItem = options.FirstOrDefault(option => option.ProjectId == selectedId)
+            ?? options[0];
     }
 
     private static void PreserveProjectSelection(WpfComboBox comboBox, ProjectDto[] projects)
@@ -1670,6 +1682,43 @@ public partial class MainWindow : Window
     private void MemoryScopeComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e) =>
         UpdateMemoryScopeEditor();
 
+    private void MemoryPreviewQueryTextBox_TextChanged(object sender, TextChangedEventArgs e) =>
+        ClearMemoryPreviewResults();
+
+    private void MemoryPreviewProjectComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e) =>
+        ClearMemoryPreviewResults();
+
+    private async void RunMemoryPreviewButton_Click(object sender, RoutedEventArgs e)
+    {
+        ClearMemoryPreviewResults();
+        var query = MemoryPreviewQueryTextBox.Text;
+        var projectId = (MemoryPreviewProjectComboBox.SelectedItem as MemoryPreviewProjectOption)?.ProjectId;
+        await RunCommandAsync(async () =>
+        {
+            var preview = await _api.PreviewMemoriesAsync(
+                new MemoryPreviewRequestDto(query, projectId),
+                _lifetime.Token);
+            if (!string.Equals(MemoryPreviewQueryTextBox.Text, query, StringComparison.Ordinal)
+                || (MemoryPreviewProjectComboBox.SelectedItem as MemoryPreviewProjectOption)?.ProjectId != projectId)
+            {
+                return;
+            }
+
+            MemoryPreviewResultsListBox.ItemsSource = preview.Items
+                .Select(MemoryPreviewRow.From)
+                .ToArray();
+            MemoryPreviewSummaryText.Text =
+                $"本机候选 {preview.CandidateCount} 条，匹配 {preview.SelectedCount} 条，共 {preview.TotalCharacters} 个字符。";
+            StatusBarText.Text = "本地相关记忆预览已更新。";
+        });
+    }
+
+    private void ClearMemoryPreviewResults()
+    {
+        MemoryPreviewResultsListBox.ItemsSource = null;
+        MemoryPreviewSummaryText.Text = string.Empty;
+    }
+
     private void NewMemoryButton_Click(object sender, RoutedEventArgs e)
     {
         MemoryListBox.SelectedItem = null;
@@ -2128,6 +2177,17 @@ public partial class MainWindow : Window
             item,
             item.Title ?? "已删除的记忆",
             $"{MemoryCategoryLabel(item.Category)} · {MemoryScopeLabel(item.Scope)} · {MemoryStatusLabel(item.Status)} · {item.UpdatedAtUtc.ToLocalTime():yyyy-MM-dd HH:mm}");
+    }
+
+    private sealed record MemoryPreviewProjectOption(Guid? ProjectId, string Name);
+
+    private sealed record MemoryPreviewRow(string Title, string Summary)
+    {
+        public static MemoryPreviewRow From(MemoryPreviewMatchDto match) => new(
+            match.Item.Title ?? "无标题",
+            $"{MemoryCategoryLabel(match.Item.Category)} · {MemoryScopeLabel(match.Item.Scope)} · {MemoryStatusLabel(match.Item.Status)}"
+            + $" · {match.Item.UpdatedAtUtc.ToLocalTime():yyyy-MM-dd HH:mm} · 分数 {match.Score}"
+            + $" · 匹配依据：{string.Join("、", match.Explanations)}");
     }
 
     private static string MemoryCategoryLabel(string category) => category switch

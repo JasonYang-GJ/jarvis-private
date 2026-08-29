@@ -160,6 +160,68 @@ public sealed class MemoryIpcIntegrationTests
         await host.StopAsync();
     }
 
+    [Fact]
+    public async Task CurrentUserPipePreviewsDeterministicLocalMatchesWithoutMutationOrAiInvocation()
+    {
+        await using var environment = DesktopHostTestEnvironment.Create();
+        var (_, project, _) = await environment.SeedProjectsAsync();
+        using var host = environment.BuildHost(services =>
+            services.AddSingleton<IMemoryContentProtector, FakeMemoryContentProtector>());
+        await host.StartAsync();
+        IDesktopApiClient client = new DesktopApiClient(environment.Options.PipeName);
+        var global = await client.CreateMemoryAsync(new CreateMemoryRequestDto(
+            "UserPreference",
+            "Global",
+            null,
+            "全局预算",
+            "控制支出",
+            null));
+        var projectMemory = await client.CreateMemoryAsync(new CreateMemoryRequestDto(
+            "ProjectNote",
+            "Project",
+            project.Id,
+            "项目预算",
+            "本月计划",
+            null));
+        const string query = "预算";
+        var request = new MemoryPreviewRequestDto(query, project.Id);
+
+        var preview = await client.PreviewMemoriesAsync(request);
+        var afterGlobal = await client.GetMemoryAsync(global.Id);
+        var afterProject = await client.GetMemoryAsync(projectMemory.Id);
+
+        Assert.Equal(2, preview.CandidateCount);
+        Assert.Equal(2, preview.SelectedCount);
+        Assert.Equal(
+            projectMemory.Id,
+            Assert.Single(preview.Items, item => item.Item.ProjectId == project.Id).Item.Id);
+        Assert.Contains("project_scope", preview.Items[0].Explanations);
+        Assert.Equal(global.Version, afterGlobal.Version);
+        Assert.Equal(global.UpdatedAtUtc, afterGlobal.UpdatedAtUtc);
+        Assert.Equal(projectMemory.Version, afterProject.Version);
+        Assert.Equal(projectMemory.UpdatedAtUtc, afterProject.UpdatedAtUtc);
+        Assert.DoesNotContain(query, request.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("全局预算", preview.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("项目预算", preview.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("项目预算", preview.Items[0].ToString(), StringComparison.Ordinal);
+        Assert.Equal(9, DesktopProtocolVersion.Current);
+        Assert.Equal("memory.preview", DesktopApiMethods.PreviewMemories);
+
+        var invalid = await Assert.ThrowsAsync<DesktopApiException>(() =>
+            client.PreviewMemoriesAsync(new MemoryPreviewRequestDto("\u0001private-query", project.Id)));
+        Assert.Equal("memory.invalid_request", invalid.Error.Code);
+        Assert.DoesNotContain("private-query", invalid.Error.UserMessage, StringComparison.Ordinal);
+        Assert.DoesNotContain("private-query", invalid.Error.TechnicalDetail ?? string.Empty, StringComparison.Ordinal);
+
+        await host.StopAsync();
+        await using var connection = new SqliteConnection(
+            $"Data Source={environment.Options.DatabasePath};Pooling=False");
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT COUNT(*) FROM ai_invocations;";
+        Assert.Equal(0L, (long)(await command.ExecuteScalarAsync() ?? -1L));
+    }
+
     private sealed class FakeMemoryContentProtector : IMemoryContentProtector
     {
         public byte[] Protect(string plaintext) =>
