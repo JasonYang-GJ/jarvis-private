@@ -352,6 +352,12 @@
           "ScreenGuide.AI.Core": "[0.3.0, )"
         }
       },
+      "screenguide.ai.qwen": {
+        "type": "Project",
+        "dependencies": {
+          "ScreenGuide.AI.Core": "[0.3.0, )"
+        }
+      },
       "screenguide.core": {
         "type": "Project",
         "dependencies": {
@@ -364,6 +370,7 @@
           "Microsoft.Extensions.Hosting": "[10.0.11, )",
           "ScreenGuide.AI.Core": "[0.3.0, )",
           "ScreenGuide.AI.DeepSeek": "[0.3.0, )",
+          "ScreenGuide.AI.Qwen": "[0.3.0, )",
           "ScreenGuide.Agent.Abstractions": "[0.3.0, )",
           "ScreenGuide.Agent.Codex": "[0.3.0, )",
           "ScreenGuide.Core": "[0.3.0, )",
