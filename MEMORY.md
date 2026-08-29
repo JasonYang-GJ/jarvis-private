@@ -4,7 +4,7 @@
 
 ## 当前状态
 
-- 当前源码与功能基线候选：V0.5.0 / V2 阶段 3；S3-R1/R2/R3 已集成并通过离线 Release 门禁。正式标签与标签源码产物身份将在最终冻结证据提交中回填。上一正式标签 `v0.4.0-stage2` 继续指向 `33b5859dcaa697bacd5edc5036a58d162b723a0e`。
+- 当前正式源码与功能基线：V0.5.0 / V2 阶段 3；`v0.5.0-stage3` 指向 `d553e7e9d606037df87d98e99250de5498f5934a`，S3-R1/R2/R3、离线 Release 门禁、实际 Release 本机流程和标签源码产物核验均已通过。Stage 3 已冻结，不自动开始 Stage 4。
 - V2 阶段 1“统一会话中枢”已经通过；363/363 自动化和实际 Release DesktopClient + DesktopHost 的真实桌面验收均通过。
 - V0.2.1 标签 `v0.2.1-baseline` 保留为上一版回滚点；回滚必须同时使用 pre-v7 备份或隔离数据目录。
 - V2 阶段 2“可替换 AI 大脑与模型路由”已通过：统一 Chat Model、Provider Registry、Model Router、Prompt Registry、DPAPI、安全停用的 Codex 普通聊天适配器、DeepSeek/千问普通聊天 Provider、设置 UI/IPC、语义建议和 schema v8 AI 调用审计。

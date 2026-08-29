@@ -85,7 +85,7 @@
 
 ## 阶段 3：可控长期记忆
 
-状态：**R1/R2/R3 已集成并通过离线 Release 门禁；V0.5.0 最终标签与标签源码产物身份待回填。**
+状态：**INTEGRATED_PASS / FINAL FREEZE。** R1/R2/R3、离线 Release 门禁、实际 Release 本机流程和 V0.5.0 标签源码产物核验均已通过。
 
 S3-R1 当前范围：
 

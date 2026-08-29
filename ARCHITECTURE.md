@@ -1,6 +1,6 @@
-# 元枢当前架构（V0.5.0 / V2 阶段 3 冻结候选 As-Built）
+# 元枢当前架构（V0.5.0 / V2 阶段 3 正式冻结 As-Built）
 
-> 本文描述已集成并通过离线 Release 门禁的 S3-R1/R2/R3 当前结构。V0.5.0 正式标签与标签源码产物身份将在最终冻结证据提交中回填。更新时间：2026-08-30。
+> 本文描述已集成、通过离线 Release 门禁并完成标签源码产物核验的 S3-R1/R2/R3 当前结构。V0.5.0 / Stage 3 已正式冻结。更新时间：2026-08-30。
 
 ## 1. 运行结构
 
@@ -239,6 +239,8 @@ Codex 普通聊天适配器由 `CodexChatModelProvider` 承载，但生产策略
 - 阶段 2 离线 Release 定向 QA 173/173 通过；集成后 Qwen 56/56、R4 Runner 61/61、设置/无 fallback/工作负载隔离 3/3 通过。R1/R2/R3 已通过证据被复用，没有机械重跑全矩阵。
 - 阶段 2 普通聊天发布目标是 DeepSeek + 千问。DeepSeek 既有真实证据已冻结；Qwen 真实 Health、Ordinary Chat 和 Cancellation 通过。Codex 普通聊天不属于发布目标，普通聊天选 Qwen 时的独立真实 Codex 编程 Task 回归已通过。
 - 阶段 3 离线 Release 定向门禁 90/90 通过；实际 Release WPF Client + DesktopHost 通过 Stage 2 路由回归和 Stage 3 记忆 CRUD、预览、完整出站确认、单次发送、输入变化失效与删除流程，Provider 为进程内 Fake，网络、真实凭据和真实 Provider 请求均为 0。
+- 阶段 3 标签 `v0.5.0-stage3` 指向 `d553e7e9d606037df87d98e99250de5498f5934a`，annotated tag object 为 `a67d2b24308edb2ce72db97676b837f5018617b8`。独立干净标签源码 locked restore、Client/Host Release publish 和安装包编译通过，发布目录 539 个文件；Client/Host ProductVersion 均为 `0.5.0+d553e7e9d606037df87d98e99250de5498f5934a`，FileVersion 均为 `0.5.0.0`。
+- V0.5.0 安装包 `artifacts/release/元枢-V0.5.0-安装包.exe` 为 64,173,791 bytes，SHA-256 为 `4683E10CD6C5317EB537681978DB8A77E2DC15041838EF3DCE2DEE47C7C16F95`，未签名。标签后的仅文档证据提交不改变标签源码或二进制来源。
 - 阶段 2 标签 `v0.4.0-stage2` 指向 `33b5859dcaa697bacd5edc5036a58d162b723a0e`，annotated tag object 为 `47a2b3b70fc22904954e2291470e809e58303eca`。独立干净标签源码 locked restore 和 Release build 通过，发布目录 538 个文件；Client/Host ProductVersion 均为 `0.4.0+33b5859dcaa697bacd5edc5036a58d162b723a0e`，FileVersion 均为 `0.4.0.0`。
 - V0.4.0 安装包 `artifacts/release/元枢-V0.4.0-安装包.exe` 为 64,128,304 bytes，SHA-256 为 `222DC720E677202BBCAEC6D507F48ACFA8B2FCA31535FF7B03010DF80EE7DEE9`，未签名。标签后的仅文档证据提交不改变标签源码或二进制来源。
 - 阶段 1 标签 `v0.3.0-stage1` 继续指向源码提交 `0a8cd9e164c35b86f67ffd94b9e0f17c312a2576`，annotated tag object 为 `9fc790ade57fa2d3c18bc5ee84e8dc9e7018aa89`。
