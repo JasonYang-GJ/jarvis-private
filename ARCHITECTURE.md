@@ -1,6 +1,6 @@
-# 元枢当前架构（V2 阶段 2 候选 As-Built）
+# 元枢当前架构（V0.4.0 / V2 阶段 2 As-Built）
 
-> 本文描述阶段 2 当前工作树已经实现的结构，并明确标出尚待真实验收的部分。更新时间：2026-08-29。V0.3.0 阶段 1 仍是最近一次正式冻结基线；阶段 2 尚未形成最终标签、版本或安装包身份。设计与验证边界见 `docs/V2_STAGE2_AI_MODEL_ROUTING_DESIGN.md`。
+> 本文描述 V0.4.0 Stage 2 正式冻结的实际结构。更新时间：2026-08-29。设计与验证边界见 `docs/V2_STAGE2_AI_MODEL_ROUTING_DESIGN.md`，精确源码、标签和产物身份见 `docs/baselines/V0.4.0_STAGE2.md`。
 
 ## 1. 运行结构
 
@@ -38,7 +38,7 @@ DesktopHost 仍是唯一业务编排和审计边界。SessionCoordinator 协调�
 
 ## 2. 正式源码范围
 
-V0.3.0 的正式源码与当前阶段 2 候选切片由下面这些内容共同组成；最终阶段 2 正式范围仍以验收后的版本基线为准：
+V0.4.0 Stage 2 正式源码由下面这些内容共同组成：
 
 - `src/`：生产项目；阶段 2 新增 `ScreenGuide.AI.DeepSeek` 与 `ScreenGuide.AI.Qwen`，并扩展 AI Core、Codex、Host、Protocol、Persistence 和 DesktopClient。
 - `tests/`：自动化与真实桌面测试项目，包含 FakeCodexCli、FakeBrowser、Provider 网络边界和实际 WPF UI Automation 测试替身/Runner。
@@ -226,10 +226,10 @@ Codex 普通聊天适配器由 `CodexChatModelProvider` 承载，但生产策略
 
 - .NET SDK 由 `global.json` 固定到 10.0.400，允许同补丁线更新。
 - 普通依赖与 win-x64 发布依赖使用锁文件，发布脚本在 locked mode 下恢复。
-- `scripts/build-desktop-release.ps1` 是现有发布入口；阶段 2 最终版本号和安装产物尚未冻结。
+- `scripts/build-desktop-release.ps1` 是发布入口；阶段 2 版本号为 V0.4.0，安装产物身份记录在 `docs/baselines/V0.4.0_STAGE2.md`。
 - V0.3.0 冻结证据保持不变：全量自动化 363/363；实际 Release DesktopClient + DesktopHost + 真实 Codex Provider + 真实 Windows Notepad 已完成阶段 1 的 10 轮连续对话、3 次真取消和项目/文件/单窗口场景，证据目录为 `%LOCALAPPDATA%\ScreenGuide\Experiments\DesktopV01\20260823-184833`。
-- 阶段 2 当前已有开发期自动化覆盖：Provider 契约/Registry/Router、A → B → A、Prompt 哈希与固定评测、DPAPI、敏感信息清理、Codex 安全停用边界、DeepSeek/千问故障与取消、AI 设置 Service/IPC/UI、语义注入拒绝、schema v8 迁移和聊天/编程分离。
-- 阶段 2 普通聊天发布目标是 DeepSeek + 千问；千问真实账户/网络验收仍须在准确 SHA 获授权后完成。Codex 普通聊天不属于发布目标，独立 Codex 编程 Agent 仍需相应回归。最终全量测试数字、实际 Release DesktopClient、版本提交/标签和安装包身份尚待总控验收，当前不得宣布阶段 2 通过或发布。
+- 阶段 2 离线 Release 定向 QA 173/173 通过；集成后 Qwen 56/56、R4 Runner 61/61、设置/无 fallback/工作负载隔离 3/3 通过。R1/R2/R3 已通过证据被复用，没有机械重跑全矩阵。
+- 阶段 2 普通聊天发布目标是 DeepSeek + 千问。DeepSeek 既有真实证据已冻结；Qwen 真实 Health、Ordinary Chat 和 Cancellation 通过。Codex 普通聊天不属于发布目标，普通聊天选 Qwen 时的独立真实 Codex 编程 Task 回归已通过。
 - 阶段 1 标签 `v0.3.0-stage1` 继续指向源码提交 `0a8cd9e164c35b86f67ffd94b9e0f17c312a2576`，annotated tag object 为 `9fc790ade57fa2d3c18bc5ee84e8dc9e7018aa89`。
 - 标签源码的 locked restore 通过。发布目录共 533 个文件；Client/Host ProductVersion 为 `0.3.0+0a8cd9e164c35b86f67ffd94b9e0f17c312a2576`，FileVersion 为 `0.3.0.0`。
 - 安装包 `artifacts/release/元枢-V0.3.0-安装包.exe` 为 64,039,656 bytes，SHA-256 为 `42C609E130B29C6D96784C2B0266473B6D3417BE0DC5FE9C81C7517CB100FCC7`，未签名。标签后的仅文档证据提交不改变标签源码或二进制来源。
@@ -240,7 +240,7 @@ Codex 普通聊天适配器由 `CodexChatModelProvider` 承载，但生产策略
 - Session 快照随完整会话历史增长；ChangeVersion 是单 Host 进程内信号，实例 ID/启动时间只解决重启后的快照世代判断，不是跨进程持久事件日志。
 - 编程任务监视器仍在 Host 内部定时查询 Task 状态；这不等于 DesktopClient 的全量轮询，但仍可在后续改为更直接的任务事件。
 - 单窗口授权当前绑定窗口句柄、进程名和标题；这比只比较句柄更安全，但同一程序重新创建同标题窗口时仍可能碰到 Windows 句柄复用。后续应加入进程 ID 与进程启动时间等更稳定身份。
-- DeepSeek 既有真实证据仍须与当前发布候选身份对账；千问的真实账号、网络和 `qwen3.7-plus` 可用性尚待准确 SHA 授权后的联网验收，模拟 HTTP 边界不能代替真实联网。
+- DeepSeek/Qwen 真实验收是已冻结的精确 SHA 证据；日后修改 Provider 或模型合同时必须对新 SHA 重新获得最小真实请求授权，不得泛化旧结论。
 - Codex 普通聊天只保留 `codex-default` 描述并在生产策略下失败关闭，不提供真实普通聊天模型或 Usage；这不影响独立 Codex 编程 Agent。
 - Provider 切换会把同一 Conversation 的既有历史交给新的数据目的地；UI 已明确提示，但仍需真实用户体验验收。
 - 每轮重建完整 Conversation 历史并以字符上限保护；Token 预算、摘要和上下文裁剪尚未实现。

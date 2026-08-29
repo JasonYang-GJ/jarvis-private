@@ -1,6 +1,6 @@
 # 元枢 V2 阶段 2：可替换 AI 大脑与模型路由设计
 
-状态：**候选实现已落入当前工作树，最终阶段验收尚未完成。** 本文描述阶段 2 当前代码边界；普通聊天发布目标是 DeepSeek + 千问，千问真实账户/网络验收须在准确 SHA 获授权后执行。Codex 普通聊天保持安全停用且不是发布目标，独立 Codex 编程 Agent 仍需相应回归；实际 Release DesktopClient、全量回归、版本提交/标签和安装包证据仍由总控验收后确认。上一正式冻结点仍是 `v0.3.0-stage1`。
+状态：**V2 阶段 2 最终验收已通过，按 V0.4.0 冻结。** 普通聊天发布目标是 DeepSeek + 千问，千问只能由用户手动选择；Codex 普通聊天保持安全停用，独立 Codex 编程 Agent 已通过工作负载隔离回归。精确源码、标签和产物身份见 `docs/baselines/V0.4.0_STAGE2.md`。
 
 ## 1. 目标与边界
 
@@ -18,7 +18,7 @@
 
 本阶段不建设长期记忆、RAG、向量数据库、用户画像、复杂多 Agent 产品系统、手机端、云端远程控制、大规模 Tool Calling 或新的现实操作能力。
 
-## 2. 当前候选架构
+## 2. 当前正式架构
 
 ```text
 DesktopClient 设置页
@@ -67,8 +67,8 @@ DesktopHost
 | Provider | 注册模型 | 代码声明能力 | 凭据与数据去向 | 当前验收状态 |
 |---|---|---|---|---|
 | Codex | `codex-default` | `None`，不声明增量流式、结构化输出或 Tool Calling | 普通聊天生产策略安全停用；编程 Agent 继续使用独立的 Codex 连接器 | `PolicyDisabled` 失败关闭，不探测或启动 CLI；编程任务不受影响 |
-| DeepSeek | `deepseek-v4-flash`、`deepseek-v4-pro` | Streaming、JSON Object、Reasoning；不声明 JSON Schema/Tool Calling/Vision | API Key；固定发送到 `https://api.deepseek.com` | 实现和开发期网络边界自动化已覆盖；真实 Key、真实联网和计费验收待总控确认 |
-| 千问 | `qwen3.7-plus` | Streaming、JSON Object；不声明 Tool Calling/Vision/Reasoning | 独立 API Key；固定发送到 `https://dashscope.aliyuncs.com` | 手动备用候选；本地 HTTP/SSE、安全和设置边界已覆盖，真实 Key/联网尚未授权 |
+| DeepSeek | `deepseek-v4-flash`、`deepseek-v4-pro` | Streaming、JSON Object、Reasoning；不声明 JSON Schema/Tool Calling/Vision | API Key；固定发送到 `https://api.deepseek.com` | 真实 Health/Chat/Streaming/Cancellation/Audit 证据已冻结 |
+| 千问 | `qwen3.7-plus` | Streaming、JSON Object；不声明 Tool Calling/Vision/Reasoning | 独立 API Key；固定发送到 `https://dashscope.aliyuncs.com` | 手动备用；真实 Health/Chat/Cancellation 及审计通过 |
 
 这里的“注册模型”只表示当前代码允许选择的 Model ID，不等于已经完成真实账户可用性验证。
 
@@ -217,20 +217,26 @@ SQLite schema v8 新增 `ai_invocations`。从任一旧 schema 升级到当前 s
 - schema v7 → v8 迁移、备份和阶段 1 Conversation 保留；
 - 普通 Chat Provider 与 Codex 编程 Agent 工作负载分离。
 
-以上是“代码与开发期自动化边界已经建立”，不是阶段 2 最终通过声明。最终全量测试总数由总控完成验收后回填到完成报告和版本基线。
+以上边界已通过阶段 2 定向自动化与真实验收。R4 复用 R1/R2/R3 已冻结证据，不重复发送 DeepSeek 请求或机械跑 600+ 全矩阵。
 
-### 尚待总控真实验收
+### 已完成总控真实验收
 
-- DeepSeek 既有真实证据与当前发布候选的准确 SHA/模型/调用审计身份对账；
-- 在准确 SHA 获授权后，使用用户本人提供的千问 Key 完成官方网络、真实账户、`qwen3.7-plus` 可用性、连续对话和真取消验收；
-- Provider 真实故障恢复以及旧回答不晚到；
-- 实际 Release DesktopClient 中选择 Provider/Model、填写/删除 Key、健康检查、数据去向提示和同 Session 连续对话；
-- 普通聊天在 DeepSeek/千问间手动切换后，真实 Codex 编程任务完整回归；
-- 全量 Release 构建/自动化、真实桌面用户流程、Git 干净状态、最终版本/提交/标签和安装包身份。
+- DeepSeek 既有真实证据与集成候选的模型/调用审计身份已对账并冻结；
+- Qwen `qwen3.7-plus` 在授权的精确 SHA 上完成真实 Health、Ordinary Chat 和 Cancellation，无 retry/fallback/resend；
+- 实际 Release DesktopClient/Host 的 Provider/Model、凭据状态、数据去向、路由和取消证据通过；
+- 普通聊天选 Qwen 时，真实 Codex 编程 Task 仅 1 Task/1 attempt，项目文件范围、真实测试和 TaskEvidence 通过，普通聊天 Provider 请求为 0；
+- R4 离线 Release 定向 QA 173/173 及集成后定向 smoke 通过；最终 Git/标签/产物身份收口到 V0.4.0 基线文档。
 
-## 14. 当前风险
+## 14. 当前风险与已解除历史项
+
+- 真实 Provider 结论只绑定已验收的精确 SHA；日后修改 Provider/模型合同时必须重新申请最小真实请求预算。
+
+### 已解除的冻结前历史项
 
 - 千问的真实账号、区域网络和 `qwen3.7-plus` 可用性尚未在准确 SHA 授权下确认，模拟 HTTP 测试不能替代真实联网。
+- 上述“千问真实账号尚未确认”是冻结前历史风险，已由 `f7506a6013d83318572c63865607d78861e669bc` 的授权真实验收解除，不再是当前阻塞。
+
+### 当前保留风险
 - Codex 普通聊天适配器只保留 `codex-default` 描述并在生产策略下失败关闭，不提供真实普通聊天模型或 Usage；它不属于阶段 2 发布目标。
 - Provider 切换会把同一 Conversation 的既有历史发送到新数据目的地；UI 已提示，但用户仍需理解这一隐私影响。
 - 每轮重建完整 Conversation 历史，当前以字符上限保护；长会话的 Token 估算、摘要和上下文裁剪属于后续工程，不是长期记忆。

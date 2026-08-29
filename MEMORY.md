@@ -4,11 +4,11 @@
 
 ## 当前状态
 
-- 当前阶段 1 源码与功能基线：V0.3.0，标签 `v0.3.0-stage1`，源码提交 `0a8cd9e164c35b86f67ffd94b9e0f17c312a2576`，annotated tag object `9fc790ade57fa2d3c18bc5ee84e8dc9e7018aa89`。完整安装生命周期尚待干净机验收，因此安装包未获对外分发放行。
+- 当前源码与功能基线：V0.4.0 / V2 阶段 2，标签 `v0.4.0-stage2`。标签目标提交、annotated tag object 和安装包哈希按两提交冻结流程回填到 `docs/baselines/V0.4.0_STAGE2.md`。完整同 AppId 安装生命周期尚待干净机验收，因此安装包未获对外分发放行。
 - V2 阶段 1“统一会话中枢”已经通过；363/363 自动化和实际 Release DesktopClient + DesktopHost 的真实桌面验收均通过。
 - V0.2.1 标签 `v0.2.1-baseline` 保留为上一版回滚点；回滚必须同时使用 pre-v7 备份或隔离数据目录。
-- V2 阶段 2“可替换 AI 大脑与模型路由”已获批准，当前候选代码已实现统一 Chat Model、Provider Registry、Model Router、Prompt Registry、DPAPI、安全停用的 Codex 普通聊天适配器、DeepSeek/千问普通聊天 Provider、设置 UI/IPC、语义建议和 schema v8 AI 调用审计。
-- 阶段 2 普通聊天发布目标已确认为 DeepSeek + 千问；千问是手动备用，真实账户/网络验收须等待准确 SHA 授权。Codex 普通聊天保持 `ProductionDisabled`/`PolicyDisabled`，不是发布目标；独立 Codex 编程 Agent 仍需相应回归。实际 Release DesktopClient、全量测试和最终 Git/版本/产物冻结尚未完成。上一正式冻结事实仍是 V0.3.0，不得把候选工作树描述为已发布或阶段 2 已通过。
+- V2 阶段 2“可替换 AI 大脑与模型路由”已通过：统一 Chat Model、Provider Registry、Model Router、Prompt Registry、DPAPI、安全停用的 Codex 普通聊天适配器、DeepSeek/千问普通聊天 Provider、设置 UI/IPC、语义建议和 schema v8 AI 调用审计。
+- 阶段 2 普通聊天发布目标是 DeepSeek + 千问；千问是手动备用，无自动 fallback/retry/resend。DeepSeek 真实证据已冻结，Qwen 真实 Health/聊天/取消和普通聊天选 Qwen 时的真实 Codex 编程隔离均已通过。Codex 普通聊天保持 `ProductionDisabled`/`PolicyDisabled`，不是发布目标。
 - 长期记忆、RAG、向量数据库、复杂多 Agent 产品功能和手机端仍未实现，属于后续阶段。
 
 ## 长期架构决策
@@ -39,7 +39,7 @@
 12. 同 AppId 的安装/卸载测试不能覆盖仍需保护的正式安装登记；本机保留 V0.2.0 时不运行 `test-desktop-installer.ps1`，完整安装生命周期改在干净机验收。
 13. 正式冻结使用两提交：先提交源码/文档并创建标签，再从标签重建和计算安装包哈希，最后用单独证据提交回填提交号与哈希，避免自引用循环。
 
-## 阶段 2 候选实现决策
+## 阶段 2 已冻结决策
 
 1. 普通聊天业务只依赖供应商无关的 `IChatModelProvider`。Provider 差异必须留在实现层；SessionCoordinator、权限和 Conversation 领域不增加 DeepSeek/千问/Codex 分支。
 2. `ChatProviderRegistry` 只接收声明 `OrdinaryChat` 工作负载的 Provider，并校验 Provider/Model 唯一；新增 Provider 不应改变 SessionCoordinator。
@@ -55,11 +55,12 @@
 12. Qwen 是 DeepSeek 的手动备用普通聊天 Provider，仅注册 `qwen3.7-plus`。它固定发送到阿里云百炼官方兼容端点，不允许自定义 URL，不自动 fallback/重试/重发，不接管 Codex 编程 Agent；reasoning 只做有界消费，绝不进入 UI、数据库或日志。
 12. V0.3.0 只支持 schema v7。回滚到 `v0.3.0-stage1` 时必须保留 schema v8 数据库并使用 pre-v8 备份或隔离数据目录；不使用破坏性 Git/文件清理。
 
-## 阶段 2 当前验证边界
+## 阶段 2 已确认验收
 
-- 已有开发期自动化覆盖：统一契约、Registry/Router、A → B → A、Prompt 哈希与固定评测集、DPAPI、敏感信息清理、Codex 安全停用边界、DeepSeek/千问故障与取消、设置 Service/IPC/UI、语义输出注入拒绝、schema v8 迁移和普通聊天/编程分离。
-- 上述只表示候选实现已有测试保护，不代表最终阶段通过；最终全量测试数在总控验收后写入完成报告和版本基线。
-- 尚待总控收口：DeepSeek 既有真实证据与当前发布候选身份对账；准确 SHA 获授权后的千问真实账户/网络、多轮、纠正和取消；实际 Release DesktopClient；聊天切换后的真实 Codex 编程任务；最终 Git 工作区、提交、标签、版本和安装包身份。
+- R1/R2/R3 全部 `INTEGRATED_PASS`；DeepSeek Flash/Pro 真实验收证据已冻结，R4 不重测。
+- Qwen `qwen3.7-plus` 在 `f7506a6013d83318572c63865607d78861e669bc` 通过真实 Health、Ordinary Chat 和 Cancellation：3/3 HTTP、2/2 模型请求，DeepSeek/Codex 普通聊天请求 0，无 retry/fallback/resend。
+- R4 离线 Release 定向 QA 173/173 通过；集成后 Qwen 56/56、R4 Runner 61/61、设置/无 fallback/工作负载隔离 3/3 通过。
+- 普通聊天选为 Qwen 时，真实 Codex 编程回归仅 1 Task/1 attempt，指定文件为唯一 Git 变化，指定 `dotnet test` 通过，任务时窗内 `ai_invocations=0`。
 
 ## 阶段 1 已确认验收
 

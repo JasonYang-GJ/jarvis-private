@@ -68,7 +68,7 @@ if (-not $iscc) {
 & $iscc (Join-Path $repoRoot 'installer\ScreenGuideDesktop.iss')
 if ($LASTEXITCODE -ne 0) { throw 'Installer compilation failed.' }
 
-$installer = Join-Path $releaseRoot '元枢-V0.3.0-安装包.exe'
+$installer = Join-Path $releaseRoot '元枢-V0.4.0-安装包.exe'
 if (-not (Test-Path -LiteralPath $installer)) { throw 'Installer was not produced.' }
 Get-FileHash -Algorithm SHA256 -LiteralPath $installer
 Write-Host "Release installer: $installer"

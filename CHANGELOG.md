@@ -2,11 +2,11 @@
 
 本项目从 V0.2.1 起采用可追溯版本记录。更早内容以历史报告和 Git 历史为准。
 
-## 未发布 - V2 阶段 2：可替换 AI 大脑与模型路由（验收中）
+## 0.4.0 - 2026-08-29（V2 阶段 2：通过）
 
-> 当前条目记录候选工作树，不代表阶段 2 已通过或已经发布。阶段 2 普通聊天发布目标是 DeepSeek + 千问；千问真实账户/网络验收、实际 Release DesktopClient、Codex 编程 Agent 回归、全量回归、最终版本/提交/标签和安装包证据仍待总控收口。Codex 普通聊天保持安全停用且不是发布目标；上一正式版本仍是 0.3.0。
+> 阶段 2 功能、真实 Provider、真实 Codex 编程隔离和 Release 定向验收已通过。普通聊天发布目标是 DeepSeek + 千问，千问仅作手动备用；Codex 普通聊天保持安全停用，独立 Codex 编程 Agent 不随聊天 Provider 变化。
 
-### 已实现的候选切片
+### 已实现能力
 
 - 新增供应商无关的 Chat Model 请求/响应、能力、健康、错误、流式回调、Usage、Finish Reason、Provider Metadata 和每 Turn 取消契约。
 - 新增 `ChatProviderRegistry` 与 `ModelRouter`；路由按 Turn 冻结，只支持用户明确设置，不做静默 fallback 或自动付费重试。
@@ -21,10 +21,12 @@
 - 新增只建议、不授权的 AI 语义意图：严格结构解析、置信度/歧义门槛和本机确定性重规划；模型 target、权限或确认主张不能直接执行。
 - 强化日志、Crash、IPC 和 UI 错误的敏感信息清理。
 
-### 开发期验证与待验收
+### 最终验收
 
-- 上述 Registry/Router、Provider 网络边界、Prompt 哈希/评测、DPAPI、故障/取消、设置 IPC/UI、语义安全和 v7 → v8 迁移已建立定向自动化测试；最终全量数字尚未冻结。
-- 尚待：DeepSeek 既有真实证据与候选身份对账、准确 SHA 获授权后的千问真实账户/网络/多轮与真取消、实际 Release DesktopClient、聊天切换后的真实 Codex 编程回归、全量 Release 回归以及 Git/版本/安装包冻结。
+- R1/R2/R3 已集成通过；R4 复用已冻结的 DeepSeek 真实证据，未重复发送 DeepSeek 请求。
+- 精确 SHA `f7506a6013d83318572c63865607d78861e669bc` 上 Qwen Health、Ordinary Chat 和 Cancellation 真实验收通过：3/3 HTTP、2/2 模型请求，无 retry/fallback/resend，取消三层终态均为 `Cancelled`。
+- R4 离线 Release 定向 QA 173/173 通过；集成后 Qwen 56/56、R4 Runner 61/61、设置/无 fallback/工作负载隔离 3/3 通过。
+- 普通聊天保存为 Qwen 时，真实 Codex 编程回归仅 1 个 Task/1 次 attempt，指定文件为唯一 Git 变化，指定 `dotnet test` 真实通过，普通聊天 Provider 请求为 0。
 - 长期记忆、RAG、向量数据库、用户画像、复杂多 Agent 产品功能、手机端、云端远程控制和大规模 Tool Calling 不属于本条目。
 
 ## 0.3.0 - 2026-08-24（V2 阶段 1：通过）

@@ -1,6 +1,6 @@
 # 元枢 V2 分阶段路线图
 
-> 路线图是计划，不代表已经实现。每个阶段必须独立验收；上一阶段未完成版本冻结时，不得自动进入下一阶段。更新时间：2026-08-24。
+> 路线图是计划，不代表已经实现。每个阶段必须独立验收；上一阶段未完成版本冻结时，不得自动进入下一阶段。更新时间：2026-08-29。
 
 ## 阶段 0：冻结真实基线
 
@@ -59,33 +59,33 @@
 
 ## 阶段 2：可替换 AI 大脑与模型路由
 
-状态：**开发候选实现已完成主要切片，最终验收中；尚未通过或冻结版本。**
+状态：**已通过（2026-08-29）；V0.4.0 Stage 2 冻结。**
 
-已实现且有开发期自动化覆盖：
+已完成：
 
 - 供应商无关 Chat Model 契约与能力/健康/错误/取消描述；
 - Provider Registry、按 Turn 冻结的 Model Router 和无静默 fallback 规则；
 - Prompt Registry、版本/用途/适用 Provider/修改原因/SHA-256 追踪及固定小型评测集；
 - Codex 普通聊天 Provider 与既有 Codex 编程 Agent 分离；
-- DeepSeek 普通聊天 Provider 的 HTTP/SSE、健康、故障、取消和边界限制；
+- DeepSeek 与手动备用千问普通聊天 Provider 的 HTTP/SSE、健康、故障、取消和边界限制；
 - Windows DPAPI 凭据、敏感信息清理、AI 设置 Service/IPC/UI；
 - `ai_invocations` 与 SQLite schema v8 迁移/升级前备份；
 - 只建议、不授权的结构化语义意图，本机严格校验后仍交给确定性 Planner 和 CapabilityPolicy；
 - 同一 Session 的 A → B → A、对话历史重建和编程 Agent 工作负载隔离测试边界。
 
-最终通过前必须完成：
+最终验收证据：
 
-- 真实 Codex 与真实 DeepSeek 各自多轮、纠正、切换和真取消；
-- 使用用户本人 DeepSeek Key 的官方网络/账户/模型/故障验收，不以模拟 HTTP 冒充真实联网；
-- 实际 Release DesktopClient 的 Provider/Model、Key、健康、数据去向和同 Session 流程；
-- 普通聊天切换到 DeepSeek 后的真实 Codex 编程任务回归；
-- 全量 Release 构建/自动化、安全攻击、Git 干净状态、最终提交/标签/版本和安装包身份。
+- R1/R2/R3 集成证据冻结，DeepSeek 不在 R4 重测；
+- Qwen 官方网络中的健康、普通聊天、真取消与调用审计通过，且无 retry/fallback/resend；
+- 实际 Release DesktopClient/Host 的设置、凭据状态、路由与工作负载隔离通过；
+- 普通聊天选为 Qwen 时，真实 Codex 编程 Task 和 TaskEvidence 通过，普通聊天 Provider 请求为 0；
+- Release 定向测试、Git 集成、标签源码构建和产物身份收口到 `docs/baselines/V0.4.0_STAGE2.md`。
 
 阶段 2 不改变阶段 1 的 Session/Turn 安全边界，也不把 Provider Thread、Conversation 历史或 AI 调用审计当作长期记忆。详细设计见 [V2_STAGE2_AI_MODEL_ROUTING_DESIGN.md](docs/V2_STAGE2_AI_MODEL_ROUTING_DESIGN.md)。
 
 ## 阶段 3：可控长期记忆
 
-状态：未开始；只有阶段 2 完成真实 Provider/桌面验收并冻结后，才由项目负责人决定是否启动。
+状态：未开始；阶段 2 已冻结，仍必须等待项目负责人单独批准后才可启动。
 
 - 用户长期事实、项目状态、任务状态和历史决策分库存储；
 - 相关性检索、来源、置信度、过期、冲突、纠错和删除；

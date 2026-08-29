@@ -1,6 +1,6 @@
-# 元枢产品事实（V2 阶段 2 候选实现，验收中）
+# 元枢产品事实（V0.4.0 / V2 阶段 2）
 
-> 当前产品事实的唯一入口。更新时间：2026-08-29。V0.3.0 阶段 1 仍是最近一次正式冻结基线；当前工作树已加入阶段 2 候选实现，但 DeepSeek/千问发布目标的真实验收、实际 Release DesktopClient、全量回归和版本冻结仍待总控收口。不得把本页的候选能力描述当作已经发布或阶段 2 已通过。
+> 当前产品事实的唯一入口。更新时间：2026-08-29。V2 阶段 2 功能、真实 Provider、真实 Codex 编程隔离和 Release 定向验收已通过；版本冻结为 V0.4.0，正式标签和安装包哈希按两提交冻结流程记录在 `docs/baselines/V0.4.0_STAGE2.md`。
 
 ## 产品定位
 
@@ -8,9 +8,9 @@
 
 ## 状态说明
 
-- **已冻结事实**：V0.3.0 阶段 1 的 Session、真取消、上下文补齐、安全门禁和真实桌面证据保持有效。
-- **阶段 2 已实现且有开发期自动化覆盖**：统一 Chat Model、Provider Registry、Model Router、Prompt Registry、DPAPI 凭据、安全停用的 Codex 普通聊天适配器、DeepSeek/千问 Provider、设置 UI/IPC、AI 调用审计和只建议不授权的语义意图边界。
-- **阶段 2 发布合同与待验收项**：普通聊天发布目标是 DeepSeek + 千问；千问仅为用户手动选择的备用 Provider，真实账户/网络验收须在准确 SHA 获授权后执行。Codex 普通聊天保持 `ProductionDisabled`/`PolicyDisabled`，不是阶段 2 的真实 Provider 发布目标；独立的 Codex 编程 Agent 仍需相应回归。实际 Release DesktopClient、全量测试和 Git/版本/产物冻结也尚待总控收口。
+- **阶段 1 保留事实**：V0.3.0 的 Session、真取消、上下文补齐、安全门禁和真实桌面证据保持有效。
+- **阶段 2 正式能力**：统一 Chat Model、Provider Registry、Model Router、Prompt Registry、DPAPI 凭据、安全停用的 Codex 普通聊天适配器、DeepSeek/千问 Provider、设置 UI/IPC、AI 调用审计和只建议不授权的语义意图边界。
+- **发布合同**：普通聊天发布目标是 DeepSeek + 千问；千问仅作手动备用，无自动 fallback、retry 或跨 Provider resend。Codex 普通聊天保持 `ProductionDisabled`/`PolicyDisabled`，独立 Codex 编程 Agent 不随聊天 Provider 改变。
 - **未来阶段 3**：长期记忆、RAG、向量数据库、跨 Session 检索和用户画像，当前均未实现。
 
 详细代码边界见 [阶段 2 AI 模型路由设计](docs/V2_STAGE2_AI_MODEL_ROUTING_DESIGN.md)。
@@ -60,7 +60,7 @@
 ## 当前 AI 大脑的真实状态
 
 - 普通问答现在通过 `RoutedConversationProvider → ModelRouter → IChatModelProvider`，SessionCoordinator 和 ConversationService 不需要知道具体供应商。
-- `ChatProviderRegistry` 当前注册三个普通聊天 Provider：安全停用的 Codex `codex-default`、DeepSeek 的 `deepseek-v4-flash`/`deepseek-v4-pro`，以及手动备用千问的 `qwen3.7-plus`。阶段 2 普通聊天发布目标是 DeepSeek + 千问；Codex 普通聊天不是发布目标。Qwen 不会自动接管 DeepSeek 失败，也不会自动重试或跨 Provider 重发；千问真实账户可用性仍以准确 SHA 获授权后的联网验收为准。
+- `ChatProviderRegistry` 当前注册三个普通聊天 Provider：安全停用的 Codex `codex-default`、DeepSeek 的 `deepseek-v4-flash`/`deepseek-v4-pro`，以及手动备用千问的 `qwen3.7-plus`。阶段 2 普通聊天发布目标是 DeepSeek + 千问；Codex 普通聊天不是发布目标。Qwen 真实健康、普通聊天和真取消已在授权预算内通过；它不会自动接管 DeepSeek 失败，也不会自动重试或跨 Provider 重发。
 - 同一 Conversation 的消息历史由元枢 SQLite 保存，每个 Turn 会重新交给当时明确选择的 Provider。Provider A → B → A 不依赖供应商 Thread，也不创建新 Session。
 - 切换只影响下一轮普通聊天；正在运行的回答保持原路由。系统没有静默 fallback，故障时不会在未告知用户的情况下把内容改发另一个供应商。
 - Prompt 已迁移到 `prompts/runtime/`：当前为 `chat.general@1` 与 `intent.semantic@1`。Registry 校验版本、适用 Provider、相对路径和内容 SHA-256；每次 AI 调用把 Prompt ID/版本/哈希、Provider、Model、目的地、状态和 Usage 写入 `ai_invocations`，不保存 Key 或完整 Prompt/Conversation 副本。
@@ -79,23 +79,19 @@
 - 真实验收运行证据位于 `%LOCALAPPDATA%\ScreenGuide\Experiments\DesktopV01\20260823-184833`；该目录含隔离测试数据和日志，不进入 Git。
 - 自动化全量测试：363/363 通过，失败 0，跳过 0。
 
-## 阶段 2 开发期验证状态
+## 阶段 2 最终验收状态
 
-已建立并有定向自动化覆盖的边界：统一契约、Provider/Model 注册、Turn 路由冻结、A → B → A、Prompt 哈希、固定 Prompt 评测集、DPAPI 凭据生命周期、敏感信息清理、Codex 普通聊天安全停用边界、DeepSeek/千问故障与取消、语义注入拒绝、设置 Service/IPC/UI、schema v7 → v8 迁移和普通聊天/编程 Agent 分离。
+已通过的固定证据：
 
-这些结果只证明候选实现的开发期边界，不等于阶段 2 最终通过。最终全量测试数字将在总控验收后写入完成报告和新的版本基线。
-
-仍待总控真实验收：
-
-- 核对并冻结 DeepSeek 的既有真实验收证据，并在准确 SHA 获授权后完成千问真实账户/官方网络、连续多轮、用户纠正和真取消验收；
-- 实际 Release DesktopClient 完成 Provider/Model 选择、Key 保存/删除、健康检查、切换和同 Session 对话；
-- 普通聊天在 DeepSeek/千问间手动切换后，真实 Codex 编程任务、项目权限和 TaskEvidence 不回归；
-- 全量 Release 构建/测试、真实桌面流程、Git 干净状态、最终提交/标签/版本和安装包身份。
+- R1/R2/R3 全部 `INTEGRATED_PASS`；DeepSeek Flash 和 Pro 的真实健康、普通聊天、流式、取消和审计证据已冻结，未在 R4 重测。
+- Qwen `qwen3.7-plus` 在精确 SHA `f7506a6013d83318572c63865607d78861e669bc` 通过真实 Health、Ordinary Chat 和 Cancellation：3/3 HTTP 成功、2/2 模型请求，取消后 Session/Conversation/AI Invocation 全为 `Cancelled`，DeepSeek/Codex 普通聊天请求为 0，无 retry/fallback/resend。
+- R4 离线 Release 定向 QA 173/173 通过；集成后 Qwen 56/56、R4 Runner 61/61、设置/无 fallback/工作负载隔离 3/3 通过。
+- 当普通聊天保存为 `qwen/qwen3.7-plus` 时，真实 Codex 编程任务仅1个 Task、1次 attempt，指定文件为唯一 Git 变化，指定 `dotnet test` 真实通过，TaskEvidence 完整，任务时窗内普通聊天 AI Invocation 为 0。
 
 ## 尚未完成
 
 - 没有用户长期记忆、RAG、向量数据库、相关性检索、记忆纠错或跨 Session 个性化。SQLite 保存 Session/聊天记录不等于长期记忆。
-- 阶段 2 尚未完成 DeepSeek + 千问发布合同、真实 Release DesktopClient 和 Codex 编程 Agent 回归的最终收口，因此不能把千问或 Provider 切换描述为正式发布能力。
+- 同 AppId 的安装—卸载—重装生命周期尚未在干净 Windows 环境执行；当前标签是可追溯的 Stage 2 开发基线，不等于已放行对外分发。
 - Prompt 已有版本、哈希和固定小型评测集，但真实模型质量评测、成本/Token 对比和长期回归趋势仍未形成发布证据。
 - Provider 路由当前只支持用户明确默认选择，不做自动成本/速度路由或自动降级；这是阶段 2 的有意范围，不是缺陷。
 - 每轮会把当前 Conversation 历史交给所选 Provider，并有字符上限；尚未做 Token 精确预算、摘要或上下文裁剪。
@@ -115,11 +111,9 @@
 
 ## 版本与安装状态
 
-- 阶段 2 当前只是未发布候选工作树；尚未指定最终版本号、提交、标签或安装包哈希，也尚未通过阶段 2 完成判定。
-- 当前阶段 1 源码与功能基线：V0.3.0，标签 `v0.3.0-stage1`，源码提交 `0a8cd9e164c35b86f67ffd94b9e0f17c312a2576`。完整安装生命周期仍需在干净机验收后，才可把安装包视为对外分发版本。
-- annotated tag object：`9fc790ade57fa2d3c18bc5ee84e8dc9e7018aa89`。标签之后的仅文档证据提交不改变标签所指源码。
-- DesktopClient / DesktopHost ProductVersion 均为 `0.3.0+0a8cd9e164c35b86f67ffd94b9e0f17c312a2576`，FileVersion 均为 `0.3.0.0`；发布目录共 533 个文件。
-- 正式安装包为 `artifacts/release/元枢-V0.3.0-安装包.exe`，64,039,656 bytes，SHA-256 为 `42C609E130B29C6D96784C2B0266473B6D3417BE0DC5FE9C81C7517CB100FCC7`，未签名。
+- 阶段 2 版本为 V0.4.0，正式标签为 `v0.4.0-stage2`。标签目标提交、annotated tag object、干净源码产物和安装包 SHA-256 由标签后的仅文档证据提交回填。
+- 阶段 2 最终集成功能 SHA 为 `f7506a6013d83318572c63865607d78861e669bc`；最终标签还包含 V0.4.0 版本和冻结文档。
+- 上一标签 `v0.3.0-stage1` 继续可达；完整安装生命周期仍需在干净机验收后，才可把安装包视为对外分发版本。
 - V0.2.1 标签 `v0.2.1-baseline` 保留为上一版回滚点；回滚数据必须使用 pre-v7 备份或隔离数据目录。
 - 阶段 2 候选代码把 SQLite 升到 schema v8 并在升级前建立 `pre-v8` 备份。V0.3.0 不能直接打开 schema v8；回滚到阶段 1 时必须使用 pre-v8 备份或隔离数据目录，不能覆盖正式数据库。
 - 为保护本机同 AppId 的现有 V0.2.0 安装、卸载登记和用户数据，本阶段没有在该机器重复完整安装—卸载—重装；该发布生命周期仍应在干净机执行。
