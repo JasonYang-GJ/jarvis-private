@@ -26,6 +26,12 @@
              Link="R3RunnerHostComposition.cs" />
     <Compile Include="..\..\tools\ScreenGuide.DesktopV01.RealAcceptanceRunner\R3RunnerExecution.cs"
              Link="R3RunnerExecution.cs" />
+    <Compile Include="..\..\tools\ScreenGuide.DesktopV01.RealAcceptanceRunner\R4QwenValidation.cs"
+             Link="R4QwenValidation.cs" />
+    <Compile Include="..\..\tools\ScreenGuide.DesktopV01.RealAcceptanceRunner\R4QwenRunnerHostComposition.cs"
+             Link="R4QwenRunnerHostComposition.cs" />
+    <Compile Include="..\..\tools\ScreenGuide.DesktopV01.RealAcceptanceRunner\R4QwenRunnerExecution.cs"
+             Link="R4QwenRunnerExecution.cs" />
   </ItemGroup>
 
   <ItemGroup>

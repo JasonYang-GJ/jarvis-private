@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using ScreenGuide.AI.Core;
 using ScreenGuide.AI.DeepSeek;
+using ScreenGuide.AI.Qwen;
 using ScreenGuide.Core.Ai;
 using ScreenGuide.Core.Conversations;
 using ScreenGuide.Core.Sessions;
@@ -13,7 +14,22 @@ using ScreenGuide.DesktopV01.RealAcceptanceRunner;
 using ScreenGuide.Skills.Windows;
 
 const string R3ResultPrefix = "YUANSHU_R3_DEEPSEEK_RESULT ";
+const string R4ResultPrefix = "YUANSHU_R4_QWEN_RESULT ";
 var r3Validation = R3DeepSeekValidationOptions.Parse(args);
+var r4Validation = R4QwenValidationOptions.Parse(args);
+if (r3Validation.Requested && r4Validation.Requested)
+{
+    Console.WriteLine(R4ResultPrefix + JsonSerializer.Serialize(new
+    {
+        Stage = "guard",
+        Passed = false,
+        ErrorCode = "real_provider_mode_conflict",
+        Requests = 0,
+        RealProvider = false
+    }));
+    return 2;
+}
+
 if (r3Validation.Requested && !r3Validation.IsValid)
 {
     Console.WriteLine(R3ResultPrefix + JsonSerializer.Serialize(new
@@ -27,7 +43,43 @@ if (r3Validation.Requested && !r3Validation.IsValid)
     return 2;
 }
 
+
+if (r4Validation.Requested && !r4Validation.IsValid)
+{
+    Console.WriteLine(R4ResultPrefix + JsonSerializer.Serialize(new
+    {
+        Stage = "guard",
+        Passed = false,
+        ErrorCode = r4Validation.ErrorCode,
+        Requests = 0,
+        RealProvider = false
+    }));
+    return 2;
+}
+
+R4BuildIdentityEvidence? r4BuildIdentity = null;
+if (r4Validation.IsValid)
+{
+    try
+    {
+        r4BuildIdentity = R4QwenBuildIdentity.RequireMatch(r4Validation.ExpectedCommitSha!);
+    }
+    catch (R4ValidationFailureException exception)
+    {
+        Console.WriteLine(R4ResultPrefix + JsonSerializer.Serialize(new
+        {
+            Stage = "guard",
+            Passed = false,
+            ErrorCode = exception.ErrorCode,
+            Requests = 0,
+            RealProvider = false
+        }));
+        return 2;
+    }
+}
+
 var stage2R3DeepSeek = r3Validation.IsValid;
+var stage2R4Qwen = r4Validation.IsValid;
 var smokeOnly = args.Any(argument =>
     string.Equals(argument, "--smoke", StringComparison.OrdinalIgnoreCase));
 var desktopActionSmoke = args.Any(argument =>
@@ -85,6 +137,8 @@ Process? trackedHost = null;
 IHost? r3Host = null;
 R3BudgetedChatModelProvider? r3Provider = null;
 R3RunEvidenceTracker? r3EvidenceTracker = null;
+IHost? r4Host = null;
+R4QwenBudgetedChatModelProvider? r4Provider = null;
 if (stage2R3DeepSeek)
 {
     var r3HostOptions = new DesktopHostOptions(dataRoot, pipeName: pipeName);
@@ -98,7 +152,18 @@ if (stage2R3DeepSeek)
     r3Provider = r3Host.Services.GetRequiredService<R3BudgetedChatModelProvider>();
 }
 
-if (trackHost && !stage2R3DeepSeek)
+if (stage2R4Qwen)
+{
+    var r4HostOptions = new DesktopHostOptions(dataRoot, pipeName: pipeName);
+    _ = await R4IsolatedAiSettingsMaterializer.MaterializeAndVerifyAsync(
+        r4HostOptions.AiSettingsPath);
+    r4Host = R4QwenRunnerHostComposition.BuildCurrentUser(r4HostOptions, r4Validation);
+    using var startupTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+    await r4Host.StartAsync(startupTimeout.Token);
+    r4Provider = r4Host.Services.GetRequiredService<R4QwenBudgetedChatModelProvider>();
+}
+
+if (trackHost && !stage2R3DeepSeek && !stage2R4Qwen)
 {
     var hostStartInfo = new ProcessStartInfo
     {
@@ -139,13 +204,25 @@ try
         TimeSpan.FromSeconds(15));
     var status = await api.GetSystemStatusAsync();
     if (!stage2R3DeepSeek
+        && !stage2R4Qwen
         && (!status.Codex.IsCompatible || status.Codex.Version != "0.147.0"))
     {
         throw new InvalidOperationException(
             $"Codex 兼容门禁未通过：{status.Codex.Version ?? "not-found"}。 ");
     }
 
-    if (stage2R3DeepSeek)
+    if (stage2R4Qwen)
+    {
+        var outcome = await R4QwenRunnerExecution.ExecuteAsync(
+            api,
+            r4Host!,
+            r4Provider!,
+            r4Validation,
+            r4BuildIdentity!);
+        Console.WriteLine(R4ResultPrefix + outcome.StructuredEvidenceJson);
+        return outcome.Passed ? 0 : 1;
+    }
+    else if (stage2R3DeepSeek)
     {
         if (r3Validation.CancellationOnly)
         {
@@ -437,6 +514,13 @@ finally
         using var shutdownTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         await r3Host.StopAsync(shutdownTimeout.Token);
         r3Host.Dispose();
+    }
+
+    if (r4Host is not null)
+    {
+        using var shutdownTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        await r4Host.StopAsync(shutdownTimeout.Token);
+        r4Host.Dispose();
     }
 
     if (trackedHost is not null)
