@@ -76,7 +76,7 @@ public sealed class MemoryService(
     {
         ArgumentNullException.ThrowIfNull(prepared);
         var now = timeProvider.GetUtcNow();
-        if (now > prepared.ExpiresAtUtc)
+        if (now >= prepared.ExpiresAtUtc)
         {
             throw new MemoryServiceException(
                 MemoryOutboundErrorCodes.ConsentStale,

@@ -408,6 +408,35 @@ public sealed class MemoryServiceTests
         Assert.DoesNotContain("撤权后不可发送", failure.Message, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task OutboundCommitAllowsOneTickBeforeExpiryAndRejectsTheExactExpiryBoundary()
+    {
+        var timeProvider = new MutableTimeProvider(Now);
+        await using var environment = await MemoryEnvironment.CreateAsync(timeProvider: timeProvider);
+        var memory = await environment.Service.CreateAsync(MemoryDraft.Create(
+            MemoryCategory.UserPreference,
+            MemoryScope.Global,
+            "到期边界",
+            "只用于假数据边界测试",
+            null,
+            Now));
+        var prepared = await environment.Service.PrepareOutboundAsync(CreateOutboundRequest(
+            [new MemoryOutboundItemReference(memory.Metadata.Id, memory.Metadata.Version)],
+            environment.Project.Id,
+            "https://api.deepseek.com/v1/chat/completions"));
+
+        timeProvider.UtcNow = prepared.ExpiresAtUtc.AddTicks(-1);
+        var envelope = await environment.Service.CommitOutboundAsync(prepared);
+        Assert.Equal(prepared.ConsentId, envelope.Audit.ConsentId);
+
+        timeProvider.UtcNow = prepared.ExpiresAtUtc;
+        var failure = await Assert.ThrowsAsync<MemoryServiceException>(() =>
+            environment.Service.CommitOutboundAsync(prepared));
+
+        Assert.Equal(MemoryOutboundErrorCodes.ConsentStale, failure.Code);
+        Assert.DoesNotContain("只用于假数据边界测试", failure.Message, StringComparison.Ordinal);
+    }
+
     private static MemoryOutboundPreparationRequest CreateOutboundRequest(
         IReadOnlyList<MemoryOutboundItemReference> items,
         Guid projectId,
@@ -435,7 +464,8 @@ public sealed class MemoryServiceTests
             SqliteTaskStore taskStore,
             SqliteMemoryStore memoryStore,
             ProjectRecord project,
-            IMemoryContentProtector protector)
+            IMemoryContentProtector protector,
+            TimeProvider timeProvider)
         {
             _root = root;
             DatabasePath = databasePath;
@@ -446,7 +476,7 @@ public sealed class MemoryServiceTests
                 memoryStore,
                 protector,
                 taskStore,
-                new FixedTimeProvider(Now));
+                timeProvider);
         }
 
         public string DatabasePath { get; }
@@ -460,7 +490,8 @@ public sealed class MemoryServiceTests
         public MemoryService Service { get; }
 
         public static async Task<MemoryEnvironment> CreateAsync(
-            IMemoryContentProtector? protector = null)
+            IMemoryContentProtector? protector = null,
+            TimeProvider? timeProvider = null)
         {
             var root = Path.Combine(Path.GetTempPath(), $"screen-guide-memory-host-{Guid.NewGuid():N}");
             var databasePath = Path.Combine(root, "state", "tasking.db");
@@ -497,7 +528,8 @@ public sealed class MemoryServiceTests
                 taskStore,
                 memoryStore,
                 project,
-                protector ?? new FakeMemoryContentProtector());
+                protector ?? new FakeMemoryContentProtector(),
+                timeProvider ?? new FixedTimeProvider(Now));
         }
 
         public async ValueTask DisposeAsync()
@@ -564,5 +596,12 @@ public sealed class MemoryServiceTests
     private sealed class FixedTimeProvider(DateTimeOffset now) : TimeProvider
     {
         public override DateTimeOffset GetUtcNow() => now;
+    }
+
+    private sealed class MutableTimeProvider(DateTimeOffset utcNow) : TimeProvider
+    {
+        public DateTimeOffset UtcNow { get; set; } = utcNow;
+
+        public override DateTimeOffset GetUtcNow() => UtcNow;
     }
 }

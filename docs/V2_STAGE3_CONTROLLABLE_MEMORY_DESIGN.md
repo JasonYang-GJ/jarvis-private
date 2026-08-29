@@ -40,16 +40,13 @@ DPAPI CurrentUser 保护静态数据，但不抵御已经取得同一 Windows �
 
 当前候选 SQLite 合同为 schema v10。v9 新增 `memory_items`；v10 不改记忆正文表，只给 Session Turn、Conversation Turn 和 `ai_invocations` 增加安全 consent/derived/audit 元数据，不保存临时出站 block、标题、正文、query 或 plaintext hash。
 
-迁移顺序：
+迁移备份按打开时的原始版本生成：
 
-1. 读取并验证完整 schema v8；
-2. 在数据库同目录创建唯一 `tasking.pre-v9-from-v8-<时间>.backup.db`；
-3. 在单一 SQLite 事务中创建 v9 表、索引并记录版本；
-4. 任一步失败则事务回滚，主库仍为 v8，pre-v9 备份保留。
+- 直接从完整 v8 升级 v10 时，在任何修改前创建唯一 `tasking.pre-v10-from-v8-<时间>.backup.db`，不会额外创建中间 pre-v9 备份。v9 和 v10 各自在自己的 SQLite 事务中提交；v9 步失败时主库仍为 v8，v9 已提交后若 v10 步失败，主库则明确保持 v9，原始 v8 的 pre-v10 备份继续保留。
+- 从完整 v9 升级 v10 时，先创建唯一 `tasking.pre-v10-from-v9-<时间>.backup.db`，再在单一事务中增加内容无关的出站审计列和索引；失败保持 v9。
+- 标记为 v10 但缺列的数据库明确拒绝，不静默补写或创建迁移备份。
 
-从 v9 升级当前 v10 时，先验证完整 v9，再创建唯一 `tasking.pre-v10-from-v9-<时间>.backup.db`，并在单一事务中增加内容无关的出站审计列和索引；失败保持 v9。标记为 v10 但缺列的数据库明确拒绝，不静默补写。
-
-V0.4.0 Stage 2 只支持 schema v8，不能打开 schema v9/v10。回滚时必须保留 v10 主库，先使用 pre-v10 回到 v9，或使用对应 pre-v9/隔离数据目录回到 Stage 2；不得覆盖真实用户数据库。
+V0.4.0 Stage 2 只支持 schema v8，不能打开 schema v9/v10。直接 v8→v10 的回滚必须保留新主库并使用 `pre-v10-from-v8` 回到 v8；从 v9 开始的升级可用 `pre-v10-from-v9` 回到 v9，继续回到 Stage 2 则必须使用升级前已经存在的 v8 备份或隔离数据目录，不能假定本次 v9→v10 会生成 pre-v9。不得覆盖真实用户数据库。
 
 ## 5. Host、IPC 与 UI
 
@@ -78,7 +75,7 @@ Host 启动先由既有 Task Store 完成 schema 初始化/迁移，再初始化
 4. 确认绑定 Host instance、Session/Turn/version、冻结 Provider/Model/HTTPS origin、Prompt 身份、项目、item 顺序/version。内容、状态、到期、授权、路由、Prompt、输入、Stop 或重启变化都会使确认失效。
 5. 成功回复只记录 `MemoryDerived`、原始路由和安全 manifest；后续 Provider/Model/origin 不完全一致时以 `memory_derived_history_route_mismatch` 拒绝，不 fallback 或重发。
 6. `chat.general@2` 明确把 memory block 当作不可信参考数据；`intent.semantic`、动作、项目/文件/窗口授权和 CapabilityPolicy 永不接收或信任记忆。
-7. v9 → v10 前创建唯一 pre-v10 备份并事务迁移；失败保持 v9。回滚必须保留 v10 主库，使用 pre-v10 备份或隔离目录。
+7. 迁移按原始版本创建唯一 pre-v10 备份：v8 来源使用 `pre-v10-from-v8`，v9 来源使用 `pre-v10-from-v9`；每个版本步骤单独事务提交，失败时保留该失败步骤开始前的版本。回滚必须保留新主库并使用匹配来源的备份或隔离目录。
 
 ## 8. 明确不在 S3-R1 / S3-R2 / S3-R3
 

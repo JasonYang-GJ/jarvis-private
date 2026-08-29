@@ -328,6 +328,188 @@ public sealed class SessionFrozenRouteTests
         }
     }
 
+    [Theory]
+    [InlineData("replacement-input")]
+    [InlineData("new-topic")]
+    [InlineData("session-switch")]
+    public async Task ReplacingForegroundWorkImmediatelyRemovesTheOldMemoryConsentFromIpc(
+        string interruption)
+    {
+        await using var environment = DesktopHostTestEnvironment.Create();
+        var provider = new SwitchingRecordingProvider(
+            "provider-a",
+            "model-a",
+            _ => Task.FromResult("不应调用"),
+            "https://provider-a.example/v1/chat");
+        using var host = environment.BuildHost(services =>
+        {
+            services.AddSingleton<IAiSettingsStore>(
+                new MutableSettingsStore(Route("provider-a", "model-a")));
+            services.AddSingleton(new ChatProviderRegistry([provider]));
+        });
+        await host.StartAsync();
+        var coordinator = host.Services.GetRequiredService<SessionCoordinator>();
+        IDesktopApiClient client = new DesktopApiClient(environment.Options.PipeName);
+        var memoryService = host.Services.GetRequiredService<MemoryService>();
+        var sessionStore = host.Services.GetRequiredService<ISessionStore>();
+        var invocations = host.Services.GetRequiredService<IAiInvocationStore>();
+        const string oldTitle = "应立即清除的标题";
+        const string oldBody = "应立即清除的正文";
+        var oldMemory = await memoryService.CreateAsync(MemoryDraft.Create(
+            MemoryCategory.UserPreference,
+            MemoryScope.Global,
+            oldTitle,
+            oldBody,
+            null,
+            environment.TimeProvider.GetUtcNow()));
+        var replacementMemory = await memoryService.CreateAsync(MemoryDraft.Create(
+            MemoryCategory.Decision,
+            MemoryScope.Global,
+            "替换请求标题",
+            "替换请求正文",
+            null,
+            environment.TimeProvider.GetUtcNow()));
+        var originalSession = await coordinator.StartNewAsync("临时记忆确认清理");
+        Guid? alternateSessionId = null;
+        if (string.Equals(interruption, "session-switch", StringComparison.Ordinal))
+        {
+            alternateSessionId = (await client.StartNewSessionAsync("切换目标会话")).SessionId;
+            _ = await client.SetCurrentSessionAsync(originalSession.Session.Id);
+        }
+
+        var submitted = await client.SubmitSessionInputAsync(new SessionInputRequestDto(
+            "等待确认的旧输入",
+            "Text",
+            $"memory-cleanup-{interruption}",
+            originalSession.Session.Id,
+            MemoryItems:
+            [
+                new MemoryOutboundItemReferenceDto(oldMemory.Metadata.Id, oldMemory.Metadata.Version)
+            ]));
+        _ = await WaitForPhaseAsync(
+            sessionStore,
+            submitted.TurnId,
+            SessionTurnPhase.WaitingForMemoryOutboundConsent);
+        var prepared = Assert.Single((await coordinator.GetCurrentAsync())!.MemoryOutboundConsents);
+
+        SessionSnapshotDto snapshot;
+        if (string.Equals(interruption, "replacement-input", StringComparison.Ordinal))
+        {
+            var replacement = await client.SubmitSessionInputAsync(new SessionInputRequestDto(
+                "替换旧输入",
+                "Text",
+                "memory-cleanup-replacement-new-turn",
+                originalSession.Session.Id,
+                MemoryItems:
+                [
+                    new MemoryOutboundItemReferenceDto(
+                        replacementMemory.Metadata.Id,
+                        replacementMemory.Metadata.Version)
+                ]));
+            _ = await WaitForPhaseAsync(
+                sessionStore,
+                replacement.TurnId,
+                SessionTurnPhase.WaitingForMemoryOutboundConsent);
+            snapshot = (await client.GetCurrentSessionAsync())!;
+        }
+        else if (string.Equals(interruption, "new-topic", StringComparison.Ordinal))
+        {
+            _ = await client.StartNewSessionAsync("新话题");
+            snapshot = await client.SetCurrentSessionAsync(originalSession.Session.Id);
+        }
+        else
+        {
+            snapshot = await client.SetCurrentSessionAsync(alternateSessionId!.Value);
+            snapshot = await client.SetCurrentSessionAsync(originalSession.Session.Id);
+        }
+
+        Assert.DoesNotContain(
+            snapshot.MemoryOutboundConsents ?? [],
+            item => item.TurnId == submitted.TurnId);
+        Assert.DoesNotContain(
+            oldTitle,
+            (snapshot.MemoryOutboundConsents ?? [])
+                .SelectMany(item => item.Items)
+                .SelectMany(item => new[] { item.Title, item.Body }));
+        Assert.DoesNotContain(
+            oldBody,
+            (snapshot.MemoryOutboundConsents ?? [])
+                .SelectMany(item => item.Items)
+                .SelectMany(item => new[] { item.Title, item.Body }));
+        var cancelled = await sessionStore.GetTurnAsync(submitted.TurnId);
+        Assert.Equal(SessionTurnPhase.Cancelled, cancelled?.Phase);
+        var stale = await Assert.ThrowsAsync<DesktopApiException>(() =>
+            client.ConfirmMemoryOutboundAsync(
+                originalSession.Session.Id,
+                submitted.TurnId,
+                prepared.ConsentId,
+                confirmed: true));
+        Assert.Equal(MemoryOutboundErrorCodes.ConsentStale, stale.Error.Code);
+        Assert.Empty(provider.Requests);
+        Assert.Empty(await invocations.GetForSessionTurnAsync(submitted.TurnId));
+        await host.StopAsync();
+    }
+
+    [Fact]
+    public async Task ExactMemoryConsentExpiryFailsBeforeInvocationOrProvider()
+    {
+        await using var environment = DesktopHostTestEnvironment.Create();
+        var provider = new SwitchingRecordingProvider(
+            "provider-a",
+            "model-a",
+            _ => Task.FromResult("不应调用"),
+            "https://provider-a.example/v1/chat");
+        using var host = environment.BuildHost(services =>
+        {
+            services.AddSingleton<IAiSettingsStore>(
+                new MutableSettingsStore(Route("provider-a", "model-a")));
+            services.AddSingleton(new ChatProviderRegistry([provider]));
+        });
+        await host.StartAsync();
+        var coordinator = host.Services.GetRequiredService<SessionCoordinator>();
+        var memoryService = host.Services.GetRequiredService<MemoryService>();
+        var sessionStore = host.Services.GetRequiredService<ISessionStore>();
+        var invocations = host.Services.GetRequiredService<IAiInvocationStore>();
+        var memory = await memoryService.CreateAsync(MemoryDraft.Create(
+            MemoryCategory.UserFact,
+            MemoryScope.Global,
+            "精确到期",
+            "到期时不得发送",
+            null,
+            environment.TimeProvider.GetUtcNow()));
+        var session = await coordinator.StartNewAsync("精确到期边界");
+        var submitted = await coordinator.SubmitAsync(
+            session.Session.Id,
+            "等待到期",
+            "Text",
+            "memory-consent-exact-expiry",
+            memoryItems:
+            [
+                new MemoryOutboundItemReference(memory.Metadata.Id, memory.Metadata.Version)
+            ]);
+        _ = await WaitForPhaseAsync(
+            sessionStore,
+            submitted.TurnId,
+            SessionTurnPhase.WaitingForMemoryOutboundConsent);
+        var prepared = Assert.Single((await coordinator.GetCurrentAsync())!.MemoryOutboundConsents);
+        environment.TimeProvider.UtcNow = prepared.ExpiresAtUtc;
+
+        _ = await coordinator.ConfirmMemoryOutboundAsync(
+            session.Session.Id,
+            submitted.TurnId,
+            prepared.ConsentId,
+            confirmed: true);
+        var failed = await WaitForPhaseAsync(
+            sessionStore,
+            submitted.TurnId,
+            SessionTurnPhase.Failed);
+
+        Assert.Equal(MemoryOutboundErrorCodes.ConsentStale, failed.FailureCode);
+        Assert.Empty(provider.Requests);
+        Assert.Empty(await invocations.GetForSessionTurnAsync(submitted.TurnId));
+        await host.StopAsync();
+    }
+
     [Fact]
     public async Task RestartInterruptsPreparedMemoryConsentWithoutProviderInvocationOrReplay()
     {

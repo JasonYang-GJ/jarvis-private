@@ -1621,6 +1621,8 @@ public sealed class SessionCoordinator(
             string? operationIdAtCancellation = null;
             try
             {
+                _preparedMemoryConsents.TryRemove(turn.Id, out _);
+                _requestedMemorySelections.TryRemove(turn.Id, out _);
                 latest = await sessionStore.GetTurnAsync(turn.Id, cancellationToken).ConfigureAwait(false);
                 if (latest is null
                     || SessionTurnPhases.IsTerminal(latest.Phase)

@@ -225,8 +225,8 @@ Codex 普通聊天适配器由 `CodexChatModelProvider` 承载，但生产策略
 
 - 默认运行数据：`%LOCALAPPDATA%\ScreenGuide\V01`。
 - SQLite：`state\tasking.db`；日志：`logs`；Codex 辅助数据：`codex`；任务证据：`evidence`；AI 路由：`settings\ai-settings.json`；DPAPI 密文：`secrets\<provider>.bin`。
-- schema v9 新增独立 `memory_items`；schema v10 只给 Session Turn、Conversation Turn 和 `ai_invocations` 增加内容无关的 consent/来源/manifest 元数据。v9 → v10 前生成唯一 pre-v10 备份并事务迁移；失败保持 v9。
-- V0.4.0 只支持 schema v8，不能打开 schema v9。回滚 Stage 2 必须保留 v9 主库并使用 pre-v9 备份或隔离数据目录；继续回滚 Stage 1 时仍遵守既有 pre-v8 边界，不能用当前源码冒充冻结历史版本。
+- schema v9 新增独立 `memory_items`；schema v10 只给 Session Turn、Conversation Turn 和 `ai_invocations` 增加内容无关的 consent/来源/manifest 元数据。迁移按打开时的原始版本生成唯一备份：直接 v8→v10 使用 `pre-v10-from-v8`，v9→v10 使用 `pre-v10-from-v9`；每个版本步骤单独事务提交，失败保留该步骤开始前的版本。
+- V0.4.0 只支持 schema v8，不能打开 schema v9/v10。直接 v8→v10 的 Stage 2 回滚使用 `pre-v10-from-v8`；v9 来源先用 `pre-v10-from-v9` 回到 v9，再使用升级前已有的 v8 备份或隔离数据目录，不能假定 v9→v10 会生成 pre-v9。继续回滚 Stage 1 时仍遵守既有 pre-v8 边界，不能用当前源码冒充冻结历史版本。
 - 重启恢复：运行中的 Session Turn 先标记 `Interrupted`，再与已有 Conversation Turn / Task 终态对账；可安全等待的项目补充状态保留，不自动执行原请求。
 - 单窗口像素和录音不写入数据库或仓库；单窗口像素在本机分析后清零。
 
