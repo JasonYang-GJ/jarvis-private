@@ -231,10 +231,10 @@ public sealed class QwenChatModelProviderTests
     }
 
     [Fact]
-    public async Task HealthAcceptsExactPermissionWhenOptionalScopeAndActionEchoesAreAbsent()
+    public async Task HealthAcceptsOfficialPermissionResponseWithEmptyCode()
     {
         var handler = new StubHttpMessageHandler((_, _) => Task.FromResult(PermissionResponse(
-            """{"success":true,"code":"","total":1,"page_no":1,"page_size":1,"data":[{"model":"qwen3.7-plus"}]}""")));
+            """{"success":true,"code":"","message":"","request_id":"FAKE_HEALTH_REQUEST_ID_MUST_NOT_ESCAPE","output":{"total":1,"page_no":1,"page_size":1,"permissions":[{"model":"qwen3.7-plus","name":"Qwen 3.7 Plus","permissions":{"inference":true,"fine_tune":false,"deploy":false}}]}}""")));
         await using var provider = new QwenChatModelProvider(
             new TestCredentialStore("fake-qwen-key"),
             handler);
@@ -569,7 +569,7 @@ public sealed class QwenChatModelProviderTests
     };
 
     private const string ValidPermissionJson =
-        """{"success":true,"code":"","request_id":"FAKE_HEALTH_REQUEST_ID_MUST_NOT_ESCAPE","total":1,"page_no":1,"page_size":1,"data":[{"model":"qwen3.7-plus","authorization_scope":"AUTHORIZED","action":"INFERENCE"}]}""";
+        """{"success":true,"code":null,"message":"","request_id":"FAKE_HEALTH_REQUEST_ID_MUST_NOT_ESCAPE","output":{"total":1,"page_no":1,"page_size":1,"permissions":[{"model":"qwen3.7-plus","name":"Qwen 3.7 Plus","permissions":{"inference":true,"fine_tune":false,"deploy":false}}]}}""";
 
     private static HttpResponseMessage PermissionResponse() => new(HttpStatusCode.OK)
     {
@@ -590,16 +590,19 @@ public sealed class QwenChatModelProviderTests
 
     public static TheoryData<string> InvalidPermissionResponses => new()
     {
-        """{"success":true,"code":"","total":0,"page_no":1,"page_size":1,"data":[]}""",
-        """{"success":true,"code":"","total":2,"page_no":1,"page_size":1,"data":[{"model":"qwen3.7-plus"},{"model":"qwen3.7-plus"}]}""",
-        """{"success":true,"code":"","total":1,"page_no":1,"page_size":1,"data":[{"model":"qwen-other"}]}""",
-        """{"success":true,"code":"","total":1,"page_no":1,"page_size":1,"data":[{"model":"qwen3.7-plus","authorization_scope":"UNAUTHORIZED"}]}""",
-        """{"success":true,"code":"","total":1,"page_no":1,"page_size":1,"data":[{"model":"qwen3.7-plus","action":"TRAINING"}]}""",
-        """{"success":true,"code":"","total":1,"page_no":2,"page_size":1,"data":[{"model":"qwen3.7-plus"}]}""",
-        """{"success":true,"code":"","total":1,"page_no":1,"page_size":2,"data":[{"model":"qwen3.7-plus"}]}""",
-        """{"success":false,"code":"","total":1,"page_no":1,"page_size":1,"data":[{"model":"qwen3.7-plus"}]}""",
-        """{"success":true,"code":"permission_denied","total":1,"page_no":1,"page_size":1,"data":[{"model":"qwen3.7-plus"}]}""",
-        """{"success":true,"code":"","total":1,"page_no":1,"page_size":1,"data":{}}""",
+        """{"success":true,"code":"","output":{"total":0,"page_no":1,"page_size":1,"permissions":[]}}""",
+        """{"success":true,"code":"","output":{"total":2,"page_no":1,"page_size":1,"permissions":[{"model":"qwen3.7-plus","permissions":{"inference":true}},{"model":"qwen3.7-plus","permissions":{"inference":true}}]}}""",
+        """{"success":true,"code":"","output":{"total":1,"page_no":1,"page_size":1,"permissions":[{"model":"qwen-other","permissions":{"inference":true}}]}}""",
+        """{"success":true,"code":"","output":{"total":1,"page_no":1,"page_size":1,"permissions":[{"model":"qwen3.7-plus"}]}}""",
+        """{"success":true,"code":"","output":{"total":1,"page_no":1,"page_size":1,"permissions":[{"model":"qwen3.7-plus","permissions":{"inference":false}}]}}""",
+        """{"success":true,"code":"","output":{"total":1,"page_no":2,"page_size":1,"permissions":[{"model":"qwen3.7-plus","permissions":{"inference":true}}]}}""",
+        """{"success":true,"code":"","output":{"total":1,"page_no":1,"page_size":2,"permissions":[{"model":"qwen3.7-plus","permissions":{"inference":true}}]}}""",
+        """{"success":false,"code":"","output":{"total":1,"page_no":1,"page_size":1,"permissions":[{"model":"qwen3.7-plus","permissions":{"inference":true}}]}}""",
+        """{"success":true,"output":{"total":1,"page_no":1,"page_size":1,"permissions":[{"model":"qwen3.7-plus","permissions":{"inference":true}}]}}""",
+        """{"success":true,"code":"permission_denied","output":{"total":1,"page_no":1,"page_size":1,"permissions":[{"model":"qwen3.7-plus","permissions":{"inference":true}}]}}""",
+        """{"success":true,"code":" ","output":{"total":1,"page_no":1,"page_size":1,"permissions":[{"model":"qwen3.7-plus","permissions":{"inference":true}}]}}""",
+        """{"success":true,"code":"","output":{"total":1,"page_no":1,"page_size":1,"permissions":{}}}""",
+        """{"success":true,"code":"","total":1,"page_no":1,"page_size":1,"data":[{"model":"qwen3.7-plus","permissions":{"inference":true}}]}""",
         "{"
     };
 

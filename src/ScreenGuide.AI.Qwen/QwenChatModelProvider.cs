@@ -260,28 +260,30 @@ public sealed class QwenChatModelProvider : IChatModelProvider
             var balanceIssue = IsExplicitBalanceIssue(root);
             if (!root.TryGetProperty("success", out var success)
                 || success.ValueKind is not JsonValueKind.True
-                || !root.TryGetProperty("code", out var code)
-                || code.ValueKind != JsonValueKind.String
-                || code.GetString() is not "")
+                || !HasEmptyOrNullCode(root))
             {
                 return new HealthPermissionEvidence(false, balanceIssue);
             }
 
-            if (!TryReadExactInt32(root, "total", 1)
-                || !TryReadExactInt32(root, "page_no", 1)
-                || !TryReadExactInt32(root, "page_size", 1)
-                || !root.TryGetProperty("data", out var data)
-                || data.ValueKind != JsonValueKind.Array
-                || data.GetArrayLength() != 1)
+            if (!root.TryGetProperty("output", out var output)
+                || output.ValueKind != JsonValueKind.Object
+                || !TryReadExactInt32(output, "total", 1)
+                || !TryReadExactInt32(output, "page_no", 1)
+                || !TryReadExactInt32(output, "page_size", 1)
+                || !output.TryGetProperty("permissions", out var permissions)
+                || permissions.ValueKind != JsonValueKind.Array
+                || permissions.GetArrayLength() != 1)
             {
                 return new HealthPermissionEvidence(false, balanceIssue);
             }
 
-            var permission = data[0];
+            var permission = permissions[0];
             if (permission.ValueKind != JsonValueKind.Object
                 || !HasExactString(permission, "model", DefaultModelId)
-                || !HasOptionalExactString(permission, "authorization_scope", "AUTHORIZED")
-                || !HasOptionalExactString(permission, "action", "INFERENCE"))
+                || !permission.TryGetProperty("permissions", out var permissionFlags)
+                || permissionFlags.ValueKind != JsonValueKind.Object
+                || !permissionFlags.TryGetProperty("inference", out var inference)
+                || inference.ValueKind != JsonValueKind.True)
             {
                 return new HealthPermissionEvidence(false, balanceIssue);
             }
@@ -309,13 +311,10 @@ public sealed class QwenChatModelProvider : IChatModelProvider
         && value.ValueKind == JsonValueKind.String
         && string.Equals(value.GetString(), expected, StringComparison.Ordinal);
 
-    private static bool HasOptionalExactString(
-        JsonElement element,
-        string propertyName,
-        string expected) =>
-        !element.TryGetProperty(propertyName, out var value)
-        || value.ValueKind == JsonValueKind.String
-        && string.Equals(value.GetString(), expected, StringComparison.Ordinal);
+    private static bool HasEmptyOrNullCode(JsonElement element) =>
+        element.TryGetProperty("code", out var code)
+        && (code.ValueKind == JsonValueKind.Null
+            || code.ValueKind == JsonValueKind.String && code.GetString() is "");
 
     private static bool IsExplicitBalanceIssue(JsonElement root)
     {
