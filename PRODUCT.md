@@ -1,6 +1,6 @@
 # 元枢产品事实（V2 阶段 2 候选实现，验收中）
 
-> 当前产品事实的唯一入口。更新时间：2026-08-29。V0.3.0 阶段 1 仍是最近一次正式冻结基线；当前工作树已加入阶段 2 候选实现，但真实 Provider、实际 Release DesktopClient、全量回归和版本冻结仍待总控验收。不得把本页的候选能力描述当作已经发布或阶段 2 已通过。
+> 当前产品事实的唯一入口。更新时间：2026-08-29。V0.3.0 阶段 1 仍是最近一次正式冻结基线；当前工作树已加入阶段 2 候选实现，但 DeepSeek/千问发布目标的真实验收、实际 Release DesktopClient、全量回归和版本冻结仍待总控收口。不得把本页的候选能力描述当作已经发布或阶段 2 已通过。
 
 ## 产品定位
 
@@ -9,8 +9,8 @@
 ## 状态说明
 
 - **已冻结事实**：V0.3.0 阶段 1 的 Session、真取消、上下文补齐、安全门禁和真实桌面证据保持有效。
-- **阶段 2 已实现且有开发期自动化覆盖**：统一 Chat Model、Provider Registry、Model Router、Prompt Registry、DPAPI 凭据、Codex/DeepSeek/Qwen Provider、设置 UI/IPC、AI 调用审计和只建议不授权的语义意图边界。
-- **阶段 2 尚待真实验收**：两个真实 Provider 的连续对话/切换/取消、真实 DeepSeek Key 与联网、实际 Release DesktopClient、真实 Codex 编程回归、全量测试和 Git/版本/产物冻结。
+- **阶段 2 已实现且有开发期自动化覆盖**：统一 Chat Model、Provider Registry、Model Router、Prompt Registry、DPAPI 凭据、安全停用的 Codex 普通聊天适配器、DeepSeek/千问 Provider、设置 UI/IPC、AI 调用审计和只建议不授权的语义意图边界。
+- **阶段 2 发布合同与待验收项**：普通聊天发布目标是 DeepSeek + 千问；千问仅为用户手动选择的备用 Provider，真实账户/网络验收须在准确 SHA 获授权后执行。Codex 普通聊天保持 `ProductionDisabled`/`PolicyDisabled`，不是阶段 2 的真实 Provider 发布目标；独立的 Codex 编程 Agent 仍需相应回归。实际 Release DesktopClient、全量测试和 Git/版本/产物冻结也尚待总控收口。
 - **未来阶段 3**：长期记忆、RAG、向量数据库、跨 Session 检索和用户画像，当前均未实现。
 
 详细代码边界见 [阶段 2 AI 模型路由设计](docs/V2_STAGE2_AI_MODEL_ROUTING_DESIGN.md)。
@@ -60,7 +60,7 @@
 ## 当前 AI 大脑的真实状态
 
 - 普通问答现在通过 `RoutedConversationProvider → ModelRouter → IChatModelProvider`，SessionCoordinator 和 ConversationService 不需要知道具体供应商。
-- `ChatProviderRegistry` 当前注册三个普通聊天 Provider：安全停用的 Codex `codex-default`、DeepSeek 的 `deepseek-v4-flash`/`deepseek-v4-pro`，以及手动备用千问的 `qwen3.7-plus`。Qwen 不会自动接管 DeepSeek 失败，也不会自动重试或跨 Provider 重发；这些仍只是代码注册项，真实账户可用性以最终联网验收为准。
+- `ChatProviderRegistry` 当前注册三个普通聊天 Provider：安全停用的 Codex `codex-default`、DeepSeek 的 `deepseek-v4-flash`/`deepseek-v4-pro`，以及手动备用千问的 `qwen3.7-plus`。阶段 2 普通聊天发布目标是 DeepSeek + 千问；Codex 普通聊天不是发布目标。Qwen 不会自动接管 DeepSeek 失败，也不会自动重试或跨 Provider 重发；千问真实账户可用性仍以准确 SHA 获授权后的联网验收为准。
 - 同一 Conversation 的消息历史由元枢 SQLite 保存，每个 Turn 会重新交给当时明确选择的 Provider。Provider A → B → A 不依赖供应商 Thread，也不创建新 Session。
 - 切换只影响下一轮普通聊天；正在运行的回答保持原路由。系统没有静默 fallback，故障时不会在未告知用户的情况下把内容改发另一个供应商。
 - Prompt 已迁移到 `prompts/runtime/`：当前为 `chat.general@1` 与 `intent.semantic@1`。Registry 校验版本、适用 Provider、相对路径和内容 SHA-256；每次 AI 调用把 Prompt ID/版本/哈希、Provider、Model、目的地、状态和 Usage 写入 `ai_invocations`，不保存 Key 或完整 Prompt/Conversation 副本。
@@ -81,26 +81,25 @@
 
 ## 阶段 2 开发期验证状态
 
-已建立并有定向自动化覆盖的边界：统一契约、Provider/Model 注册、Turn 路由冻结、A → B → A、Prompt 哈希、固定 Prompt 评测集、DPAPI 凭据生命周期、敏感信息清理、Codex/DeepSeek/Qwen 故障与取消、语义注入拒绝、设置 Service/IPC/UI、schema v7 → v8 迁移和普通聊天/编程 Agent 分离。
+已建立并有定向自动化覆盖的边界：统一契约、Provider/Model 注册、Turn 路由冻结、A → B → A、Prompt 哈希、固定 Prompt 评测集、DPAPI 凭据生命周期、敏感信息清理、Codex 普通聊天安全停用边界、DeepSeek/千问故障与取消、语义注入拒绝、设置 Service/IPC/UI、schema v7 → v8 迁移和普通聊天/编程 Agent 分离。
 
 这些结果只证明候选实现的开发期边界，不等于阶段 2 最终通过。最终全量测试数字将在总控验收后写入完成报告和新的版本基线。
 
 仍待总控真实验收：
 
-- 真实 Codex 与真实 DeepSeek 分别完成连续多轮、用户纠正和真取消；
-- 使用用户本人 DeepSeek Key 访问官方网络，并确认真实模型、账户/余额、错误和数据去向；
+- 核对并冻结 DeepSeek 的既有真实验收证据，并在准确 SHA 获授权后完成千问真实账户/官方网络、连续多轮、用户纠正和真取消验收；
 - 实际 Release DesktopClient 完成 Provider/Model 选择、Key 保存/删除、健康检查、切换和同 Session 对话；
-- 普通聊天切换到 DeepSeek 后，真实 Codex 编程任务、项目权限和 TaskEvidence 不回归；
+- 普通聊天在 DeepSeek/千问间手动切换后，真实 Codex 编程任务、项目权限和 TaskEvidence 不回归；
 - 全量 Release 构建/测试、真实桌面流程、Git 干净状态、最终提交/标签/版本和安装包身份。
 
 ## 尚未完成
 
 - 没有用户长期记忆、RAG、向量数据库、相关性检索、记忆纠错或跨 Session 个性化。SQLite 保存 Session/聊天记录不等于长期记忆。
-- 阶段 2 尚未完成两个真实 Provider、真实 Release DesktopClient 和真实 Codex 编程回归的最终验收，因此不能把 DeepSeek 或模型切换描述为正式发布能力。
+- 阶段 2 尚未完成 DeepSeek + 千问发布合同、真实 Release DesktopClient 和 Codex 编程 Agent 回归的最终收口，因此不能把千问或 Provider 切换描述为正式发布能力。
 - Prompt 已有版本、哈希和固定小型评测集，但真实模型质量评测、成本/Token 对比和长期回归趋势仍未形成发布证据。
 - Provider 路由当前只支持用户明确默认选择，不做自动成本/速度路由或自动降级；这是阶段 2 的有意范围，不是缺陷。
 - 每轮会把当前 Conversation 历史交给所选 Provider，并有字符上限；尚未做 Token 精确预算、摘要或上下文裁剪。
-- Codex 普通聊天只能显示 `codex-default`，实际底层模型由本机 Codex 配置决定，当前无法提供准确模型 ID 或 Usage。
+- Codex 普通聊天适配器仍注册 `codex-default`，但生产策略有意在接触 CLI 或用户项目之前以 `ProductionDisabled`/`PolicyDisabled` 失败关闭；它不是阶段 2 发布目标。Codex 编程 Agent 继续走独立连接器。
 - 本机单窗口理解主要依赖 OCR 和可访问控件，不能可靠理解纯图片、视频、图标语义和复杂空间关系。
 - 语音模型不在安装包内；商业分发前仍需完成许可证、下载和更新方案。
 - 安装包未做数字签名；Windows 可能显示未知发布者警告。

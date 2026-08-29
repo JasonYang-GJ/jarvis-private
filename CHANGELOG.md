@@ -4,7 +4,7 @@
 
 ## 未发布 - V2 阶段 2：可替换 AI 大脑与模型路由（验收中）
 
-> 当前条目记录候选工作树，不代表阶段 2 已通过或已经发布。真实 Codex、真实 DeepSeek、实际 Release DesktopClient、全量回归、最终版本/提交/标签和安装包证据仍待总控验收；上一正式版本仍是 0.3.0。
+> 当前条目记录候选工作树，不代表阶段 2 已通过或已经发布。阶段 2 普通聊天发布目标是 DeepSeek + 千问；千问真实账户/网络验收、实际 Release DesktopClient、Codex 编程 Agent 回归、全量回归、最终版本/提交/标签和安装包证据仍待总控收口。Codex 普通聊天保持安全停用且不是发布目标；上一正式版本仍是 0.3.0。
 
 ### 已实现的候选切片
 
@@ -12,7 +12,7 @@
 - 新增 `ChatProviderRegistry` 与 `ModelRouter`；路由按 Turn 冻结，只支持用户明确设置，不做静默 fallback 或自动付费重试。
 - 新增 `RoutedConversationProvider`，从元枢 ConversationStore 重建完整会话历史，使同一 Session 可 A → B → A 切换而不依赖 Provider Thread。
 - 新增 `prompts/runtime` Prompt Registry，当前注册 `chat.general@1` 和 `intent.semantic@1`；校验相对路径、Provider 范围和 SHA-256，并加入固定小型回归评测集。
-- 新增 Codex 普通聊天 Provider，与既有 Codex 编程 Connector/Skill 分离；聊天 Provider 切换不改变编程 Agent、项目权限和 TaskEvidence。
+- 保留 Codex 普通聊天适配器并固定为 `ProductionDisabled`/`PolicyDisabled`，与既有 Codex 编程 Connector/Skill 分离；它不是阶段 2 发布目标，聊天 Provider 切换不改变编程 Agent、项目权限和 TaskEvidence。
 - 新增 DeepSeek 普通聊天 Provider，固定官方 HTTPS 目的地，支持当前注册模型、SSE/JSON Object、健康检查、大小限制、取消和 401/402/429/5xx/超时/网络/非法响应等安全错误映射。
 - 新增千问手动备用普通聊天 Provider，仅暴露 `qwen3.7-plus`，固定阿里云百炼 HTTPS 端点与文本 Chat Completions 负载；支持 SSE/JSON Object、Usage、健康、取消和安全错误映射，拒绝 Tool Call，内部 reasoning 只做有界消费且不公开。千问失败不会自动改发 DeepSeek/Codex。
 - 新增 Windows DPAPI `CurrentUser` 凭据存储、短生命周期 lease、原子替换、删除/损坏恢复和缓冲清零；Key 不写 Git、SQLite 或普通设置。
@@ -24,7 +24,7 @@
 ### 开发期验证与待验收
 
 - 上述 Registry/Router、Provider 网络边界、Prompt 哈希/评测、DPAPI、故障/取消、设置 IPC/UI、语义安全和 v7 → v8 迁移已建立定向自动化测试；最终全量数字尚未冻结。
-- 尚待：两个真实 Provider 多轮与真取消、真实 DeepSeek Key/官方网络/账户、实际 Release DesktopClient、聊天切换后的真实 Codex 编程回归、全量 Release 回归以及 Git/版本/安装包冻结。
+- 尚待：DeepSeek 既有真实证据与候选身份对账、准确 SHA 获授权后的千问真实账户/网络/多轮与真取消、实际 Release DesktopClient、聊天切换后的真实 Codex 编程回归、全量 Release 回归以及 Git/版本/安装包冻结。
 - 长期记忆、RAG、向量数据库、用户画像、复杂多 Agent 产品功能、手机端、云端远程控制和大规模 Tool Calling 不属于本条目。
 
 ## 0.3.0 - 2026-08-24（V2 阶段 1：通过）

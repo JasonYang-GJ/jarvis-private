@@ -1,6 +1,6 @@
 # 元枢 V2 阶段 2：可替换 AI 大脑与模型路由设计
 
-状态：**候选实现已落入当前工作树，最终阶段验收尚未完成。** 本文描述阶段 2 当前代码边界；真实 Codex、真实 DeepSeek 联网、实际 Release DesktopClient、全量回归、版本提交/标签和安装包证据仍由总控验收后确认。上一正式冻结点仍是 `v0.3.0-stage1`。
+状态：**候选实现已落入当前工作树，最终阶段验收尚未完成。** 本文描述阶段 2 当前代码边界；普通聊天发布目标是 DeepSeek + 千问，千问真实账户/网络验收须在准确 SHA 获授权后执行。Codex 普通聊天保持安全停用且不是发布目标，独立 Codex 编程 Agent 仍需相应回归；实际 Release DesktopClient、全量回归、版本提交/标签和安装包证据仍由总控验收后确认。上一正式冻结点仍是 `v0.3.0-stage1`。
 
 ## 1. 目标与边界
 
@@ -10,7 +10,7 @@
 
 - 供应商无关的 Chat Model 契约；
 - Provider Registry、Model Router、Prompt Registry；
-- Codex、DeepSeek 和千问普通聊天 Provider；
+- 安全停用的 Codex 普通聊天适配器，以及 DeepSeek、千问普通聊天 Provider；
 - Provider/Model 设置、健康状态和安全凭据；
 - 只建议、不授权的 AI 语义意图层；
 - AI 调用追踪、故障映射、取消和必要 UI/IPC；
@@ -142,10 +142,10 @@ DPAPI 解决“密钥明文落盘”问题，但不是对已取得同一 Windows
 
 ## 8. Codex 普通聊天与编程 Agent 分离
 
-- 普通聊天 Codex 路径：`RoutedConversationProvider → ModelRouter → CodexChatModelProvider`。
+- 普通聊天 Codex 适配路径：`RoutedConversationProvider → ModelRouter → CodexChatModelProvider`；生产策略在探测/启动 CLI 或发送正文前以 `ProductionDisabled`/`PolicyDisabled` 失败关闭。
 - 编程任务路径：`LocalTaskEntryService / AgentTaskExecutionService → CodexConnector / CodexSkillAdapter`。
 
-两条路径共用本机 Codex 安装基础，但契约、调用生命周期和用户设置互相独立。把普通聊天切到 DeepSeek 不会修改编程 Agent，也不会改变项目授权、Git 范围或 TaskEvidence。
+两条路径的契约、调用生命周期和用户设置互相独立。Codex 普通聊天适配器安全停用不影响编程 Agent；在 DeepSeek 与千问之间手动切换普通聊天也不会修改编程 Agent、项目授权、Git 范围或 TaskEvidence。
 
 ## 9. 语义意图：模型只建议
 
@@ -165,7 +165,7 @@ DPAPI 解决“密钥明文落盘”问题，但不是对已取得同一 Windows
 ## 10. 取消、故障和晚到结果
 
 - `ModelRouter` 按 Turn 保存实际 Provider，`CancelAsync` 直接转发给它。
-- Codex 普通聊天把进程加入 Windows Job Object，取消时终止进程树。
+- Codex 普通聊天生产策略在接触 CLI 前失败关闭，不启动需要取消的进程；独立 Codex 编程 Agent 继续使用其既有进程树取消边界。
 - DeepSeek 使用与 Turn 绑定的取消令牌取消真实 HTTP/SSE 读取，并在取消后拒绝迟到成功。
 - Qwen 同样把 Turn 取消传给 HTTP/SSE，并等待活动调用结束；它只发布 `delta.content`，对 `reasoning_content` 仅做有界计数消费，任何 Tool Call 都失败关闭。
 - `RoutedConversationProvider` 继续依赖阶段 1 的 Conversation/Session 唯一终态，取消后的回答不能重新插入消息或覆盖新状态。
@@ -210,7 +210,7 @@ SQLite schema v8 新增 `ai_invocations`。从任一旧 schema 升级到当前 s
 - Chat Model 契约、能力、错误和工作负载边界；
 - Provider Registry 与 Model Router 的注册、冻结路由、A → B → A 和取消映射；
 - Prompt 路径/哈希/Provider 约束及固定评测集；
-- Codex 与 DeepSeek Provider 的请求、边界、故障、取消和晚到结果保护；
+- Codex 普通聊天安全停用边界，以及 DeepSeek/千问 Provider 的请求、故障、取消和晚到结果保护；
 - DPAPI 保存、替换、删除、损坏密文、短生命周期 lease 和敏感信息清理；
 - AI 设置 Service/IPC/UI 逻辑；
 - 语义输出严格解析、置信度/歧义策略、Prompt 注入与权限绕过拒绝；
@@ -221,17 +221,17 @@ SQLite schema v8 新增 `ai_invocations`。从任一旧 schema 升级到当前 s
 
 ### 尚待总控真实验收
 
-- 真实 Codex 普通聊天连续多轮、A → B → A 切换和反复真取消；
-- 用户提供的 DeepSeek Key、真实官方网络、真实计费账户、两模型可用性、连续对话和真取消；
+- DeepSeek 既有真实证据与当前发布候选的准确 SHA/模型/调用审计身份对账；
+- 在准确 SHA 获授权后，使用用户本人提供的千问 Key 完成官方网络、真实账户、`qwen3.7-plus` 可用性、连续对话和真取消验收；
 - Provider 真实故障恢复以及旧回答不晚到；
 - 实际 Release DesktopClient 中选择 Provider/Model、填写/删除 Key、健康检查、数据去向提示和同 Session 连续对话；
-- 普通聊天切到 DeepSeek 后，真实 Codex 编程任务完整回归；
+- 普通聊天在 DeepSeek/千问间手动切换后，真实 Codex 编程任务完整回归；
 - 全量 Release 构建/自动化、真实桌面用户流程、Git 干净状态、最终版本/提交/标签和安装包身份。
 
 ## 14. 当前风险
 
-- DeepSeek 的真实账号、余额、区域网络和官方模型可用性尚未以用户凭据确认，模拟 HTTP 测试不能替代真实联网。
-- Codex Provider 描述的是 Codex CLI 的默认模型，元枢目前不能显示 Codex 实际底层模型 ID或 Usage。
+- 千问的真实账号、区域网络和 `qwen3.7-plus` 可用性尚未在准确 SHA 授权下确认，模拟 HTTP 测试不能替代真实联网。
+- Codex 普通聊天适配器只保留 `codex-default` 描述并在生产策略下失败关闭，不提供真实普通聊天模型或 Usage；它不属于阶段 2 发布目标。
 - Provider 切换会把同一 Conversation 的既有历史发送到新数据目的地；UI 已提示，但用户仍需理解这一隐私影响。
 - 每轮重建完整 Conversation 历史，当前以字符上限保护；长会话的 Token 估算、摘要和上下文裁剪属于后续工程，不是长期记忆。
 - DPAPI 只保护本机静态密文，不抵御同用户高权限恶意进程或运行时内存读取。

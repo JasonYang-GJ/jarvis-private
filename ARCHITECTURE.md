@@ -20,7 +20,7 @@ DesktopHost
   │    ├─ ConversationService → RoutedConversationProvider
   │    │    ├─ PromptRegistry → chat.general@1
   │    │    └─ ModelRouter → Provider Registry
-  │    │         ├─ CodexChatModelProvider
+  │    │         ├─ CodexChatModelProvider（生产策略安全停用）
   │    │         ├─ DeepSeekChatModelProvider
   │    │         └─ QwenChatModelProvider（仅手动备用）
   │    ├─ AssistantCommandService → 权限策略与 Windows Skills
@@ -67,7 +67,7 @@ V0.3.0 的正式源码与当前阶段 2 候选切片由下面这些内容共同�
 | `ScreenGuide.Skills.*` | 可替换技能接口与 Windows 低风险动作 | 任意桌面控制 |
 | `ScreenGuide.Vision.*` | 单窗口捕获、敏感窗口拒绝、本机 OCR/UIA | 全桌面捕获和云端上传 |
 | `ScreenGuide.Voice.Windows` | 本机采音、离线识别、回声过滤、朗读 | 保存录音或后台隐蔽监听 |
-| `ScreenGuide.Agent.*` | Agent 抽象、Codex 普通聊天适配、独立 Codex 编程连接和进程树取消 | 把普通聊天路由与编程 Agent 混为同一配置，或决定电脑动作权限 |
+| `ScreenGuide.Agent.*` | Agent 抽象、安全停用的 Codex 普通聊天适配、独立 Codex 编程连接和进程树取消 | 把普通聊天路由与编程 Agent 混为同一配置，或决定电脑动作权限 |
 | `ScreenGuide.Evidence` | Git、测试和任务结果证据 | 代替真实用户验收 |
 
 ## 4. Session Coordinator 数据模型
@@ -183,10 +183,11 @@ V0.3.0 的正式源码与当前阶段 2 候选切片由下面这些内容共同�
 
 `ChatProviderRegistry` 当前注册：
 
-- `codex / codex-default`：通过本机 Codex CLI 和当前登录账号发送到 OpenAI Codex 云端；当前诚实声明为非增量流式、无结构化输出能力。实际底层模型由 Codex 配置决定。
+- `codex / codex-default`：保留普通聊天适配器描述，但生产策略固定为 `ProductionDisabled`/`PolicyDisabled`，在探测或启动 CLI、读取项目或发送用户正文之前失败关闭；它不是阶段 2 发布目标。独立 Codex 编程 Agent 不受影响。
 - `deepseek / deepseek-v4-flash`、`deepseek-v4-pro`：固定 HTTPS 目的地 `https://api.deepseek.com`，声明 Streaming、JSON Object 和 Reasoning；Key 只从凭据 lease 读取，不从环境变量、源码、SQLite 或普通配置读取。
+- `qwen / qwen3.7-plus`：固定阿里云百炼 HTTPS 目的地，声明 Streaming 与 JSON Object；只允许用户手动选择，不自动 fallback、重试或重发。
 
-Registry 中的注册不代表真实账号已经验收。Codex、DeepSeek 的真实多轮/取消/切换和实际 Release UI 仍待总控完成。
+Registry 中的注册不代表真实账号已经验收。阶段 2 普通聊天发布目标是 DeepSeek + 千问；千问真实账户/网络验收须在准确 SHA 获授权后执行。Codex 普通聊天保持安全停用，不属于该真实 Provider 发布门禁。
 
 ### 路由与无静默降级
 
@@ -204,7 +205,7 @@ SQLite `ai_invocations` 记录 Provider/Model、Prompt ID/版本/哈希、数据
 
 ### 普通聊天与编程 Agent
 
-Codex 普通聊天走 `CodexChatModelProvider`；编程任务仍走独立 `CodexConnector` / `CodexSkillAdapter`。把普通聊天切到 DeepSeek 不改变项目授权、Codex 编程生命周期、Git 边界或 TaskEvidence。
+Codex 普通聊天适配器由 `CodexChatModelProvider` 承载，但生产策略有意失败关闭；编程任务仍走独立 `CodexConnector` / `CodexSkillAdapter`。在 DeepSeek 与千问之间手动切换普通聊天不改变项目授权、Codex 编程生命周期、Git 边界或 TaskEvidence。
 
 ### 语义意图与安全
 
@@ -227,8 +228,8 @@ Codex 普通聊天走 `CodexChatModelProvider`；编程任务仍走独立 `Codex
 - 普通依赖与 win-x64 发布依赖使用锁文件，发布脚本在 locked mode 下恢复。
 - `scripts/build-desktop-release.ps1` 是现有发布入口；阶段 2 最终版本号和安装产物尚未冻结。
 - V0.3.0 冻结证据保持不变：全量自动化 363/363；实际 Release DesktopClient + DesktopHost + 真实 Codex Provider + 真实 Windows Notepad 已完成阶段 1 的 10 轮连续对话、3 次真取消和项目/文件/单窗口场景，证据目录为 `%LOCALAPPDATA%\ScreenGuide\Experiments\DesktopV01\20260823-184833`。
-- 阶段 2 当前已有开发期自动化覆盖：Provider 契约/Registry/Router、A → B → A、Prompt 哈希与固定评测、DPAPI、敏感信息清理、Codex/DeepSeek 故障和取消、AI 设置 Service/IPC/UI、语义注入拒绝、schema v8 迁移和聊天/编程分离。
-- 阶段 2 最终全量测试数字、真实 Codex/DeepSeek 多轮与取消、实际 Release DesktopClient、真实 Codex 编程回归、版本提交/标签和安装包身份尚待总控验收，当前不得宣布阶段 2 通过或发布。
+- 阶段 2 当前已有开发期自动化覆盖：Provider 契约/Registry/Router、A → B → A、Prompt 哈希与固定评测、DPAPI、敏感信息清理、Codex 安全停用边界、DeepSeek/千问故障与取消、AI 设置 Service/IPC/UI、语义注入拒绝、schema v8 迁移和聊天/编程分离。
+- 阶段 2 普通聊天发布目标是 DeepSeek + 千问；千问真实账户/网络验收仍须在准确 SHA 获授权后完成。Codex 普通聊天不属于发布目标，独立 Codex 编程 Agent 仍需相应回归。最终全量测试数字、实际 Release DesktopClient、版本提交/标签和安装包身份尚待总控验收，当前不得宣布阶段 2 通过或发布。
 - 阶段 1 标签 `v0.3.0-stage1` 继续指向源码提交 `0a8cd9e164c35b86f67ffd94b9e0f17c312a2576`，annotated tag object 为 `9fc790ade57fa2d3c18bc5ee84e8dc9e7018aa89`。
 - 标签源码的 locked restore 通过。发布目录共 533 个文件；Client/Host ProductVersion 为 `0.3.0+0a8cd9e164c35b86f67ffd94b9e0f17c312a2576`，FileVersion 为 `0.3.0.0`。
 - 安装包 `artifacts/release/元枢-V0.3.0-安装包.exe` 为 64,039,656 bytes，SHA-256 为 `42C609E130B29C6D96784C2B0266473B6D3417BE0DC5FE9C81C7517CB100FCC7`，未签名。标签后的仅文档证据提交不改变标签源码或二进制来源。
@@ -239,8 +240,8 @@ Codex 普通聊天走 `CodexChatModelProvider`；编程任务仍走独立 `Codex
 - Session 快照随完整会话历史增长；ChangeVersion 是单 Host 进程内信号，实例 ID/启动时间只解决重启后的快照世代判断，不是跨进程持久事件日志。
 - 编程任务监视器仍在 Host 内部定时查询 Task 状态；这不等于 DesktopClient 的全量轮询，但仍可在后续改为更直接的任务事件。
 - 单窗口授权当前绑定窗口句柄、进程名和标题；这比只比较句柄更安全，但同一程序重新创建同标题窗口时仍可能碰到 Windows 句柄复用。后续应加入进程 ID 与进程启动时间等更稳定身份。
-- DeepSeek 的真实账号、余额、官方模型可用性和网络尚未以用户凭据验收；模拟 HTTP 边界不能代替真实联网。
-- Codex 普通聊天只暴露 `codex-default`，元枢无法确认 Codex 实际底层模型 ID 或 Usage。
+- DeepSeek 既有真实证据仍须与当前发布候选身份对账；千问的真实账号、网络和 `qwen3.7-plus` 可用性尚待准确 SHA 授权后的联网验收，模拟 HTTP 边界不能代替真实联网。
+- Codex 普通聊天只保留 `codex-default` 描述并在生产策略下失败关闭，不提供真实普通聊天模型或 Usage；这不影响独立 Codex 编程 Agent。
 - Provider 切换会把同一 Conversation 的既有历史交给新的数据目的地；UI 已明确提示，但仍需真实用户体验验收。
 - 每轮重建完整 Conversation 历史并以字符上限保护；Token 预算、摘要和上下文裁剪尚未实现。
 - DPAPI 保护静态密文，但不抵御已取得同一 Windows 用户权限、管理员权限或运行时内存读取能力的恶意程序。

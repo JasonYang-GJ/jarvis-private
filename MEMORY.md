@@ -1,14 +1,14 @@
 # 元枢项目记忆
 
-> 本文件记录稳定项目事实和历史决策，不是产品运行时的“用户长期记忆数据库”。更新时间：2026-08-24。
+> 本文件记录稳定项目事实和历史决策，不是产品运行时的“用户长期记忆数据库”。更新时间：2026-08-29。
 
 ## 当前状态
 
 - 当前阶段 1 源码与功能基线：V0.3.0，标签 `v0.3.0-stage1`，源码提交 `0a8cd9e164c35b86f67ffd94b9e0f17c312a2576`，annotated tag object `9fc790ade57fa2d3c18bc5ee84e8dc9e7018aa89`。完整安装生命周期尚待干净机验收，因此安装包未获对外分发放行。
 - V2 阶段 1“统一会话中枢”已经通过；363/363 自动化和实际 Release DesktopClient + DesktopHost 的真实桌面验收均通过。
 - V0.2.1 标签 `v0.2.1-baseline` 保留为上一版回滚点；回滚必须同时使用 pre-v7 备份或隔离数据目录。
-- V2 阶段 2“可替换 AI 大脑与模型路由”已获批准，当前候选代码已实现统一 Chat Model、Provider Registry、Model Router、Prompt Registry、DPAPI、Codex/DeepSeek/Qwen 普通聊天 Provider、设置 UI/IPC、语义建议和 schema v8 AI 调用审计。
-- 阶段 2 仍处于验收中：真实 Codex、真实 DeepSeek Key/网络/计费、实际 Release DesktopClient、真实 Codex 编程回归、全量测试和最终 Git/版本/产物冻结尚未完成。上一正式冻结事实仍是 V0.3.0，不得把候选工作树描述为已发布或阶段 2 已通过。
+- V2 阶段 2“可替换 AI 大脑与模型路由”已获批准，当前候选代码已实现统一 Chat Model、Provider Registry、Model Router、Prompt Registry、DPAPI、安全停用的 Codex 普通聊天适配器、DeepSeek/千问普通聊天 Provider、设置 UI/IPC、语义建议和 schema v8 AI 调用审计。
+- 阶段 2 普通聊天发布目标已确认为 DeepSeek + 千问；千问是手动备用，真实账户/网络验收须等待准确 SHA 授权。Codex 普通聊天保持 `ProductionDisabled`/`PolicyDisabled`，不是发布目标；独立 Codex 编程 Agent 仍需相应回归。实际 Release DesktopClient、全量测试和最终 Git/版本/产物冻结尚未完成。上一正式冻结事实仍是 V0.3.0，不得把候选工作树描述为已发布或阶段 2 已通过。
 - 长期记忆、RAG、向量数据库、复杂多 Agent 产品功能和手机端仍未实现，属于后续阶段。
 
 ## 长期架构决策
@@ -18,7 +18,7 @@
 3. 电脑操作采用确定性意图 + 权限白名单；模型、网页、屏幕、文档和 SessionCoordinator 都不能自行扩大权限。
 4. 只捕获用户确认的单个前台窗口，绝不回退为全桌面；授权只对显示的单个窗口和当前 Turn 生效。
 5. 运行数据存放在用户本地应用数据目录，不进入仓库；卸载默认保留。
-6. 模型供应商必须位于可替换接口后。当前 Codex 只是唯一实现，不代表长期绑定。
+6. 模型供应商必须位于可替换接口后。阶段 1 的 Codex 真实证据是历史冻结事实；阶段 2 普通聊天发布目标改为 DeepSeek + 千问，不与 Codex 编程 Agent 绑定。
 7. Conversation/Provider Thread、Session/Turn、编程 Task 和未来长期记忆是四种不同状态，不能混用。
 8. 安装产物不提交 Git，以版本标签、哈希、测试记录和外部快照关联。
 9. 正式版本只能在标签存在、干净源码构建和测试通过、安装验收通过、工作区干净后宣布冻结。
@@ -41,11 +41,11 @@
 
 ## 阶段 2 候选实现决策
 
-1. 普通聊天业务只依赖供应商无关的 `IChatModelProvider`。Provider 差异必须留在实现层；SessionCoordinator、权限和 Conversation 领域不增加 DeepSeek/Codex 分支。
+1. 普通聊天业务只依赖供应商无关的 `IChatModelProvider`。Provider 差异必须留在实现层；SessionCoordinator、权限和 Conversation 领域不增加 DeepSeek/千问/Codex 分支。
 2. `ChatProviderRegistry` 只接收声明 `OrdinaryChat` 工作负载的 Provider，并校验 Provider/Model 唯一；新增 Provider 不应改变 SessionCoordinator。
 3. `ModelRouter` 第一版只支持用户明确选择的默认路由。每个 Turn 开始时冻结 Provider/Model；设置变化只影响下一轮，没有静默 fallback、自动付费重试或隐式跨供应商发送。
 4. 对话连续性由元枢 `ConversationStore` 保存的消息历史负责，而不是依赖 Provider Thread。A → B → A 时每轮把同一 Conversation 历史交给当时选中的 Provider。
-5. 普通聊天与编程 Agent 独立：Codex 普通聊天走 `CodexChatModelProvider`，编程任务继续走 `CodexConnector` / `CodexSkillAdapter`；聊天切换不能改变项目授权或 TaskEvidence。
+5. 普通聊天与编程 Agent 独立：`CodexChatModelProvider` 作为安全停用适配器保留，生产普通聊天以 `ProductionDisabled`/`PolicyDisabled` 失败关闭；编程任务继续走 `CodexConnector` / `CodexSkillAdapter`。DeepSeek/千问聊天切换不能改变项目授权或 TaskEvidence。
 6. Prompt Registry 使用仓库内受版本控制的文件和清单，当前 Prompt 为 `chat.general@1`、`intent.semantic@1`。每次加载校验相对路径、适用 Provider 和 SHA-256；每次调用记录 Prompt ID/版本/哈希。
 7. Provider/Model 设置与凭据分开。路由 ID 写普通设置文件；DeepSeek/Qwen Key 分别使用 Windows DPAPI `CurrentUser` 加密密文，只通过各自短生命周期 lease 读取，Key 不进 Git、SQLite、普通日志或 IPC 响应。
 8. 不做静默跨 Provider 降级。Provider 故障必须给用户明确、安全提示；是否切换数据目的地由用户决定。
@@ -57,9 +57,9 @@
 
 ## 阶段 2 当前验证边界
 
-- 已有开发期自动化覆盖：统一契约、Registry/Router、A → B → A、Prompt 哈希与固定评测集、DPAPI、敏感信息清理、Codex/DeepSeek 故障与取消、设置 Service/IPC/UI、语义输出注入拒绝、schema v8 迁移和普通聊天/编程分离。
+- 已有开发期自动化覆盖：统一契约、Registry/Router、A → B → A、Prompt 哈希与固定评测集、DPAPI、敏感信息清理、Codex 安全停用边界、DeepSeek/千问故障与取消、设置 Service/IPC/UI、语义输出注入拒绝、schema v8 迁移和普通聊天/编程分离。
 - 上述只表示候选实现已有测试保护，不代表最终阶段通过；最终全量测试数在总控验收后写入完成报告和版本基线。
-- 尚待真实验收：两个真实 Provider 的多轮、纠正和取消；真实 DeepSeek Key/官方网络/账户；实际 Release DesktopClient；聊天切换后的真实 Codex 编程任务；最终 Git 工作区、提交、标签、版本和安装包身份。
+- 尚待总控收口：DeepSeek 既有真实证据与当前发布候选身份对账；准确 SHA 获授权后的千问真实账户/网络、多轮、纠正和取消；实际 Release DesktopClient；聊天切换后的真实 Codex 编程任务；最终 Git 工作区、提交、标签、版本和安装包身份。
 
 ## 阶段 1 已确认验收
 
@@ -82,9 +82,9 @@
 ## 尚未解决
 
 - 没有用户长期记忆、RAG、向量数据库或跨 Session 相关信息检索。
-- 阶段 2 的真实 Codex、真实 DeepSeek 联网与实际 Release DesktopClient 尚未完成最终验收；不能把模拟 Provider 测试写成真实可用。
+- 阶段 2 的千问真实账户/网络和实际 Release DesktopClient 尚未完成最终验收；Codex 普通聊天有意安全停用且不是发布目标。不能把模拟 Provider 测试写成真实可用。
 - 固定 Prompt 评测集已建立，但真实模型质量、Token/成本对比和长期回归趋势尚未形成发布证据。
-- Codex 普通聊天只显示 `codex-default`，实际底层模型 ID 和 Usage 仍不可见。
+- Codex 普通聊天只保留 `codex-default` 描述并在生产策略下失败关闭，不提供真实普通聊天模型或 Usage；独立 Codex 编程 Agent 继续保留。
 - Provider 切换会把同一 Conversation 既有历史发送到新的数据目的地；UI 已提示，真实用户是否理解仍需验收。
 - 每轮发送完整 Conversation 历史并设字符上限；没有 Token 精确预算、摘要和上下文裁剪。
 - DPAPI 不抵御同一 Windows 用户高权限恶意进程或运行时内存读取。
