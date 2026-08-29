@@ -228,6 +228,10 @@ public sealed class R4QwenRealAcceptanceRunnerTests
             Assert.Equal("qwen3.7-plus", outcome.Result.SettingsModelId);
             Assert.True(outcome.Result.ModelEvidence?.IsCompleteMatch);
             Assert.True(outcome.Result.HealthPassed);
+            Assert.Equal("Healthy", outcome.Result.HealthState);
+            Assert.Equal("healthy", outcome.Result.HealthMessageCategory);
+            Assert.True(outcome.Result.HealthResponseShapeEvidence?.ParseValid);
+            Assert.True(outcome.Result.HealthResponseShapeEvidence?.ExactModelMatch);
             Assert.True(outcome.Result.OrdinaryPassed);
             Assert.True(outcome.Result.OrdinaryReplyExact);
             Assert.True(outcome.Result.CancellationPassed);
@@ -271,6 +275,7 @@ public sealed class R4QwenRealAcceptanceRunnerTests
             Assert.DoesNotContain(R4QwenRunnerExecution.OrdinaryCanary, outcome.StructuredEvidenceJson, StringComparison.Ordinal);
             Assert.DoesNotContain(R4QwenRunnerExecution.CancellationCanary, outcome.StructuredEvidenceJson, StringComparison.Ordinal);
             Assert.DoesNotContain("FAKE-QWEN-REQUEST-ID", outcome.StructuredEvidenceJson, StringComparison.Ordinal);
+            Assert.DoesNotContain("FAKE-HEALTH-ID", outcome.StructuredEvidenceJson, StringComparison.Ordinal);
             Assert.DoesNotContain("Authorization", outcome.StructuredEvidenceJson, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("data:", outcome.StructuredEvidenceJson, StringComparison.Ordinal);
 
@@ -484,6 +489,160 @@ public sealed class R4QwenRealAcceptanceRunnerTests
         }
     }
 
+    [Fact]
+    public async Task Http200HealthFailurePreservesSafeStateDiagnosticAndResponseShape()
+    {
+        const string responseMessageSentinel = "PRIVATE_HEALTH_MESSAGE_MUST_NOT_ESCAPE";
+        const string requestIdSentinel = "PRIVATE_HEALTH_REQUEST_ID_MUST_NOT_ESCAPE";
+        using var directory = new TestOwnedDirectory();
+        var hostOptions = new DesktopHostOptions(
+            Path.Combine(directory.Path, "isolated-data"),
+            pipeName: $"ScreenGuide.R4.Qwen.HealthEvidence.{Guid.NewGuid():N}");
+        var validation = R4QwenValidationOptions.Parse(ValidArguments());
+        var credentials = new FakeCredentialStore("FAKE_QWEN_SECRET_SENTINEL");
+        var transport = new HealthFixtureTransport($$"""
+            {"success":true,"code":null,"message":"{{responseMessageSentinel}}","request_id":"{{requestIdSentinel}}"}
+            """);
+        _ = await R4IsolatedAiSettingsMaterializer.MaterializeAndVerifyAsync(
+            hostOptions.AiSettingsPath);
+        using var host = R4QwenRunnerHostComposition.BuildOffline(
+            hostOptions,
+            validation,
+            credentials,
+            transport);
+        await host.StartAsync();
+        try
+        {
+            var api = new DesktopApiClient(hostOptions.PipeName, TimeSpan.FromSeconds(5));
+            var provider = host.Services.GetRequiredService<R4QwenBudgetedChatModelProvider>();
+            var buildIdentity = new R4BuildIdentityEvidence(
+                validation.ExpectedCommitSha!,
+                validation.ExpectedCommitSha,
+                $"0.3.0+{validation.ExpectedCommitSha}");
+
+            var outcome = await R4QwenRunnerExecution.ExecuteAsync(
+                api,
+                host,
+                provider,
+                validation,
+                buildIdentity);
+
+            Assert.False(outcome.Passed);
+            Assert.Equal("health", outcome.Result.Stage);
+            Assert.Equal("r4_health_failed", outcome.Result.ErrorCode);
+            Assert.Equal("qwen.health.permission_unavailable", outcome.Result.ProviderDiagnosticCode);
+            Assert.Equal("Unavailable", outcome.Result.HealthState);
+            Assert.Equal("permission_unavailable", outcome.Result.HealthMessageCategory);
+            Assert.False(outcome.Result.HealthPassed);
+            Assert.Equal(1, outcome.Result.HttpTotalRequestCount);
+            Assert.Equal(0, outcome.Result.HttpModelRequestCount);
+            var shape = Assert.IsType<R4HealthResponseShapeEvidence>(
+                outcome.Result.HealthResponseShapeEvidence);
+            Assert.Equal(200, shape.HttpStatus);
+            Assert.Equal("application_json", shape.ContentTypeCategory);
+            Assert.True(shape.BodyByteCount > 0);
+            Assert.Equal("object", shape.RootJsonKind);
+            Assert.True(shape.ParseValid);
+            Assert.False(shape.SizeLimitExceeded);
+            Assert.False(shape.Truncated);
+            Assert.Equal(new R4JsonFieldEvidence(true, "true", "true", null), shape.Success);
+            Assert.Equal(new R4JsonFieldEvidence(true, "null", "null", null), shape.Code);
+            Assert.Equal(new R4JsonFieldEvidence(false, "missing", null, null), shape.Output);
+            Assert.False(shape.ExactlyOneModel);
+            Assert.False(shape.ExactModelMatch);
+            Assert.DoesNotContain(responseMessageSentinel, outcome.StructuredEvidenceJson, StringComparison.Ordinal);
+            Assert.DoesNotContain(requestIdSentinel, outcome.StructuredEvidenceJson, StringComparison.Ordinal);
+            Assert.DoesNotContain("\"message\":", outcome.StructuredEvidenceJson, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("request_id", outcome.StructuredEvidenceJson, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            await host.StopAsync();
+        }
+    }
+
+    [Theory]
+    [MemberData(nameof(HealthShapeFixtures))]
+    public async Task HealthShapeEvidenceClassifiesOfflineFixturesWithoutChangingProviderResult(
+        HealthShapeFixture fixture)
+    {
+        using var directory = new TestOwnedDirectory();
+        var hostOptions = new DesktopHostOptions(
+            directory.Path,
+            pipeName: $"ScreenGuide.R4.Qwen.HealthShape.{Guid.NewGuid():N}");
+        var validation = R4QwenValidationOptions.Parse(ValidArguments());
+        var credentials = new FakeCredentialStore("FAKE_QWEN_SECRET_SENTINEL");
+        var transport = new HealthFixtureTransport(fixture.Body);
+        using var host = R4QwenRunnerHostComposition.BuildOffline(
+            hostOptions,
+            validation,
+            credentials,
+            transport);
+        var provider = host.Services.GetRequiredService<R4QwenBudgetedChatModelProvider>();
+
+        var health = await provider.CheckHealthAsync();
+
+        Assert.Equal(fixture.ExpectedHealthState, health.State.ToString());
+        Assert.Equal(1, provider.TotalRequestCount);
+        Assert.Equal(1, transport.SendCount);
+        Assert.Equal(1, credentials.OpenLeaseCount);
+        Assert.Equal(1, credentials.DisposedLeaseCount);
+        var evidence = Assert.IsType<R4HealthResponseShapeEvidence>(
+            host.Services.GetRequiredService<R4QwenHttpEvidence>().HealthResponseShape);
+        Assert.Equal(200, evidence.HttpStatus);
+        Assert.Equal("application_json", evidence.ContentTypeCategory);
+        Assert.True(evidence.BodyByteCount > 0);
+        Assert.Equal(fixture.ParseValid ? "object" : "unknown", evidence.RootJsonKind);
+        Assert.Equal(fixture.ParseValid, evidence.ParseValid);
+        Assert.Equal(fixture.SizeLimitExceeded, evidence.SizeLimitExceeded);
+        Assert.Equal(fixture.Truncated, evidence.Truncated);
+        Assert.Equal(fixture.OutputKind, evidence.Output.Kind);
+        Assert.Equal(fixture.PermissionsCount, evidence.PermissionsCount);
+        Assert.Equal(fixture.ExactlyOneModel, evidence.ExactlyOneModel);
+        Assert.Equal(fixture.ExactModelMatch, evidence.ExactModelMatch);
+        Assert.Equal(fixture.InferenceKind, evidence.Inference.Kind);
+        Assert.Equal(fixture.InferenceCategory, evidence.Inference.ValueCategory);
+        Assert.Equal(fixture.ExpectedTotal, evidence.Total.NumericValue);
+        Assert.Equal(fixture.ExpectedPageNo, evidence.PageNo.NumericValue);
+        Assert.Equal(fixture.ExpectedPageSize, evidence.PageSize.NumericValue);
+        var serialized = JsonSerializer.Serialize(evidence);
+        Assert.DoesNotContain("PRIVATE_HEALTH", serialized, StringComparison.Ordinal);
+        Assert.DoesNotContain("qwen-unknown-model", serialized, StringComparison.Ordinal);
+        Assert.DoesNotContain("request_id", serialized, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("\"message\":", serialized, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task NonemptyHealthCodeIsCategorizedWithoutRecordingItsValue()
+    {
+        const string codeSentinel = "PRIVATE_HEALTH_CODE_MUST_NOT_ESCAPE";
+        using var directory = new TestOwnedDirectory();
+        var hostOptions = new DesktopHostOptions(
+            directory.Path,
+            pipeName: $"ScreenGuide.R4.Qwen.HealthCode.{Guid.NewGuid():N}");
+        var validation = R4QwenValidationOptions.Parse(ValidArguments());
+        var credentials = new FakeCredentialStore("FAKE_QWEN_SECRET_SENTINEL");
+        var transport = new HealthFixtureTransport(
+            $$"""{"success":false,"code":"{{codeSentinel}}","message":"PRIVATE_HEALTH_MESSAGE"}""");
+        using var host = R4QwenRunnerHostComposition.BuildOffline(
+            hostOptions,
+            validation,
+            credentials,
+            transport);
+        var provider = host.Services.GetRequiredService<R4QwenBudgetedChatModelProvider>();
+
+        var health = await provider.CheckHealthAsync();
+
+        Assert.Equal("Unavailable", health.State.ToString());
+        var evidence = Assert.IsType<R4HealthResponseShapeEvidence>(
+            host.Services.GetRequiredService<R4QwenHttpEvidence>().HealthResponseShape);
+        Assert.Equal(new R4JsonFieldEvidence(true, "false", "false", null), evidence.Success);
+        Assert.Equal(new R4JsonFieldEvidence(true, "string", "nonempty", null), evidence.Code);
+        var serialized = JsonSerializer.Serialize(evidence);
+        Assert.DoesNotContain(codeSentinel, serialized, StringComparison.Ordinal);
+        Assert.DoesNotContain("PRIVATE_HEALTH_MESSAGE", serialized, StringComparison.Ordinal);
+    }
+
     public static TheoryData<string[]> InvalidArgumentSets
     {
         get
@@ -509,6 +668,103 @@ public sealed class R4QwenRealAcceptanceRunnerTests
                 valid.Where(item => item != "--no-resend").ToArray()
             };
         }
+    }
+
+    public static TheoryData<HealthShapeFixture> HealthShapeFixtures =>
+        new()
+        {
+            new HealthShapeFixture(
+                "official-success",
+                OfficialHealthJson,
+                "Healthy",
+                ParseValid: true,
+                SizeLimitExceeded: false,
+                Truncated: false,
+                OutputKind: "object",
+                PermissionsCount: 1,
+                ExactlyOneModel: true,
+                ExactModelMatch: true,
+                InferenceKind: "true",
+                InferenceCategory: "true",
+                ExpectedTotal: 1,
+                ExpectedPageNo: 1,
+                ExpectedPageSize: 1),
+            new HealthShapeFixture(
+                "missing-output",
+                """{"success":true,"code":null,"message":"PRIVATE_HEALTH_MESSAGE","request_id":"PRIVATE_HEALTH_ID"}""",
+                "Unavailable", true, false, false, "missing", null, false, false, "missing", null, null, null, null),
+            new HealthShapeFixture(
+                "wrong-kinds",
+                """{"success":"yes","code":7,"output":[]}""",
+                "Unavailable", true, false, false, "array", null, false, false, "missing", null, null, null, null),
+            new HealthShapeFixture(
+                "paging-mismatch",
+                PermissionHealthJson(total: 2, pageNo: 2, pageSize: 3),
+                "Unavailable", true, false, false, "object", 1, true, true, "true", "true", 2, 2, 3),
+            new HealthShapeFixture(
+                "empty-permissions",
+                """{"success":true,"code":null,"output":{"total":0,"page_no":1,"page_size":1,"permissions":[]}}""",
+                "Unavailable", true, false, false, "object", 0, false, false, "missing", null, 0, 1, 1),
+            new HealthShapeFixture(
+                "multiple-permissions",
+                """{"success":true,"code":null,"output":{"total":2,"page_no":1,"page_size":1,"permissions":[{"model":"qwen3.7-plus","permissions":{"inference":true}},{"model":"qwen3.7-plus","permissions":{"inference":true}}]}}""",
+                "Unavailable", true, false, false, "object", 2, false, false, "missing", null, 2, 1, 1),
+            new HealthShapeFixture(
+                "model-mismatch",
+                """{"success":true,"code":null,"output":{"total":1,"page_no":1,"page_size":1,"permissions":[{"model":"qwen-unknown-model","permissions":{"inference":true}}]}}""",
+                "Unavailable", true, false, false, "object", 1, true, false, "true", "true", 1, 1, 1),
+            new HealthShapeFixture(
+                "missing-inference",
+                """{"success":true,"code":null,"output":{"total":1,"page_no":1,"page_size":1,"permissions":[{"model":"qwen3.7-plus","permissions":{}}]}}""",
+                "Unavailable", true, false, false, "object", 1, true, true, "missing", null, 1, 1, 1),
+            new HealthShapeFixture(
+                "false-inference",
+                """{"success":true,"code":null,"output":{"total":1,"page_no":1,"page_size":1,"permissions":[{"model":"qwen3.7-plus","permissions":{"inference":false}}]}}""",
+                "Unavailable", true, false, false, "object", 1, true, true, "false", "false", 1, 1, 1),
+            new HealthShapeFixture(
+                "legacy-data-array",
+                """{"success":true,"code":null,"total":1,"page_no":1,"page_size":1,"data":[{"model":"qwen3.7-plus"}]}""",
+                "Unavailable", true, false, false, "missing", null, false, false, "missing", null, null, null, null),
+            new HealthShapeFixture(
+                "malformed",
+                """{"success":true,"code":null,"output":{""",
+                "Unavailable", false, false, false, "missing", null, false, false, "missing", null, null, null, null),
+            new HealthShapeFixture(
+                "oversized",
+                "{\"success\":true,\"code\":null,\"padding\":\"" + new string('X', R4HealthResponseShapeCollector.MaxEvidenceBytes) + "\"}",
+                "Unavailable", false, true, true, "missing", null, false, false, "missing", null, null, null, null)
+        };
+
+    private const string OfficialHealthJson =
+        """{"success":true,"code":null,"message":"PRIVATE_HEALTH_MESSAGE","request_id":"PRIVATE_HEALTH_ID","output":{"total":1,"page_no":1,"page_size":1,"permissions":[{"model":"qwen3.7-plus","name":"Qwen 3.7 Plus","permissions":{"inference":true,"fine_tune":false,"deploy":false}}]}}""";
+
+    private static string PermissionHealthJson(int total, int pageNo, int pageSize) =>
+        "{\"success\":true,\"code\":null,\"output\":{\"total\":"
+        + total
+        + ",\"page_no\":"
+        + pageNo
+        + ",\"page_size\":"
+        + pageSize
+        + ",\"permissions\":[{\"model\":\"qwen3.7-plus\",\"permissions\":{\"inference\":true}}]}}";
+
+    public sealed record HealthShapeFixture(
+        string Name,
+        string Body,
+        string ExpectedHealthState,
+        bool ParseValid,
+        bool SizeLimitExceeded,
+        bool Truncated,
+        string OutputKind,
+        int? PermissionsCount,
+        bool ExactlyOneModel,
+        bool ExactModelMatch,
+        string InferenceKind,
+        string? InferenceCategory,
+        int? ExpectedTotal,
+        int? ExpectedPageNo,
+        int? ExpectedPageSize)
+    {
+        public override string ToString() => Name;
     }
 
     private static string[] ValidArguments() =>
@@ -794,6 +1050,23 @@ public sealed class R4QwenRealAcceptanceRunnerTests
                     "data: {\"choices\":[{\"delta\":{\"content\":\"\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n",
                     Encoding.UTF8,
                     "text/event-stream")
+            });
+        }
+    }
+
+    private sealed class HealthFixtureTransport(string body) : HttpMessageHandler
+    {
+        public int SendCount { get; private set; }
+
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            SendCount++;
+            Assert.Equal(HttpMethod.Get, request.Method);
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(body, Encoding.UTF8, "application/json")
             });
         }
     }

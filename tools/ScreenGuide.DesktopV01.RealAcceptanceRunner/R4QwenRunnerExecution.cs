@@ -61,6 +61,12 @@ public sealed record R4QwenValidationResult
 
     public bool HealthPassed { get; init; }
 
+    public string? HealthState { get; init; }
+
+    public string? HealthMessageCategory { get; init; }
+
+    public R4HealthResponseShapeEvidence? HealthResponseShapeEvidence { get; init; }
+
     public bool OrdinaryExecuted { get; init; }
 
     public bool OrdinaryPassed { get; init; }
@@ -160,6 +166,8 @@ public static class R4QwenRunnerExecution
         var stage = "guard";
         string? settingsProviderId = null;
         string? settingsModelId = null;
+        string? healthState = null;
+        string? healthMessageCategory = null;
         var stopwatch = Stopwatch.StartNew();
         try
         {
@@ -186,6 +194,8 @@ public static class R4QwenRunnerExecution
                     new ProviderIdRequestDto(QwenChatModelProvider.ProviderId),
                     token)
                 .ConfigureAwait(false);
+            healthState = health.State;
+            healthMessageCategory = SafeHealthMessageCategory(health);
             if (string.Equals(health.State, "NotConfigured", StringComparison.Ordinal))
             {
                 throw new R4ValidationFailureException(
@@ -195,7 +205,9 @@ public static class R4QwenRunnerExecution
 
             if (!string.Equals(health.State, "Healthy", StringComparison.Ordinal))
             {
-                throw new R4ValidationFailureException("r4_health_failed");
+                throw new R4ValidationFailureException(
+                    "r4_health_failed",
+                    $"qwen.health.{healthMessageCategory}");
             }
 
             var invocations = host.Services.GetRequiredService<IAiInvocationStore>();
@@ -306,6 +318,9 @@ public static class R4QwenRunnerExecution
                 ModelEvidence = modelEvidence,
                 HealthExecuted = true,
                 HealthPassed = true,
+                HealthState = healthState,
+                HealthMessageCategory = healthMessageCategory,
+                HealthResponseShapeEvidence = http.HealthResponseShape,
                 OrdinaryExecuted = true,
                 OrdinaryPassed = true,
                 OrdinaryReplyExact = true,
@@ -362,6 +377,9 @@ public static class R4QwenRunnerExecution
                 SettingsProviderId = settingsProviderId,
                 SettingsModelId = settingsModelId,
                 HealthExecuted = stage is not "guard" and not "settings",
+                HealthState = healthState,
+                HealthMessageCategory = healthMessageCategory,
+                HealthResponseShapeEvidence = http?.HealthResponseShape,
                 OrdinaryExecuted = stage is "ordinary" or "cancellation" or "audit",
                 CancellationExecuted = stage is "cancellation" or "audit",
                 TotalRequestCount = provider.TotalRequestCount,
@@ -687,5 +705,70 @@ public static class R4QwenRunnerExecution
                    || character is '.' or '_' or '-')
             ? value
             : null;
+    }
+
+    private static string SafeHealthMessageCategory(AiProviderHealthDto health)
+    {
+        if (string.Equals(health.State, "Healthy", StringComparison.Ordinal))
+        {
+            return "healthy";
+        }
+
+        if (string.Equals(health.State, "NotConfigured", StringComparison.Ordinal))
+        {
+            return "not_configured";
+        }
+
+        var message = health.SafeMessage;
+        if (message.Contains("有效推理权限", StringComparison.Ordinal))
+        {
+            return "permission_unavailable";
+        }
+
+        if (message.Contains("余额", StringComparison.Ordinal)
+            || message.Contains("计费", StringComparison.Ordinal))
+        {
+            return "billing_unavailable";
+        }
+
+        if (message.Contains("API Key 无效", StringComparison.Ordinal)
+            || message.Contains("API Key 已失效", StringComparison.Ordinal))
+        {
+            return "credential_invalid";
+        }
+
+        if (message.Contains("没有访问", StringComparison.Ordinal))
+        {
+            return "permission_denied";
+        }
+
+        if (message.Contains("请求过多", StringComparison.Ordinal))
+        {
+            return "rate_limited";
+        }
+
+        if (message.Contains("超时", StringComparison.Ordinal))
+        {
+            return "timeout";
+        }
+
+        if (message.Contains("无法连接", StringComparison.Ordinal))
+        {
+            return "network_unavailable";
+        }
+
+        if (message.Contains("不安全的跳转", StringComparison.Ordinal))
+        {
+            return "redirect_rejected";
+        }
+
+        if (message.Contains("服务暂时不可用", StringComparison.Ordinal))
+        {
+            return "service_unavailable";
+        }
+
+        return string.Equals(health.State, "Degraded", StringComparison.Ordinal)
+            ? "degraded"
+            : "unavailable";
     }
 }
