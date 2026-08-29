@@ -347,6 +347,12 @@
           "ScreenGuide.AI.Core": "[0.3.0, )"
         }
       },
+      "screenguide.ai.qwen": {
+        "type": "Project",
+        "dependencies": {
+          "ScreenGuide.AI.Core": "[0.3.0, )"
+        }
+      },
       "screenguide.core": {
         "type": "Project",
         "dependencies": {

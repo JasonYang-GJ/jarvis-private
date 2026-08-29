@@ -1,5 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using ScreenGuide.Agent.Abstractions;
+using ScreenGuide.AI.Core;
+using ScreenGuide.Core.Conversations;
 using ScreenGuide.Core.Security;
 using ScreenGuide.DesktopHost.Runtime;
 using ScreenGuide.Skills.Abstractions;
@@ -51,6 +53,25 @@ public sealed class DesktopHostDependencyTests
         Assert.Equal(2, skillIds.Length);
         Assert.Contains("codex.project-task", skillIds);
         Assert.Contains("windows.safe-launch", skillIds);
+    }
+
+    [Fact]
+    public async Task HostRegistersQwenBesideExistingProvidersWithoutChangingConversationOrProgrammingAgentOwners()
+    {
+        await using var environment = DesktopHostTestEnvironment.Create();
+        using var host = environment.BuildHost();
+
+        var providers = host.Services.GetServices<IChatModelProvider>().ToArray();
+        Assert.Equal(["codex", "deepseek", "qwen"], providers
+            .Select(provider => provider.Descriptor.ProviderId)
+            .Order(StringComparer.Ordinal)
+            .ToArray());
+        var qwen = providers.Single(provider => provider.Descriptor.ProviderId == "qwen");
+        Assert.Equal("千问", qwen.Descriptor.DisplayName);
+        Assert.Equal("qwen3.7-plus", Assert.Single(qwen.Descriptor.Models).ModelId);
+        Assert.IsType<RoutedConversationProvider>(
+            host.Services.GetRequiredService<IConversationProvider>());
+        Assert.Equal("codex", host.Services.GetRequiredService<IAgentConnector>().ConnectorId);
     }
 
     [Fact]

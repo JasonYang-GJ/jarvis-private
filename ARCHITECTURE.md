@@ -1,6 +1,6 @@
 # 元枢当前架构（V2 阶段 2 候选 As-Built）
 
-> 本文描述阶段 2 当前工作树已经实现的结构，并明确标出尚待真实验收的部分。更新时间：2026-08-24。V0.3.0 阶段 1 仍是最近一次正式冻结基线；阶段 2 尚未形成最终提交、标签、版本或安装包身份。设计与验证边界见 `docs/V2_STAGE2_AI_MODEL_ROUTING_DESIGN.md`。
+> 本文描述阶段 2 当前工作树已经实现的结构，并明确标出尚待真实验收的部分。更新时间：2026-08-29。V0.3.0 阶段 1 仍是最近一次正式冻结基线；阶段 2 尚未形成最终标签、版本或安装包身份。设计与验证边界见 `docs/V2_STAGE2_AI_MODEL_ROUTING_DESIGN.md`。
 
 ## 1. 运行结构
 
@@ -21,7 +21,8 @@ DesktopHost
   │    │    ├─ PromptRegistry → chat.general@1
   │    │    └─ ModelRouter → Provider Registry
   │    │         ├─ CodexChatModelProvider
-  │    │         └─ DeepSeekChatModelProvider
+  │    │         ├─ DeepSeekChatModelProvider
+  │    │         └─ QwenChatModelProvider（仅手动备用）
   │    ├─ AssistantCommandService → 权限策略与 Windows Skills
   │    │    └─ ModelSemanticIntentSuggester（不可信建议）→ 确定性重规划
   │    ├─ Window Vision → 单窗口捕获、本机 OCR/UIA
@@ -39,7 +40,7 @@ DesktopHost 仍是唯一业务编排和审计边界。SessionCoordinator 协调�
 
 V0.3.0 的正式源码与当前阶段 2 候选切片由下面这些内容共同组成；最终阶段 2 正式范围仍以验收后的版本基线为准：
 
-- `src/`：生产项目；阶段 2 新增 `ScreenGuide.AI.DeepSeek`，并扩展 AI Core、Codex、Host、Protocol、Persistence 和 DesktopClient。
+- `src/`：生产项目；阶段 2 新增 `ScreenGuide.AI.DeepSeek` 与 `ScreenGuide.AI.Qwen`，并扩展 AI Core、Codex、Host、Protocol、Persistence 和 DesktopClient。
 - `tests/`：自动化与真实桌面测试项目，包含 FakeCodexCli、FakeBrowser、Provider 网络边界和实际 WPF UI Automation 测试替身/Runner。
 - `prompts/runtime/`：受版本控制的 Prompt Registry 与 Prompt 内容。
 - `tools/`：3 个集成与真实验收 Runner。
@@ -60,6 +61,7 @@ V0.3.0 的正式源码与当前阶段 2 候选切片由下面这些内容共同�
 | `ScreenGuide.DesktopHost` | SessionCoordinator、业务编排、权限、恢复、审计、增量状态通知 | 让 UI 绕过 Coordinator 直接组合新流程 |
 | `ScreenGuide.AI.Core` | 供应商无关 Chat Model 契约、Provider Registry、Model Router、Prompt Registry、语义建议校验及确定性意图规划 | Provider HTTP/CLI 细节、自由执行工具或隐式授予权限 |
 | `ScreenGuide.AI.DeepSeek` | 固定 DeepSeek 官方目的地的普通聊天 HTTP/SSE Provider、错误和健康映射 | 保存 Key、决定 Session、编程 Agent 或电脑权限 |
+| `ScreenGuide.AI.Qwen` | 固定阿里云百炼兼容端点、仅 `qwen3.7-plus` 的普通聊天 HTTP/SSE Provider；消费但不公开 reasoning，拒绝 Tool Call | 自动 fallback、保存 Key、改变 Session/权限或替代 Codex 编程 Agent |
 | `ScreenGuide.Core` | Session、任务、对话、AI 调用审计和权限领域契约 | Windows、SQLite 或模型供应商细节 |
 | `ScreenGuide.Persistence` | SQLite schema v8 与 Session/任务/对话/AI 调用追踪存储 | UI、Key 和模型调用 |
 | `ScreenGuide.Skills.*` | 可替换技能接口与 Windows 低风险动作 | 任意桌面控制 |
@@ -128,7 +130,7 @@ V0.3.0 的正式源码与当前阶段 2 候选切片由下面这些内容共同�
   → ConversationService.CancelAsync
   → IConversationProvider.CancelAsync
   → ModelRouter 按 Turn 找到真实 Provider
-  → Codex 进程树终止，或 DeepSeek HTTP/SSE 取消
+  → Codex 进程树终止，或 DeepSeek/Qwen HTTP/SSE 取消
   → Conversation Turn = Cancelled
   → Session Turn = Cancelled
 ```
@@ -139,7 +141,7 @@ V0.3.0 的正式源码与当前阶段 2 候选切片由下面这些内容共同�
 - Conversation 的取消与成功提交在 SQLite 中争夺唯一终态：取消先把仍在 Running 的 Turn 原子结束，成功只能提交仍在 Running 的 Turn。取消赢得终态后，迟到 Provider 结果不能再插入 Assistant 消息。
 - Session Turn 的确认、授权和取消由每 Turn 串行门协调；SessionStore 的终态和版本条件继续阻止迟到结果把取消改回成功。
 - ModelRouter 在 Turn 开始时冻结路由；设置中途改变只影响下一轮。取消会到达这个 Turn 实际使用的 Provider，不会误取消新 Provider 的其他请求。
-- Codex 普通聊天使用 Windows Job Object 终止进程树；DeepSeek 取消真实 HTTP 请求和流式读取。两者在取消后都拒绝迟到成功。
+- Codex 普通聊天使用 Windows Job Object 终止进程树；DeepSeek 与 Qwen 取消真实 HTTP 请求和流式读取。三者在取消后都拒绝迟到成功。
 - Host 关闭时会取消仍在内存中的前台工作和监视器；重启恢复不会自动重放。
 
 ## 7. 上下文补齐与安全边界

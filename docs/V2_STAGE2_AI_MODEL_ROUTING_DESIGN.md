@@ -10,7 +10,7 @@
 
 - 供应商无关的 Chat Model 契约；
 - Provider Registry、Model Router、Prompt Registry；
-- Codex 和 DeepSeek 普通聊天 Provider；
+- Codex、DeepSeek 和千问普通聊天 Provider；
 - Provider/Model 设置、健康状态和安全凭据；
 - 只建议、不授权的 AI 语义意图层；
 - AI 调用追踪、故障映射、取消和必要 UI/IPC；
@@ -41,7 +41,8 @@ DesktopHost
   │    └─ 确定性重规划 + CapabilityPolicy / 原有权限门禁
   ├─ Provider Registry
   │    ├─ CodexChatModelProvider
-  │    └─ DeepSeekChatModelProvider
+  │    ├─ DeepSeekChatModelProvider
+  │    └─ QwenChatModelProvider（手动备用）
   ├─ FileAiSettingsStore（只保存 Provider/Model 路由）
   └─ WindowsDpapiCredentialStore（只保存加密凭据）
 ```
@@ -67,6 +68,7 @@ DesktopHost
 |---|---|---|---|---|
 | Codex | `codex-default` | `None`，不声明增量流式、结构化输出或 Tool Calling | 普通聊天生产策略安全停用；编程 Agent 继续使用独立的 Codex 连接器 | `PolicyDisabled` 失败关闭，不探测或启动 CLI；编程任务不受影响 |
 | DeepSeek | `deepseek-v4-flash`、`deepseek-v4-pro` | Streaming、JSON Object、Reasoning；不声明 JSON Schema/Tool Calling/Vision | API Key；固定发送到 `https://api.deepseek.com` | 实现和开发期网络边界自动化已覆盖；真实 Key、真实联网和计费验收待总控确认 |
+| 千问 | `qwen3.7-plus` | Streaming、JSON Object；不声明 Tool Calling/Vision/Reasoning | 独立 API Key；固定发送到 `https://dashscope.aliyuncs.com` | 手动备用候选；本地 HTTP/SSE、安全和设置边界已覆盖，真实 Key/联网尚未授权 |
 
 这里的“注册模型”只表示当前代码允许选择的 Model ID，不等于已经完成真实账户可用性验证。
 
@@ -74,7 +76,7 @@ DesktopHost
 
 - 核心健康状态为 `NotChecked`、`NotConfigured`、`Healthy`、`Degraded`、`Unavailable`、`PolicyDisabled`。配置状态与健康状态分离：凭据仓库是“是否已配置”的真值，连接失败不能把已保存凭据误报为缺失；无凭据型 Provider 的配置状态为 `NotRequired`。
 - 为兼容现有 protocol v8，Host 只在 DTO 边界把 `PolicyDisabled` 投影为 `Unavailable`，同时保留安全策略说明和 `IsConfigured=true`；核心层不丢失 `PolicyDisabled` 语义。
-- 稳定错误种类包括 `Configuration`、`Unauthorized`、`Authorization`、`PolicyDisabled`、`InsufficientBalance`、`RateLimited`、`Timeout`、`Network`、`Unavailable` 等。DeepSeek 缺 Key 属于 `Configuration`，401 属于 `Unauthorized`，403 属于 `Authorization`，402 属于 `InsufficientBalance`，429 属于 `RateLimited`，5xx 属于 `Unavailable`。
+- 稳定错误种类包括 `Configuration`、`Unauthorized`、`Authorization`、`PolicyDisabled`、`InsufficientBalance`、`RateLimited`、`Timeout`、`Network`、`Unavailable` 等。DeepSeek/Qwen 缺 Key 属于 `Configuration`，401 属于 `Unauthorized`，403 属于 `Authorization`，402 属于 `InsufficientBalance`，429 属于 `RateLimited`，5xx 属于 `Unavailable`。
 - `ChatModelError.Code` 只用于安全诊断和审计。新代码使用不超过 80 个 ASCII 字符的 `owner.reason` 形式；旧下划线代码仍可读取，不要求迁移。用户可见 `FailureCode` 只由稳定错误种类产生，不依赖 Provider 诊断码。
 - `IsRetryable` 由 AI Core 统一计算：只有 `RateLimited`、`Timeout`、`Network`、`Unavailable` 可重试。`RetryAfter` 仅接受限流或可信服务不可用响应，且必须大于 0、不超过 24 小时；这只是诊断事实，不会触发自动重试或 fallback。
 - Provider 错误消息、请求 ID 和诊断码进入 Host 前必须经过固定边界；API Key、Bearer、用户路径、Prompt、Conversation、原始响应和内部堆栈不得进入用户可见错误。普通聊天失败后不会把同一正文改发到另一个 Provider。
@@ -126,7 +128,7 @@ SQLite `ai_invocations` 记录 Provider、Model、Prompt ID/版本/哈希、数�
 
 普通 Provider/Model 路由写入用户本地应用数据目录中的 `settings/ai-settings.json`。该文件只保存非敏感 ID，不保存 Key。
 
-DeepSeek Key 通过 `WindowsDpapiCredentialStore` 保存到用户本地应用数据目录 `secrets/<provider>.bin`：
+DeepSeek 与 Qwen Key 通过 `WindowsDpapiCredentialStore` 分别保存到用户本地应用数据目录 `secrets/<provider>.bin`：
 
 - 使用 Windows DPAPI `CurrentUser` 保护；
 - 额外把 Provider ID 绑定为 entropy，避免密文被当作另一个 Provider 的凭据使用；
@@ -165,9 +167,10 @@ DPAPI 解决“密钥明文落盘”问题，但不是对已取得同一 Windows
 - `ModelRouter` 按 Turn 保存实际 Provider，`CancelAsync` 直接转发给它。
 - Codex 普通聊天把进程加入 Windows Job Object，取消时终止进程树。
 - DeepSeek 使用与 Turn 绑定的取消令牌取消真实 HTTP/SSE 读取，并在取消后拒绝迟到成功。
+- Qwen 同样把 Turn 取消传给 HTTP/SSE，并等待活动调用结束；它只发布 `delta.content`，对 `reasoning_content` 仅做有界计数消费，任何 Tool Call 都失败关闭。
 - `RoutedConversationProvider` 继续依赖阶段 1 的 Conversation/Session 唯一终态，取消后的回答不能重新插入消息或覆盖新状态。
 - DeepSeek 把未配置、401、403、402、400/422、404/模型错误、429、5xx、超时、网络错误、非法响应和不安全重定向映射为稳定种类与安全大白话；响应体和 SSE 有大小上限。
-- 不自动付费重试，不静默改发其他 Provider。
+- 不自动付费重试，不静默改发其他 Provider；Qwen 只能由用户手动选中，失败不会触发 DeepSeek/Codex 请求。
 
 ## 11. UI 与 IPC
 

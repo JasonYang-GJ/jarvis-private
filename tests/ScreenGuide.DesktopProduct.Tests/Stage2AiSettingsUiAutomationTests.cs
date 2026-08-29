@@ -37,6 +37,7 @@ public sealed class Stage2AiSettingsUiAutomationTests
 
         var codex = RecordingChatProvider.Codex();
         var deepSeek = RecordingChatProvider.DeepSeek();
+        var qwen = RecordingChatProvider.Qwen();
         Process? clientProcess = null;
         IHost? host = null;
         try
@@ -52,11 +53,15 @@ public sealed class Stage2AiSettingsUiAutomationTests
                     services.RemoveAll<IChatModelProvider>();
                     services.AddSingleton<IChatModelProvider>(codex);
                     services.AddSingleton<IChatModelProvider>(deepSeek);
+                    services.AddSingleton<IChatModelProvider>(qwen);
                 });
             await host.StartAsync();
 
             var api = new DesktopApiClient(pipeName, TimeSpan.FromSeconds(5));
             await WaitUntilAsync(() => api.PingAsync(), TimeSpan.FromSeconds(20));
+            _ = await api.SetChatRouteAsync(new SetChatRouteRequestDto(
+                "codex",
+                "codex-default"));
             var project = await api.AddProjectAsync(new AddProjectRequestDto(
                 projectRoot,
                 "Stage2 real client project"));
@@ -94,6 +99,33 @@ public sealed class Stage2AiSettingsUiAutomationTests
                 TimeSpan.FromSeconds(10));
             Assert.Equal("Codex", SelectedItemName(providerCombo));
             Assert.Equal("Codex Chat", SelectedItemName(modelCombo));
+
+            await SelectComboBoxItemAsync(
+                providerCombo,
+                clientProcess.Id,
+                "千问",
+                TimeSpan.FromSeconds(10));
+            await WaitUntilAsync(
+                () => Task.FromResult(SelectedItemName(modelCombo) == "千问 3.7 Plus"),
+                TimeSpan.FromSeconds(10));
+            var qwenDestination = await WaitForElementByAutomationIdAsync(
+                automationRoot,
+                "AiDataDestination",
+                TimeSpan.FromSeconds(10));
+            Assert.Contains(
+                "https://dashscope.aliyuncs.com",
+                qwenDestination.Current.Name,
+                StringComparison.Ordinal);
+            Assert.Empty(qwen.Requests);
+
+            await SelectComboBoxItemAsync(
+                providerCombo,
+                clientProcess.Id,
+                "Codex",
+                TimeSpan.FromSeconds(10));
+            await WaitUntilAsync(
+                () => Task.FromResult(SelectedItemName(modelCombo) == "Codex Chat"),
+                TimeSpan.FromSeconds(10));
 
             Invoke(await WaitForElementByNameAsync(
                 automationRoot,
@@ -1603,6 +1635,17 @@ public sealed class Stage2AiSettingsUiAutomationTests
                     "DeepSeek V4 Pro",
                     ChatModelCapabilities.Streaming | ChatModelCapabilities.JsonObjectOutput)
             ],
+            ChatProviderCredentialKind.ApiKey));
+
+        public static RecordingChatProvider Qwen() => new(new ChatProviderDescriptor(
+            "qwen",
+            "千问",
+            "https://dashscope.aliyuncs.com",
+            SendsDataOffDevice: true,
+            [new ChatModelDescriptor(
+                "qwen3.7-plus",
+                "千问 3.7 Plus",
+                ChatModelCapabilities.Streaming | ChatModelCapabilities.JsonObjectOutput)],
             ChatProviderCredentialKind.ApiKey));
 
         public Task<ChatProviderHealth> CheckHealthAsync(

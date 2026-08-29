@@ -186,6 +186,50 @@ public sealed class AiSettingsServiceTests
         Assert.Equal(1, deepseek.HealthChecks);
     }
 
+    [Fact]
+    public async Task QwenManualRouteAndCredentialLifecycleRemainProviderScoped()
+    {
+        const string qwenKey = "fake-qwen-key-never-return";
+        var deepseek = new SettingsProvider(
+            "deepseek",
+            "deepseek-v4-pro",
+            ChatProviderCredentialKind.ApiKey,
+            "DeepSeek");
+        var qwen = new SettingsProvider(
+            "qwen",
+            "qwen3.7-plus",
+            ChatProviderCredentialKind.ApiKey,
+            "https://dashscope.aliyuncs.com",
+            displayName: "千问");
+        var credentials = new MemoryCredentialStore();
+        var service = Service(
+            new MemorySettingsStore(new AiSettings(
+                new ChatModelRoute("deepseek", "deepseek-v4-pro"))),
+            credentials,
+            deepseek,
+            qwen);
+
+        var routed = await service.SetChatRouteAsync(
+            new SetChatRouteRequestDto("qwen", "qwen3.7-plus"));
+        var saved = await service.SetProviderCredentialAsync(
+            new SetProviderCredentialRequestDto("qwen", qwenKey));
+        var settings = await service.GetAsync();
+        var health = await service.CheckProviderHealthAsync(new ProviderIdRequestDto("qwen"));
+        var deleted = await service.DeleteProviderCredentialAsync(new ProviderIdRequestDto("qwen"));
+
+        Assert.Equal(new AiChatRouteDto("qwen", "qwen3.7-plus"), routed.CurrentChatRoute);
+        Assert.Equal("Codex", routed.ProgrammingAgent);
+        Assert.Equal("Configured", saved.ConfigurationState);
+        Assert.Equal("Configured", settings.Providers.Single(item => item.ProviderId == "qwen").ConfigurationState);
+        Assert.Equal("Missing", settings.Providers.Single(item => item.ProviderId == "deepseek").ConfigurationState);
+        Assert.Equal("Healthy", health.State);
+        Assert.Equal(1, qwen.HealthChecks);
+        Assert.Equal(0, deepseek.HealthChecks);
+        Assert.Equal("Missing", deleted.ConfigurationState);
+        Assert.Contains("千问", deleted.SafeMessage, StringComparison.Ordinal);
+        Assert.DoesNotContain(qwenKey, string.Join('|', routed, saved, settings, health, deleted), StringComparison.Ordinal);
+    }
+
     private static AiSettingsService Service(params SettingsProvider[] providers) =>
         Service(
             new MemorySettingsStore(new AiSettings(
@@ -206,11 +250,12 @@ public sealed class AiSettingsServiceTests
         string destination,
         ChatProviderHealthState healthState = ChatProviderHealthState.Healthy,
         bool healthIsConfigured = true,
-        string healthMessage = "连接正常。") : IChatModelProvider
+        string healthMessage = "连接正常。",
+        string? displayName = null) : IChatModelProvider
     {
         public ChatProviderDescriptor Descriptor { get; } = new(
             providerId,
-            providerId,
+            displayName ?? providerId,
             destination,
             true,
             [new ChatModelDescriptor(

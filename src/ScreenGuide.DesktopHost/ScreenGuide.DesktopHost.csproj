@@ -13,6 +13,7 @@
     <ProjectReference Include="..\ScreenGuide.Agent.Codex\ScreenGuide.Agent.Codex.csproj" />
     <ProjectReference Include="..\ScreenGuide.AI.Core\ScreenGuide.AI.Core.csproj" />
     <ProjectReference Include="..\ScreenGuide.AI.DeepSeek\ScreenGuide.AI.DeepSeek.csproj" />
+    <ProjectReference Include="..\ScreenGuide.AI.Qwen\ScreenGuide.AI.Qwen.csproj" />
     <ProjectReference Include="..\ScreenGuide.Core\ScreenGuide.Core.csproj" />
     <ProjectReference Include="..\ScreenGuide.DesktopProtocol\ScreenGuide.DesktopProtocol.csproj" />
     <ProjectReference Include="..\ScreenGuide.Evidence\ScreenGuide.Evidence.csproj" />

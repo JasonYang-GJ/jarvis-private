@@ -10,6 +10,7 @@ public sealed class AiSettingsIpcIntegrationTests
     public async Task RealPipeSwitchesOrdinaryChatRouteAndKeepsCredentialWriteOnly()
     {
         const string canaryKey = "sk-stage2-ipc-canary-must-never-leak";
+        const string qwenCanaryKey = "qwen-ipc-canary-must-never-leak";
         await using var environment = DesktopHostTestEnvironment.Create();
         using var host = environment.BuildHost();
         await host.StartAsync();
@@ -21,9 +22,13 @@ public sealed class AiSettingsIpcIntegrationTests
         {
             var initial = await client.GetAiSettingsAsync();
             Assert.Equal("Codex", initial.ProgrammingAgent);
-            Assert.Equal("codex", initial.CurrentChatRoute.ProviderId);
+            Assert.Equal(new AiChatRouteDto("deepseek", "deepseek-v4-pro"), initial.CurrentChatRoute);
             Assert.Contains(initial.Providers, item => item.ProviderId == "codex");
             Assert.Contains(initial.Providers, item => item.ProviderId == "deepseek");
+            var qwenInitial = initial.Providers.Single(item => item.ProviderId == "qwen");
+            Assert.Equal("千问", qwenInitial.DisplayName);
+            Assert.Equal("Missing", qwenInitial.ConfigurationState);
+            Assert.Equal("qwen3.7-plus", Assert.Single(qwenInitial.Models).ModelId);
 
             var switched = await client.SetChatRouteAsync(
                 new SetChatRouteRequestDto("deepseek", "deepseek-v4-pro"));
@@ -72,6 +77,29 @@ public sealed class AiSettingsIpcIntegrationTests
                 (await client.GetAiSettingsAsync()).Providers
                 .Single(item => item.ProviderId == "deepseek")
                 .ConfigurationState);
+
+            var qwenRoute = await client.SetChatRouteAsync(
+                new SetChatRouteRequestDto("qwen", "qwen3.7-plus"));
+            var qwenCredential = await client.SetProviderCredentialAsync(
+                new SetProviderCredentialRequestDto("qwen", qwenCanaryKey));
+            var qwenConfigured = await client.GetAiSettingsAsync();
+            Assert.Equal(new AiChatRouteDto("qwen", "qwen3.7-plus"), qwenRoute.CurrentChatRoute);
+            Assert.Equal("Codex", qwenRoute.ProgrammingAgent);
+            Assert.Equal("Configured", qwenCredential.ConfigurationState);
+            Assert.Equal(
+                "Configured",
+                qwenConfigured.Providers.Single(item => item.ProviderId == "qwen").ConfigurationState);
+            Assert.Equal(
+                "Missing",
+                qwenConfigured.Providers.Single(item => item.ProviderId == "deepseek").ConfigurationState);
+            Assert.True(File.Exists(Path.Combine(environment.Options.SecretsDirectory, "qwen.bin")));
+            Assert.False(File.Exists(Path.Combine(environment.Options.SecretsDirectory, "deepseek.bin")));
+            AssertNoPlaintextCanary(environment.Options.DataDirectory, qwenCanaryKey);
+
+            var qwenDeleted = await client.DeleteProviderCredentialAsync(
+                new ProviderIdRequestDto("qwen"));
+            Assert.Equal("Missing", qwenDeleted.ConfigurationState);
+            Assert.False(File.Exists(Path.Combine(environment.Options.SecretsDirectory, "qwen.bin")));
         }
         finally
         {

@@ -99,7 +99,7 @@ public sealed class AiSettingsService(
         return new AiProviderCredentialStatusDto(
             descriptor.ProviderId,
             ProviderCredentialState.Missing.ToString(),
-            "API Key 已删除；DeepSeek 普通聊天在重新配置前不可用。");
+            $"API Key 已删除；{descriptor.DisplayName}普通聊天在重新配置前不可用。");
     }
 
     public async Task<AiProviderHealthDto> CheckProviderHealthAsync(

@@ -14,6 +14,7 @@
 - 新增 `prompts/runtime` Prompt Registry，当前注册 `chat.general@1` 和 `intent.semantic@1`；校验相对路径、Provider 范围和 SHA-256，并加入固定小型回归评测集。
 - 新增 Codex 普通聊天 Provider，与既有 Codex 编程 Connector/Skill 分离；聊天 Provider 切换不改变编程 Agent、项目权限和 TaskEvidence。
 - 新增 DeepSeek 普通聊天 Provider，固定官方 HTTPS 目的地，支持当前注册模型、SSE/JSON Object、健康检查、大小限制、取消和 401/402/429/5xx/超时/网络/非法响应等安全错误映射。
+- 新增千问手动备用普通聊天 Provider，仅暴露 `qwen3.7-plus`，固定阿里云百炼 HTTPS 端点与文本 Chat Completions 负载；支持 SSE/JSON Object、Usage、健康、取消和安全错误映射，拒绝 Tool Call，内部 reasoning 只做有界消费且不公开。千问失败不会自动改发 DeepSeek/Codex。
 - 新增 Windows DPAPI `CurrentUser` 凭据存储、短生命周期 lease、原子替换、删除/损坏恢复和缓冲清零；Key 不写 Git、SQLite 或普通设置。
 - IPC 协议候选升级到 v8，新增 AI 设置、路由、凭据和健康方法；设置页明确普通聊天与 Codex 编程 Agent、Provider/Model、配置状态和数据发送目的地，Key 不回显且删除前确认。
 - 新增 `ai_invocations` 和 SQLite schema v8，记录 Provider/Model/Prompt/目的地/状态/Usage 等追踪信息；旧 schema 升级前生成 pre-v8 备份。

@@ -2,6 +2,7 @@
   <Folder Name="/src/">
     <Project Path="src/ScreenGuide.AI.Core/ScreenGuide.AI.Core.csproj" />
     <Project Path="src/ScreenGuide.AI.DeepSeek/ScreenGuide.AI.DeepSeek.csproj" />
+    <Project Path="src/ScreenGuide.AI.Qwen/ScreenGuide.AI.Qwen.csproj" />
     <Project Path="src/ScreenGuide.Agent.Abstractions/ScreenGuide.Agent.Abstractions.csproj" />
     <Project Path="src/ScreenGuide.Agent.Codex/ScreenGuide.Agent.Codex.csproj" />
     <Project Path="src/ScreenGuide.Core/ScreenGuide.Core.csproj" />
@@ -19,6 +20,7 @@
   <Folder Name="/tests/">
     <Project Path="tests/ScreenGuide.AI.Core.Tests/ScreenGuide.AI.Core.Tests.csproj" />
     <Project Path="tests/ScreenGuide.AI.DeepSeek.Tests/ScreenGuide.AI.DeepSeek.Tests.csproj" />
+    <Project Path="tests/ScreenGuide.AI.Qwen.Tests/ScreenGuide.AI.Qwen.Tests.csproj" />
     <Project Path="tests/ScreenGuide.Agent.Codex.Tests/ScreenGuide.Agent.Codex.Tests.csproj" />
     <Project Path="tests/ScreenGuide.Core.Tests/ScreenGuide.Core.Tests.csproj" />
     <Project Path="tests/ScreenGuide.DesktopClient.Tests/ScreenGuide.DesktopClient.Tests.csproj" />

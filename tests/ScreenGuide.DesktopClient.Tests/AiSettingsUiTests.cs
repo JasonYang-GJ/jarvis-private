@@ -168,6 +168,42 @@ public sealed class AiSettingsUiTests
         Assert.Contains("无法使用普通聊天", confirmation, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void DescriptorDrivenQwenSelectionShowsItsOnlyModelAndProviderScopedCredentialControls()
+    {
+        var qwen = new AiProviderSettingsDto(
+            "qwen",
+            "千问",
+            "https://dashscope.aliyuncs.com",
+            SendsDataOffDevice: true,
+            "Missing",
+            new AiProviderHealthDto(
+                "qwen",
+                "NotConfigured",
+                IsConfigured: false,
+                "尚未配置 API Key。"),
+            [new AiModelSettingsDto(
+                "qwen3.7-plus",
+                "千问 3.7 Plus",
+                ["Streaming", "JsonObjectOutput"])]);
+
+        var selectedModel = AiSettingsUiPolicy.SelectModelId(
+            qwen,
+            requestedModelId: "deepseek-v4-pro",
+            new AiChatRouteDto("qwen", "qwen3.7-plus"));
+        var credentials = AiSettingsUiPolicy.PresentCredential(
+            qwen,
+            hasSecretInput: true,
+            hostOnline: true);
+        var confirmation = AiSettingsUiPolicy.CredentialDeleteConfirmation(qwen);
+
+        Assert.Equal("qwen3.7-plus", selectedModel);
+        Assert.True(credentials.ShowCredentialInputs);
+        Assert.True(credentials.CanSave);
+        Assert.False(credentials.CanDelete);
+        Assert.Contains("千问", confirmation, StringComparison.Ordinal);
+    }
+
     private static AiProviderSettingsDto Provider(string configurationState) => new(
         "codex",
         "Codex",

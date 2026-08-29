@@ -3,6 +3,7 @@ using Microsoft.Extensions.Hosting;
 using ScreenGuide.Agent.Abstractions;
 using ScreenGuide.Agent.Codex;
 using ScreenGuide.AI.Core;
+using ScreenGuide.AI.Qwen;
 using ScreenGuide.Core.Ai;
 using ScreenGuide.Core.Conversations;
 using ScreenGuide.Core.Tasking;
@@ -283,6 +284,54 @@ public sealed class Stage2ModelRoutingEndToEndTests
         Assert.Single(providerB.Requests);
     }
 
+    [Fact]
+    public async Task ManuallySelectedQwenMissingCredentialFailsClosedWithoutCallingAnotherProvider()
+    {
+        await using var environment = DesktopHostTestEnvironment.Create();
+        var codex = new ControllableChatProvider("codex", "codex-default");
+        var deepseek = new ControllableChatProvider("deepseek", "deepseek-v4-pro");
+        var credentials = new MissingCredentialStore();
+        await using var qwen = new QwenChatModelProvider(
+            credentials,
+            new NoHttpHandler());
+        using var host = environment.BuildHost(services => services.AddSingleton(
+            new ChatProviderRegistry([codex, deepseek, qwen])));
+        await host.StartAsync();
+        IDesktopApiClient client = new DesktopApiClient(environment.Options.PipeName);
+
+        var route = await client.SetChatRouteAsync(
+            new SetChatRouteRequestDto("qwen", "qwen3.7-plus"));
+        var session = await client.StartNewSessionAsync("Qwen 手动备用失败关闭");
+        var submitted = await client.SubmitSessionInputAsync(new SessionInputRequestDto(
+            "请使用当前手动选择的千问回答。",
+            "Text",
+            "qwen-missing-key-no-fallback",
+            session.SessionId));
+        var terminal = await WaitForTerminalTurnAsync(
+            client,
+            submitted.TurnId,
+            TimeSpan.FromSeconds(10));
+        var invocations = await host.Services.GetRequiredService<IAiInvocationStore>()
+            .GetForSessionTurnAsync(submitted.TurnId);
+        await host.StopAsync();
+
+        Assert.Equal(new AiChatRouteDto("qwen", "qwen3.7-plus"), route.CurrentChatRoute);
+        Assert.Equal("Codex", route.ProgrammingAgent);
+        var turn = terminal.Turns.Single(item => item.Id == submitted.TurnId);
+        Assert.Equal("Failed", turn.Phase);
+        Assert.Contains("尚未配置", turn.FailureMessage, StringComparison.Ordinal);
+        Assert.NotEmpty(invocations);
+        Assert.All(invocations, invocation =>
+        {
+            Assert.Equal("qwen", invocation.ProviderId);
+            Assert.Equal("qwen3.7-plus", invocation.ModelId);
+            Assert.Equal("qwen.not_configured", invocation.FailureCode);
+        });
+        Assert.Empty(codex.Requests);
+        Assert.Empty(deepseek.Requests);
+        Assert.True(credentials.OpenLeaseCount > 0);
+    }
+
     private static IHost BuildHost(
         DesktopHostTestEnvironment environment,
         ControllableChatProvider providerA,
@@ -500,5 +549,45 @@ public sealed class Stage2ModelRoutingEndToEndTests
             ReleaseBlockedRequest();
             return ValueTask.CompletedTask;
         }
+    }
+
+    private sealed class MissingCredentialStore : IProviderCredentialStore
+    {
+        public int OpenLeaseCount { get; private set; }
+
+        public Task<ProviderCredentialStatus> GetStatusAsync(
+            string providerId,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(new ProviderCredentialStatus(
+                providerId,
+                ProviderCredentialState.Missing,
+                null));
+
+        public Task SetAsync(
+            string providerId,
+            ReadOnlyMemory<char> secret,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public ValueTask<IProviderCredentialLease?> OpenLeaseAsync(
+            string providerId,
+            CancellationToken cancellationToken = default)
+        {
+            OpenLeaseCount++;
+            return ValueTask.FromResult<IProviderCredentialLease?>(null);
+        }
+
+        public Task<bool> DeleteAsync(
+            string providerId,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+    }
+
+    private sealed class NoHttpHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken) =>
+            throw new InvalidOperationException("Qwen 缺少凭据时不得进入 HTTP。");
     }
 }

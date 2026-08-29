@@ -7,7 +7,7 @@
 - 当前阶段 1 源码与功能基线：V0.3.0，标签 `v0.3.0-stage1`，源码提交 `0a8cd9e164c35b86f67ffd94b9e0f17c312a2576`，annotated tag object `9fc790ade57fa2d3c18bc5ee84e8dc9e7018aa89`。完整安装生命周期尚待干净机验收，因此安装包未获对外分发放行。
 - V2 阶段 1“统一会话中枢”已经通过；363/363 自动化和实际 Release DesktopClient + DesktopHost 的真实桌面验收均通过。
 - V0.2.1 标签 `v0.2.1-baseline` 保留为上一版回滚点；回滚必须同时使用 pre-v7 备份或隔离数据目录。
-- V2 阶段 2“可替换 AI 大脑与模型路由”已获批准，当前候选代码已实现统一 Chat Model、Provider Registry、Model Router、Prompt Registry、DPAPI、Codex/DeepSeek 普通聊天 Provider、设置 UI/IPC、语义建议和 schema v8 AI 调用审计。
+- V2 阶段 2“可替换 AI 大脑与模型路由”已获批准，当前候选代码已实现统一 Chat Model、Provider Registry、Model Router、Prompt Registry、DPAPI、Codex/DeepSeek/Qwen 普通聊天 Provider、设置 UI/IPC、语义建议和 schema v8 AI 调用审计。
 - 阶段 2 仍处于验收中：真实 Codex、真实 DeepSeek Key/网络/计费、实际 Release DesktopClient、真实 Codex 编程回归、全量测试和最终 Git/版本/产物冻结尚未完成。上一正式冻结事实仍是 V0.3.0，不得把候选工作树描述为已发布或阶段 2 已通过。
 - 长期记忆、RAG、向量数据库、复杂多 Agent 产品功能和手机端仍未实现，属于后续阶段。
 
@@ -47,11 +47,12 @@
 4. 对话连续性由元枢 `ConversationStore` 保存的消息历史负责，而不是依赖 Provider Thread。A → B → A 时每轮把同一 Conversation 历史交给当时选中的 Provider。
 5. 普通聊天与编程 Agent 独立：Codex 普通聊天走 `CodexChatModelProvider`，编程任务继续走 `CodexConnector` / `CodexSkillAdapter`；聊天切换不能改变项目授权或 TaskEvidence。
 6. Prompt Registry 使用仓库内受版本控制的文件和清单，当前 Prompt 为 `chat.general@1`、`intent.semantic@1`。每次加载校验相对路径、适用 Provider 和 SHA-256；每次调用记录 Prompt ID/版本/哈希。
-7. Provider/Model 设置与凭据分开。路由 ID 写普通设置文件；DeepSeek Key 使用 Windows DPAPI `CurrentUser` 加密密文，只通过短生命周期 lease 读取，Key 不进 Git、SQLite、普通日志或 IPC 响应。
+7. Provider/Model 设置与凭据分开。路由 ID 写普通设置文件；DeepSeek/Qwen Key 分别使用 Windows DPAPI `CurrentUser` 加密密文，只通过各自短生命周期 lease 读取，Key 不进 Git、SQLite、普通日志或 IPC 响应。
 8. 不做静默跨 Provider 降级。Provider 故障必须给用户明确、安全提示；是否切换数据目的地由用户决定。
 9. AI 语义层只提供不可信的意图类型建议。严格本机解析、置信度和歧义门槛通过后，仍由确定性 Planner 用真实上下文重算；模型 target、缺失上下文和任何“用户已同意”主张都不能授权。
 10. protocol v8 只新增 AI 设置/凭据/健康 IPC，不创建第二套 Session 状态。设置页必须明确普通聊天与 Codex 编程 Agent 的责任和数据目的地。
 11. SQLite schema v8 新增 `ai_invocations`，只记录 Provider/Model/Prompt/目的地/状态/Usage 等调用证据，不保存 Key、Prompt 正文或完整 Conversation。升级前生成 pre-v8 备份。
+12. Qwen 是 DeepSeek 的手动备用普通聊天 Provider，仅注册 `qwen3.7-plus`。它固定发送到阿里云百炼官方兼容端点，不允许自定义 URL，不自动 fallback/重试/重发，不接管 Codex 编程 Agent；reasoning 只做有界消费，绝不进入 UI、数据库或日志。
 12. V0.3.0 只支持 schema v7。回滚到 `v0.3.0-stage1` 时必须保留 schema v8 数据库并使用 pre-v8 备份或隔离数据目录；不使用破坏性 Git/文件清理。
 
 ## 阶段 2 当前验证边界

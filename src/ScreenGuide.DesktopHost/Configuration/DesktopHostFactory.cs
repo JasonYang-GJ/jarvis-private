@@ -5,6 +5,7 @@ using ScreenGuide.Agent.Abstractions;
 using ScreenGuide.Agent.Codex;
 using ScreenGuide.AI.Core;
 using ScreenGuide.AI.DeepSeek;
+using ScreenGuide.AI.Qwen;
 using ScreenGuide.Core.Ai;
 using ScreenGuide.Core.Conversations;
 using ScreenGuide.Core.Security;
@@ -69,8 +70,8 @@ public static class DesktopHostFactory
             return new FileAiSettingsStore(
                 hostOptions.AiSettingsPath,
                 new AiSettings(new ChatModelRoute(
-                    CodexChatModelProvider.ProviderId,
-                    CodexChatModelProvider.DefaultModelId)));
+                    DeepSeekChatModelProvider.ProviderId,
+                    DeepSeekChatModelProvider.ProModelId)));
         });
         builder.Services.AddSingleton(services =>
         {
@@ -112,10 +113,13 @@ public static class DesktopHostFactory
         builder.Services.AddSingleton(services => new CodexChatModelProvider(
             services.GetRequiredService<CodexChatOptions>()));
         builder.Services.AddSingleton<DeepSeekChatModelProvider>();
+        builder.Services.AddSingleton<QwenChatModelProvider>();
         builder.Services.AddSingleton<IChatModelProvider>(services =>
             services.GetRequiredService<CodexChatModelProvider>());
         builder.Services.AddSingleton<IChatModelProvider>(services =>
             services.GetRequiredService<DeepSeekChatModelProvider>());
+        builder.Services.AddSingleton<IChatModelProvider>(services =>
+            services.GetRequiredService<QwenChatModelProvider>());
         builder.Services.AddSingleton(services => new ChatProviderRegistry(
             services.GetServices<IChatModelProvider>()));
         builder.Services.AddSingleton<ModelRouter>();
