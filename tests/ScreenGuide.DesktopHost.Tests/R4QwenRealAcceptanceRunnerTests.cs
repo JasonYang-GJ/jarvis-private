@@ -6,6 +6,7 @@ using ScreenGuide.AI.Core;
 using ScreenGuide.AI.Qwen;
 using ScreenGuide.Core.Ai;
 using ScreenGuide.Core.Conversations;
+using ScreenGuide.Core.Sessions;
 using ScreenGuide.DesktopHost.Configuration;
 using ScreenGuide.DesktopProtocol;
 using ScreenGuide.DesktopV01.RealAcceptanceRunner;
@@ -36,6 +37,37 @@ public sealed class R4QwenRealAcceptanceRunnerTests
         Assert.Equal(
             "ScreenGuide.DesktopV01.RealAcceptanceRunner.exe --stage2-r4-qwen --real-provider --expected-provider=qwen --expected-model=qwen3.7-plus --expected-sha=ec5c727f143d0f22e347621c10585ebe948b1cda --max-total-requests=3 --max-model-requests=2 --ordinary-max-output-tokens=32 --cancellation-max-output-tokens=256 --total-timeout-seconds=600 --no-automatic-retry --no-fallback --no-resend",
             R4QwenLaunchCommand.Create(options.ExpectedCommitSha!));
+    }
+
+    [Fact]
+    public void ExactHealthOnlyArgumentsProduceOneGetAndZeroModelBudget()
+    {
+        var options = R4QwenValidationOptions.Parse(HealthOnlyArguments());
+
+        Assert.True(options.Requested);
+        Assert.True(options.IsValid);
+        Assert.True(options.HealthOnly);
+        Assert.Equal(1, options.Budget?.MaxTotalRequests);
+        Assert.Equal(0, options.Budget?.MaxModelRequests);
+        Assert.Equal(0, options.Budget?.OrdinaryMaxOutputTokens);
+        Assert.Equal(0, options.Budget?.CancellationMaxOutputTokens);
+        Assert.Equal(
+            "ScreenGuide.DesktopV01.RealAcceptanceRunner.exe --stage2-r4-qwen --real-provider --health-only --expected-provider=qwen --expected-model=qwen3.7-plus --expected-sha=38feaa9f4a227644b97fccfe98018ab517f01d1f --max-total-requests=1 --max-model-requests=0 --total-timeout-seconds=600 --no-automatic-retry --no-fallback --no-resend",
+            R4QwenLaunchCommand.CreateHealthOnly(options.ExpectedCommitSha!));
+    }
+
+    [Theory]
+    [MemberData(nameof(InvalidHealthOnlyArgumentSets))]
+    public void HealthOnlyArgumentConflictsFailClosed(
+        string[] arguments,
+        string expectedErrorCode)
+    {
+        var options = R4QwenValidationOptions.Parse(arguments);
+
+        Assert.True(options.Requested);
+        Assert.False(options.IsValid);
+        Assert.Equal(expectedErrorCode, options.ErrorCode);
+        Assert.Null(options.Budget);
     }
 
     [Fact]
@@ -222,6 +254,7 @@ public sealed class R4QwenRealAcceptanceRunnerTests
 
             Assert.True(outcome.Passed, outcome.StructuredEvidenceJson);
             Assert.True(outcome.Result.Passed);
+            Assert.Equal("full", outcome.Result.Mode);
             Assert.Equal("complete", outcome.Result.Stage);
             Assert.True(outcome.Result.BuildIdentity.IsExactMatch);
             Assert.Equal("qwen", outcome.Result.SettingsProviderId);
@@ -252,6 +285,9 @@ public sealed class R4QwenRealAcceptanceRunnerTests
             Assert.Equal(2, outcome.Result.HttpModelRequestCount);
             Assert.Equal(0, outcome.Result.DeepSeekCallCount);
             Assert.Equal(0, outcome.Result.CodexChatCallCount);
+            Assert.Equal(1, outcome.Result.SessionCount);
+            Assert.Equal(1, outcome.Result.ConversationCount);
+            Assert.Equal(2, outcome.Result.AiInvocationCount);
             Assert.True(outcome.Result.NoAutomaticRetry);
             Assert.True(outcome.Result.NoFallback);
             Assert.True(outcome.Result.NoResend);
@@ -562,6 +598,85 @@ public sealed class R4QwenRealAcceptanceRunnerTests
     }
 
     [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task HealthOnlyExecutionStopsAfterOneGetWithoutSessionOrModelWork(
+        bool healthy)
+    {
+        using var directory = new TestOwnedDirectory();
+        var hostOptions = new DesktopHostOptions(
+            Path.Combine(directory.Path, "isolated-data"),
+            pipeName: $"ScreenGuide.R4.Qwen.HealthOnly.{Guid.NewGuid():N}");
+        var validation = R4QwenValidationOptions.Parse(HealthOnlyArguments());
+        var credentials = new FakeCredentialStore("FAKE_QWEN_SECRET_SENTINEL");
+        var transport = new HealthFixtureTransport(
+            healthy
+                ? OfficialHealthJson
+                : """{"success":true,"code":null,"output":{"total":0,"page_no":1,"page_size":1,"permissions":[]}}""");
+        _ = await R4IsolatedAiSettingsMaterializer.MaterializeAndVerifyAsync(
+            hostOptions.AiSettingsPath);
+        using var host = R4QwenRunnerHostComposition.BuildOffline(
+            hostOptions,
+            validation,
+            credentials,
+            transport);
+        await host.StartAsync();
+        try
+        {
+            var api = new DesktopApiClient(hostOptions.PipeName, TimeSpan.FromSeconds(5));
+            var provider = host.Services.GetRequiredService<R4QwenBudgetedChatModelProvider>();
+            var buildIdentity = new R4BuildIdentityEvidence(
+                validation.ExpectedCommitSha!,
+                validation.ExpectedCommitSha,
+                $"0.3.0+{validation.ExpectedCommitSha}");
+
+            var outcome = await R4QwenRunnerExecution.ExecuteAsync(
+                api,
+                host,
+                provider,
+                validation,
+                buildIdentity);
+
+            Assert.Equal(healthy, outcome.Passed);
+            Assert.Equal("health-only", outcome.Result.Mode);
+            Assert.Equal(healthy ? "complete" : "health", outcome.Result.Stage);
+            Assert.Equal(healthy ? null : "r4_health_failed", outcome.Result.ErrorCode);
+            Assert.Equal(healthy ? null : "qwen.health.permission_unavailable", outcome.Result.ProviderDiagnosticCode);
+            Assert.True(outcome.Result.HealthExecuted);
+            Assert.Equal(healthy, outcome.Result.HealthPassed);
+            Assert.Equal(healthy ? "Healthy" : "Unavailable", outcome.Result.HealthState);
+            Assert.Equal(healthy ? "healthy" : "permission_unavailable", outcome.Result.HealthMessageCategory);
+            Assert.False(outcome.Result.OrdinaryExecuted);
+            Assert.False(outcome.Result.CancellationExecuted);
+            Assert.Equal(1, outcome.Result.TotalRequestCount);
+            Assert.Equal(1, outcome.Result.HealthRequestCount);
+            Assert.Equal(0, outcome.Result.ModelRequestCount);
+            Assert.Equal(1, outcome.Result.HttpTotalRequestCount);
+            Assert.Equal(1, outcome.Result.HttpHealthRequestCount);
+            Assert.Equal(0, outcome.Result.HttpModelRequestCount);
+            Assert.Equal(0, outcome.Result.DeepSeekCallCount);
+            Assert.Equal(0, outcome.Result.CodexChatCallCount);
+            Assert.Equal(0, outcome.Result.SessionCount);
+            Assert.Equal(0, outcome.Result.ConversationCount);
+            Assert.Equal(0, outcome.Result.AiInvocationCount);
+            Assert.True(outcome.Result.NoAutomaticRetry);
+            Assert.True(outcome.Result.NoFallback);
+            Assert.True(outcome.Result.NoResend);
+            Assert.True(outcome.Result.HealthResponseShapeEvidence?.ParseValid);
+            Assert.Equal(1, transport.SendCount);
+            Assert.Null(await api.GetCurrentSessionAsync());
+            Assert.Empty(await host.Services.GetRequiredService<ISessionStore>().GetSessionsAsync());
+            Assert.Empty(await host.Services.GetRequiredService<IConversationStore>().GetConversationsAsync());
+            Assert.DoesNotContain("FAKE_QWEN_SECRET_SENTINEL", outcome.StructuredEvidenceJson, StringComparison.Ordinal);
+            Assert.DoesNotContain("PRIVATE_HEALTH", outcome.StructuredEvidenceJson, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await host.StopAsync();
+        }
+    }
+
+    [Theory]
     [MemberData(nameof(HealthShapeFixtures))]
     public async Task HealthShapeEvidenceClassifiesOfflineFixturesWithoutChangingProviderResult(
         HealthShapeFixture fixture)
@@ -666,6 +781,31 @@ public sealed class R4QwenRealAcceptanceRunnerTests
                 valid.Where(item => item != "--no-automatic-retry").ToArray(),
                 valid.Where(item => item != "--no-fallback").ToArray(),
                 valid.Where(item => item != "--no-resend").ToArray()
+            };
+        }
+    }
+
+    public static TheoryData<string[], string> InvalidHealthOnlyArgumentSets
+    {
+        get
+        {
+            var valid = HealthOnlyArguments();
+            return new TheoryData<string[], string>
+            {
+                { valid.Where(item => item != "--health-only").ToArray(), "r4_health_only_required" },
+                { valid.Concat(["--health-only"]).ToArray(), "r4_health_only_mode_repeated" },
+                { Replace(valid, "--max-total-requests=1", "--max-total-requests=3"), "r4_health_only_budget_out_of_range" },
+                { Replace(valid, "--max-model-requests=0", "--max-model-requests=2"), "r4_health_only_budget_out_of_range" },
+                { Replace(valid, "--max-model-requests=0", "--max-model-requests=1"), "r4_health_only_budget_out_of_range" },
+                { valid.Concat(["--ordinary-max-output-tokens=32"]).ToArray(), "r4_health_only_token_arguments_forbidden" },
+                { valid.Concat(["--cancellation-max-output-tokens=256"]).ToArray(), "r4_health_only_token_arguments_forbidden" },
+                { valid.Concat(["--cancellation-only"]).ToArray(), "r4_real_provider_mode_conflict" },
+                { valid.Where(item => item != "--no-automatic-retry").ToArray(), "r4_real_provider_budget_missing" },
+                { valid.Concat(["--no-automatic-retry"]).ToArray(), "r4_real_provider_budget_missing" },
+                { valid.Where(item => item != "--no-fallback").ToArray(), "r4_real_provider_budget_missing" },
+                { valid.Concat(["--no-fallback"]).ToArray(), "r4_real_provider_budget_missing" },
+                { valid.Where(item => item != "--no-resend").ToArray(), "r4_real_provider_budget_missing" },
+                { valid.Concat(["--no-resend"]).ToArray(), "r4_real_provider_budget_missing" }
             };
         }
     }
@@ -778,6 +918,22 @@ public sealed class R4QwenRealAcceptanceRunnerTests
         "--max-model-requests=2",
         "--ordinary-max-output-tokens=32",
         "--cancellation-max-output-tokens=256",
+        "--total-timeout-seconds=600",
+        "--no-automatic-retry",
+        "--no-fallback",
+        "--no-resend"
+    ];
+
+    private static string[] HealthOnlyArguments() =>
+    [
+        "--stage2-r4-qwen",
+        "--real-provider",
+        "--health-only",
+        "--expected-provider=qwen",
+        "--expected-model=qwen3.7-plus",
+        "--expected-sha=38feaa9f4a227644b97fccfe98018ab517f01d1f",
+        "--max-total-requests=1",
+        "--max-model-requests=0",
         "--total-timeout-seconds=600",
         "--no-automatic-retry",
         "--no-fallback",

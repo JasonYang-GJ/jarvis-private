@@ -21,6 +21,7 @@ public sealed record R4QwenValidationOptions(
     string? ExpectedProviderId,
     string? ExpectedModelId,
     string? ExpectedCommitSha,
+    bool HealthOnly,
     R4QwenValidationBudget? Budget)
 {
     public const string ModeArgument = "--stage2-r4-qwen";
@@ -45,6 +46,21 @@ public sealed record R4QwenValidationOptions(
         {
             return Invalid(requested: true, "r4_real_provider_approval_missing");
         }
+
+        var healthOnlyCount = CountExact(arguments, "--health-only");
+        if (healthOnlyCount > 1)
+        {
+            return Invalid(requested: true, "r4_health_only_mode_repeated");
+        }
+
+        if (arguments.Any(argument =>
+                string.Equals(argument, "--cancellation-only", StringComparison.Ordinal)
+                || string.Equals(argument, "--stage2-r3-deepseek", StringComparison.Ordinal)))
+        {
+            return Invalid(requested: true, "r4_real_provider_mode_conflict");
+        }
+
+        var healthOnly = healthOnlyCount == 1;
 
         var provider = ReadSingle(
             arguments,
@@ -97,6 +113,50 @@ public sealed record R4QwenValidationOptions(
             return Invalid(requested: true, "r4_real_provider_budget_missing");
         }
 
+        if (healthOnly)
+        {
+            if (arguments.Any(argument =>
+                    argument.StartsWith("--ordinary-max-output-tokens=", StringComparison.Ordinal)
+                    || argument.StartsWith("--cancellation-max-output-tokens=", StringComparison.Ordinal)))
+            {
+                return Invalid(requested: true, "r4_health_only_token_arguments_forbidden");
+            }
+
+            if (!TryReadExactInt(arguments, "--max-total-requests=", 1)
+                || !TryReadExactInt(arguments, "--max-model-requests=", 0)
+                || !TryReadExactInt(arguments, "--total-timeout-seconds=", 600))
+            {
+                return Invalid(requested: true, "r4_health_only_budget_out_of_range");
+            }
+
+            return new R4QwenValidationOptions(
+                Requested: true,
+                IsValid: true,
+                ErrorCode: null,
+                ExpectedProvider,
+                ExpectedModel,
+                commit.Value,
+                HealthOnly: true,
+                new R4QwenValidationBudget(
+                    MaxTotalRequests: 1,
+                    MaxModelRequests: 0,
+                    OrdinaryMaxOutputTokens: 0,
+                    CancellationMaxOutputTokens: 0,
+                    TimeSpan.FromSeconds(600),
+                    NoAutomaticRetry: true,
+                    NoFallback: true,
+                    NoResend: true));
+        }
+
+        if (TryReadExactInt(arguments, "--max-total-requests=", 1)
+            && TryReadExactInt(arguments, "--max-model-requests=", 0)
+            && !arguments.Any(argument =>
+                argument.StartsWith("--ordinary-max-output-tokens=", StringComparison.Ordinal)
+                || argument.StartsWith("--cancellation-max-output-tokens=", StringComparison.Ordinal)))
+        {
+            return Invalid(requested: true, "r4_health_only_required");
+        }
+
         if (!TryReadExactInt(arguments, "--max-total-requests=", 3)
             || !TryReadExactInt(arguments, "--max-model-requests=", 2)
             || !TryReadExactInt(arguments, "--ordinary-max-output-tokens=", 32)
@@ -113,6 +173,7 @@ public sealed record R4QwenValidationOptions(
             ExpectedProvider,
             ExpectedModel,
             commit.Value,
+            HealthOnly: false,
             new R4QwenValidationBudget(
                 MaxTotalRequests: 3,
                 MaxModelRequests: 2,
@@ -125,7 +186,7 @@ public sealed record R4QwenValidationOptions(
     }
 
     private static R4QwenValidationOptions Invalid(bool requested, string errorCode) =>
-        new(requested, IsValid: false, errorCode, null, null, null, null);
+        new(requested, IsValid: false, errorCode, null, null, null, HealthOnly: false, null);
 
     private static int CountExact(IReadOnlyList<string> arguments, string expected) =>
         arguments.Count(argument => string.Equals(argument, expected, StringComparison.Ordinal));
@@ -344,12 +405,7 @@ public static class R4QwenLaunchCommand
 {
     public static string Create(string exactCommitSha)
     {
-        if (exactCommitSha is not { Length: 40 }
-            || exactCommitSha.Any(character =>
-                character is not (>= '0' and <= '9' or >= 'a' and <= 'f')))
-        {
-            throw new ArgumentOutOfRangeException(nameof(exactCommitSha));
-        }
+        ValidateCommitSha(exactCommitSha);
 
         return "ScreenGuide.DesktopV01.RealAcceptanceRunner.exe"
                + " --stage2-r4-qwen --real-provider"
@@ -359,5 +415,27 @@ public static class R4QwenLaunchCommand
                + " --ordinary-max-output-tokens=32 --cancellation-max-output-tokens=256"
                + " --total-timeout-seconds=600"
                + " --no-automatic-retry --no-fallback --no-resend";
+    }
+
+    public static string CreateHealthOnly(string exactCommitSha)
+    {
+        ValidateCommitSha(exactCommitSha);
+        return "ScreenGuide.DesktopV01.RealAcceptanceRunner.exe"
+               + " --stage2-r4-qwen --real-provider --health-only"
+               + " --expected-provider=qwen --expected-model=qwen3.7-plus"
+               + $" --expected-sha={exactCommitSha}"
+               + " --max-total-requests=1 --max-model-requests=0"
+               + " --total-timeout-seconds=600"
+               + " --no-automatic-retry --no-fallback --no-resend";
+    }
+
+    private static void ValidateCommitSha(string exactCommitSha)
+    {
+        if (exactCommitSha is not { Length: 40 }
+            || exactCommitSha.Any(character =>
+                character is not (>= '0' and <= '9' or >= 'a' and <= 'f')))
+        {
+            throw new ArgumentOutOfRangeException(nameof(exactCommitSha));
+        }
     }
 }

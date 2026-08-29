@@ -35,6 +35,8 @@ public sealed record R4QwenModelEvidence(
 
 public sealed record R4QwenValidationResult
 {
+    public required string Mode { get; init; }
+
     public required string Stage { get; init; }
 
     public required bool Passed { get; init; }
@@ -117,6 +119,12 @@ public sealed record R4QwenValidationResult
 
     public int CodexChatCallCount { get; init; }
 
+    public int? SessionCount { get; init; }
+
+    public int? ConversationCount { get; init; }
+
+    public int? AiInvocationCount { get; init; }
+
     public bool NoAutomaticRetry { get; init; }
 
     public bool NoFallback { get; init; }
@@ -164,6 +172,7 @@ public static class R4QwenRunnerExecution
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(buildIdentity);
         var stage = "guard";
+        var mode = options.HealthOnly ? "health-only" : "full";
         string? settingsProviderId = null;
         string? settingsModelId = null;
         string? healthState = null;
@@ -208,6 +217,52 @@ public static class R4QwenRunnerExecution
                 throw new R4ValidationFailureException(
                     "r4_health_failed",
                     $"qwen.health.{healthMessageCategory}");
+            }
+
+            if (options.HealthOnly)
+            {
+                var healthHttp = host.Services.GetRequiredService<R4QwenHttpEvidence>();
+                var healthProbe = host.Services.GetRequiredService<R4ForbiddenProviderProbe>();
+                RequireHealthOnlyCounts(provider, healthHttp, healthProbe, options.Budget);
+                stopwatch.Stop();
+                var healthOnlyResult = new R4QwenValidationResult
+                {
+                    Mode = mode,
+                    Stage = "complete",
+                    Passed = true,
+                    BuildIdentity = buildIdentity,
+                    LaunchCommand = R4QwenLaunchCommand.CreateHealthOnly(
+                        buildIdentity.ExpectedCommitSha),
+                    ProviderId = QwenChatModelProvider.ProviderId,
+                    ModelId = QwenChatModelProvider.DefaultModelId,
+                    SettingsProviderId = settingsProviderId,
+                    SettingsModelId = settingsModelId,
+                    HealthExecuted = true,
+                    HealthPassed = true,
+                    HealthState = healthState,
+                    HealthMessageCategory = healthMessageCategory,
+                    HealthResponseShapeEvidence = healthHttp.HealthResponseShape,
+                    TotalRequestCount = provider.TotalRequestCount,
+                    HealthRequestCount = provider.HealthRequestCount,
+                    ModelRequestCount = provider.ModelRequestCount,
+                    HttpTotalRequestCount = healthHttp.TotalRequests,
+                    HttpHealthRequestCount = healthHttp.HealthRequests,
+                    HttpModelRequestCount = healthHttp.ModelRequests,
+                    HttpStatusCodes = healthHttp.StatusCodes,
+                    DeepSeekCallCount = healthProbe.DeepSeekCalls,
+                    CodexChatCallCount = healthProbe.CodexChatCalls,
+                    SessionCount = 0,
+                    ConversationCount = 0,
+                    AiInvocationCount = 0,
+                    NoAutomaticRetry = options.Budget.NoAutomaticRetry,
+                    NoFallback = options.Budget.NoFallback,
+                    NoResend = options.Budget.NoResend,
+                    ElapsedMilliseconds = stopwatch.ElapsedMilliseconds
+                };
+                return new R4QwenExecutionOutcome(
+                    true,
+                    JsonSerializer.Serialize(healthOnlyResult),
+                    healthOnlyResult);
             }
 
             var invocations = host.Services.GetRequiredService<IAiInvocationStore>();
@@ -307,6 +362,7 @@ public static class R4QwenRunnerExecution
             stopwatch.Stop();
             var result = new R4QwenValidationResult
             {
+                Mode = mode,
                 Stage = "complete",
                 Passed = true,
                 BuildIdentity = buildIdentity,
@@ -348,6 +404,9 @@ public static class R4QwenRunnerExecution
                 HttpStatusCodes = http.StatusCodes,
                 DeepSeekCallCount = probe.DeepSeekCalls,
                 CodexChatCallCount = probe.CodexChatCalls,
+                SessionCount = 1,
+                ConversationCount = 1,
+                AiInvocationCount = allInvocations.Length,
                 NoAutomaticRetry = options.Budget.NoAutomaticRetry,
                 NoFallback = options.Budget.NoFallback,
                 NoResend = options.Budget.NoResend,
@@ -366,12 +425,15 @@ public static class R4QwenRunnerExecution
             var probe = host.Services.GetService<R4ForbiddenProviderProbe>();
             var result = new R4QwenValidationResult
             {
+                Mode = mode,
                 Stage = stage,
                 Passed = false,
                 ErrorCode = SafeErrorCode(exception),
                 ProviderDiagnosticCode = SafeDiagnosticCode(exception),
                 BuildIdentity = buildIdentity,
-                LaunchCommand = R4QwenLaunchCommand.Create(buildIdentity.ExpectedCommitSha),
+                LaunchCommand = options.HealthOnly
+                    ? R4QwenLaunchCommand.CreateHealthOnly(buildIdentity.ExpectedCommitSha)
+                    : R4QwenLaunchCommand.Create(buildIdentity.ExpectedCommitSha),
                 ProviderId = QwenChatModelProvider.ProviderId,
                 ModelId = QwenChatModelProvider.DefaultModelId,
                 SettingsProviderId = settingsProviderId,
@@ -391,6 +453,9 @@ public static class R4QwenRunnerExecution
                 HttpStatusCodes = http?.StatusCodes ?? [],
                 DeepSeekCallCount = probe?.DeepSeekCalls ?? 0,
                 CodexChatCallCount = probe?.CodexChatCalls ?? 0,
+                SessionCount = options.HealthOnly ? 0 : null,
+                ConversationCount = options.HealthOnly ? 0 : null,
+                AiInvocationCount = options.HealthOnly ? 0 : null,
                 NoAutomaticRetry = options.Budget?.NoAutomaticRetry == true,
                 NoFallback = options.Budget?.NoFallback == true,
                 NoResend = options.Budget?.NoResend == true,
@@ -679,6 +744,27 @@ public static class R4QwenRunnerExecution
             || probe.CodexChatCalls != 0)
         {
             throw new R4ValidationFailureException("r4_request_count_mismatch");
+        }
+    }
+
+    private static void RequireHealthOnlyCounts(
+        R4QwenBudgetedChatModelProvider provider,
+        R4QwenHttpEvidence http,
+        R4ForbiddenProviderProbe probe,
+        R4QwenValidationBudget budget)
+    {
+        if (budget.MaxTotalRequests != 1
+            || budget.MaxModelRequests != 0
+            || provider.TotalRequestCount != 1
+            || provider.HealthRequestCount != 1
+            || provider.ModelRequestCount != 0
+            || http.TotalRequests != 1
+            || http.HealthRequests != 1
+            || http.ModelRequests != 0
+            || probe.DeepSeekCalls != 0
+            || probe.CodexChatCalls != 0)
+        {
+            throw new R4ValidationFailureException("r4_health_only_request_count_mismatch");
         }
     }
 
