@@ -12,6 +12,16 @@
       "changeReason": "建立供应商无关的普通聊天安全边界。"
     },
     {
+      "id": "chat.general",
+      "version": "2",
+      "purpose": "chat-with-user-selected-memory",
+      "contentFile": "chat/general.v2.md",
+      "sha256": "82A414F8A3E829F957BA77614A993C908119D8C6A499C1B4717E2139DF656B67",
+      "providerIds": ["*"],
+      "createdAtUtc": "2026-08-30T00:00:00Z",
+      "changeReason": "为用户逐 Turn 明确选择并确认的本机记忆建立不可信参考数据边界。"
+    },
+    {
       "id": "intent.semantic",
       "version": "1",
       "purpose": "semantic-intent-suggestion",

@@ -32,6 +32,8 @@ public partial class MainWindow : Window
     private IReadOnlyList<DesktopApplicationDto> _desktopApplications = [];
     private IReadOnlyList<TaskSummaryDto> _tasks = [];
     private IReadOnlyList<MemoryDto> _memories = [];
+    private bool _isRenderingMemoryConsent;
+    private bool _isInvalidatingMemoryConsent;
     private SystemStatusDto? _systemStatus;
     private Guid? _selectedTaskId;
     private Guid? _selectedConversationId;
@@ -316,6 +318,7 @@ public partial class MainWindow : Window
 
         _currentSession = snapshot;
         _selectedConversationId = snapshot?.ConversationId;
+        RenderConversationMemoryChoices();
         var presentation = SessionUiPresenter.Present(snapshot);
         SessionTitleText.Text = presentation.Title;
         SessionStatusText.Text = presentation.StatusText;
@@ -384,6 +387,7 @@ public partial class MainWindow : Window
         ConversationInputTextBox.IsEnabled = _isHostOnline && snapshot is not null;
         SendConversationButton.IsEnabled = ConversationInputTextBox.IsEnabled;
         StopConversationButton.Visibility = presentation.ShowStop ? Visibility.Visible : Visibility.Collapsed;
+        RenderMemoryOutboundConsent(snapshot);
         ConversationListBox.ItemsSource = snapshot is null
             ? Array.Empty<ConversationRow>()
             : new[]
@@ -482,6 +486,42 @@ public partial class MainWindow : Window
         }
     }
 
+    private void RenderMemoryOutboundConsent(SessionSnapshotDto? snapshot)
+    {
+        var consent = snapshot?.MemoryOutboundConsents?
+            .SingleOrDefault(item => item.TurnId == snapshot.ForegroundTurn?.Id);
+        _isRenderingMemoryConsent = true;
+        try
+        {
+            MemoryOutboundConsentBorder.Visibility = consent is null
+                ? Visibility.Collapsed
+                : Visibility.Visible;
+            if (consent is null)
+            {
+                MemoryOutboundItemsControl.ItemsSource = null;
+                return;
+            }
+
+            MemoryOutboundRouteText.Text =
+                $"AI 服务：{consent.ProviderId} · 模型：{consent.ModelId} · HTTPS 去向：{consent.DestinationOrigin}";
+            MemoryOutboundProjectText.Text = consent.ProjectId is null
+                ? "项目绑定：无（仅全局记忆）"
+                : $"项目绑定：{consent.ProjectName ?? "已授权项目"}（{consent.ProjectId:D}）";
+            MemoryOutboundItemsControl.ItemsSource = consent.Items.Select((item, index) =>
+                new MemoryOutboundConsentItemRow(
+                    $"{index + 1}. {item.Title}",
+                    item.Body,
+                    $"类别：{MemoryCategoryLabel(item.Category)} · 范围：{MemoryScopeLabel(item.Scope)} · version {item.Version} · {item.CharacterCount} 字符"))
+                .ToArray();
+            MemoryOutboundBudgetText.Text =
+                $"合计：{consent.ItemCount} 条，标题与正文共 {consent.TotalCharacters} 个 UTF-16 字符。";
+        }
+        finally
+        {
+            _isRenderingMemoryConsent = false;
+        }
+    }
+
     private async Task LoadMemoriesForPageAsync(Guid? preferredMemoryId = null)
     {
         if (_isLoadingMemories || _lifetime.IsCancellationRequested)
@@ -501,6 +541,9 @@ public partial class MainWindow : Window
             {
                 ClearMemoryEditor();
             }
+
+
+            RenderConversationMemoryChoices();
         }
         catch (OperationCanceledException) when (_lifetime.IsCancellationRequested)
         {
@@ -512,6 +555,38 @@ public partial class MainWindow : Window
         finally
         {
             _isLoadingMemories = false;
+        }
+    }
+
+    private void RenderConversationMemoryChoices()
+    {
+        if (!IsLoaded)
+        {
+            return;
+        }
+
+        var selectedIds = ConversationMemorySelectionList.SelectedItems
+            .OfType<MemoryRow>()
+            .Select(row => row.Item.Id)
+            .ToHashSet();
+        var selectedProjectId = _currentSession?.SelectedProjectId;
+        var rows = _memories
+            .Where(item => item.Status == "Active"
+                           && (item.Scope == "Global" || item.ProjectId == selectedProjectId))
+            .Select(MemoryRow.From)
+            .ToArray();
+        _isRenderingMemoryConsent = true;
+        try
+        {
+            ConversationMemorySelectionList.ItemsSource = rows;
+            foreach (var row in rows.Where(row => selectedIds.Contains(row.Item.Id)))
+            {
+                ConversationMemorySelectionList.SelectedItems.Add(row);
+            }
+        }
+        finally
+        {
+            _isRenderingMemoryConsent = false;
         }
     }
 
@@ -1381,16 +1456,104 @@ public partial class MainWindow : Window
 
         await RunCommandAsync(async () =>
         {
+            var memoryItems = ConversationMemorySelectionList.SelectedItems
+                .OfType<MemoryRow>()
+                .Select(row => new MemoryOutboundItemReferenceDto(row.Item.Id, row.Item.Version))
+                .ToArray();
+            if (memoryItems.Length > 8)
+            {
+                throw new InvalidOperationException("每个 Turn 最多只能选择 8 条长期记忆。");
+            }
+
             await _api.SubmitSessionInputAsync(
                 new SessionInputRequestDto(
                     message,
                     "Text",
                     $"desktop-chat-{Guid.NewGuid():N}",
-                    session.SessionId),
+                    session.SessionId,
+                    MemoryItems: memoryItems),
                 _lifetime.Token);
             ConversationInputTextBox.Clear();
+            _isRenderingMemoryConsent = true;
+            ConversationMemorySelectionList.UnselectAll();
+            _isRenderingMemoryConsent = false;
             await RefreshSessionAsync();
         });
+    }
+
+    private async void ConfirmMemoryOutboundButton_Click(object sender, RoutedEventArgs e) =>
+        await RespondMemoryOutboundConsentAsync(confirmed: true);
+
+    private async void DeclineMemoryOutboundButton_Click(object sender, RoutedEventArgs e) =>
+        await RespondMemoryOutboundConsentAsync(confirmed: false);
+
+    private async Task RespondMemoryOutboundConsentAsync(bool confirmed)
+    {
+        var session = _currentSession;
+        var consent = session?.MemoryOutboundConsents?
+            .SingleOrDefault(item => item.TurnId == session.ForegroundTurn?.Id);
+        if (session is null || consent is null)
+        {
+            return;
+        }
+
+        await RunCommandAsync(async () =>
+        {
+            var snapshot = await _api.ConfirmMemoryOutboundAsync(
+                session.SessionId,
+                consent.TurnId,
+                consent.ConsentId,
+                confirmed,
+                _lifetime.Token);
+            RenderSession(snapshot);
+        });
+    }
+
+    private async void ConversationMemorySelectionList_SelectionChanged(
+        object sender,
+        SelectionChangedEventArgs e) =>
+        await InvalidateDisplayedMemoryConsentAsync();
+
+    private async void ConversationInputTextBox_TextChanged(object sender, TextChangedEventArgs e) =>
+        await InvalidateDisplayedMemoryConsentAsync();
+
+    private async Task InvalidateDisplayedMemoryConsentAsync()
+    {
+        if (_isRenderingMemoryConsent || _isInvalidatingMemoryConsent)
+        {
+            return;
+        }
+
+        var session = _currentSession;
+        var consent = session?.MemoryOutboundConsents?
+            .SingleOrDefault(item => item.TurnId == session.ForegroundTurn?.Id);
+        if (session is null || consent is null)
+        {
+            return;
+        }
+
+        _isInvalidatingMemoryConsent = true;
+        try
+        {
+            var snapshot = await _api.ConfirmMemoryOutboundAsync(
+                session.SessionId,
+                consent.TurnId,
+                consent.ConsentId,
+                confirmed: false,
+                _lifetime.Token);
+            RenderSession(snapshot);
+        }
+        catch (OperationCanceledException) when (_lifetime.IsCancellationRequested)
+        {
+        }
+        catch (Exception exception)
+        {
+            ShowError("长期记忆出站确认已失效，请重新提交。", exception);
+        }
+        finally
+        {
+            _isInvalidatingMemoryConsent = false;
+        }
     }
 
     private async void StopConversationButton_Click(object sender, RoutedEventArgs e)
@@ -1682,11 +1845,17 @@ public partial class MainWindow : Window
     private void MemoryScopeComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e) =>
         UpdateMemoryScopeEditor();
 
-    private void MemoryPreviewQueryTextBox_TextChanged(object sender, TextChangedEventArgs e) =>
+    private async void MemoryPreviewQueryTextBox_TextChanged(object sender, TextChangedEventArgs e)
+    {
         ClearMemoryPreviewResults();
+        await InvalidateDisplayedMemoryConsentAsync();
+    }
 
-    private void MemoryPreviewProjectComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e) =>
+    private async void MemoryPreviewProjectComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
         ClearMemoryPreviewResults();
+        await InvalidateDisplayedMemoryConsentAsync();
+    }
 
     private async void RunMemoryPreviewButton_Click(object sender, RoutedEventArgs e)
     {
@@ -1767,6 +1936,11 @@ public partial class MainWindow : Window
                     MemoryTitleTextBox.Text,
                     MemoryBodyTextBox.Text,
                     expiresAtUtc), _lifetime.Token);
+            if (selected is not null)
+            {
+                await InvalidateDisplayedMemoryConsentAsync();
+            }
+
             await LoadMemoriesForPageAsync(saved.Id);
             StatusBarText.Text = selected is null ? "长期记忆已保存在本机。" : "长期记忆已修正。";
         });
@@ -1786,6 +1960,7 @@ public partial class MainWindow : Window
                 row.Item.Id,
                 row.Item.Version,
                 enable), _lifetime.Token);
+            await InvalidateDisplayedMemoryConsentAsync();
             await LoadMemoriesForPageAsync(updated.Id);
             StatusBarText.Text = enable ? "长期记忆已启用。" : "长期记忆已停用。";
         });
@@ -1815,6 +1990,7 @@ public partial class MainWindow : Window
                 row.Item.Id,
                 row.Item.Version,
                 Confirmed: true), _lifetime.Token);
+            await InvalidateDisplayedMemoryConsentAsync();
             await LoadMemoriesForPageAsync();
             StatusBarText.Text = "长期记忆已删除。";
         });
@@ -1978,6 +2154,10 @@ public partial class MainWindow : Window
         if (page == AppPage.Settings)
         {
             _ = LoadAiSettingsForPageAsync();
+            _ = LoadMemoriesForPageAsync();
+        }
+        else if (page == AppPage.Conversations)
+        {
             _ = LoadMemoriesForPageAsync();
         }
         foreach (var button in new[]
@@ -2189,6 +2369,8 @@ public partial class MainWindow : Window
             + $" · {match.Item.UpdatedAtUtc.ToLocalTime():yyyy-MM-dd HH:mm} · 分数 {match.Score}"
             + $" · 匹配依据：{string.Join("、", match.Explanations)}");
     }
+
+    private sealed record MemoryOutboundConsentItemRow(string Header, string Body, string Metadata);
 
     private static string MemoryCategoryLabel(string category) => category switch
     {

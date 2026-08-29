@@ -28,6 +28,110 @@ public sealed class MemoryService(
     ILocalTaskStore taskStore,
     TimeProvider timeProvider)
 {
+    public async Task<MemoryOutboundPreparedConsent> PrepareOutboundAsync(
+        MemoryOutboundPreparationRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ValidateOutboundRequest(request);
+        var now = timeProvider.GetUtcNow();
+        try
+        {
+            return await store.ExecuteOutboundSelectionAsync(
+                request.Items,
+                request.ProjectId,
+                now,
+                protectedItems => BuildPreparedOutbound(request, protectedItems, now),
+                cancellationToken).ConfigureAwait(false);
+        }
+        catch (MemoryServiceException)
+        {
+            throw;
+        }
+        catch (MemoryValidationException exception)
+        {
+            throw new MemoryServiceException(
+                exception.Message.Contains("授权", StringComparison.Ordinal)
+                    ? MemoryOutboundErrorCodes.ProjectUnauthorized
+                    : MemoryOutboundErrorCodes.ItemUnavailable,
+                "所选记忆已变化或当前不可用于出站。",
+                exception);
+        }
+        catch (Exception exception) when (IsProtectionFailure(exception))
+        {
+            throw ProtectionFailure(exception);
+        }
+        catch (Exception exception) when (IsStorageFailure(exception))
+        {
+            throw new MemoryServiceException(
+                MemoryOutboundErrorCodes.CommitFailed,
+                "记忆出站准备未能安全完成。",
+                exception);
+        }
+    }
+
+    public async Task<MemoryOutboundEnvelope> CommitOutboundAsync(
+        MemoryOutboundPreparedConsent prepared,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(prepared);
+        var now = timeProvider.GetUtcNow();
+        if (now > prepared.ExpiresAtUtc)
+        {
+            throw new MemoryServiceException(
+                MemoryOutboundErrorCodes.ConsentStale,
+                "记忆出站确认已失效，请重新检查后确认。");
+        }
+
+        try
+        {
+            return await store.ExecuteOutboundSelectionAsync(
+                prepared.Items.Select(item => new MemoryOutboundItemReference(item.Id, item.Version)).ToArray(),
+                prepared.ProjectId,
+                now,
+                protectedItems =>
+                {
+                    var current = protectedItems.Select(Unprotect).ToArray();
+                    if (current.Length != prepared.Items.Count
+                        || current.Where((item, index) => !Matches(prepared.Items[index], item)).Any())
+                    {
+                        throw new MemoryValidationException("记忆出站确认快照已变化。");
+                    }
+
+                    return new MemoryOutboundEnvelope(
+                        prepared.SerializedContext,
+                        prepared.ToAuditMetadata(now));
+                },
+                cancellationToken).ConfigureAwait(false);
+        }
+        catch (MemoryServiceException)
+        {
+            throw;
+        }
+        catch (MemoryValidationException exception)
+        {
+            throw new MemoryServiceException(
+                exception.Message.Contains("授权", StringComparison.Ordinal)
+                    ? MemoryOutboundErrorCodes.ProjectUnauthorized
+                    : MemoryOutboundErrorCodes.ConsentStale,
+                exception.Message.Contains("授权", StringComparison.Ordinal)
+                    ? "所选项目已不再授权，记忆没有发送。"
+                    : "记忆出站确认已失效，请重新检查后确认。",
+                exception);
+        }
+        catch (Exception exception) when (IsProtectionFailure(exception))
+        {
+            throw ProtectionFailure(exception);
+        }
+        catch (Exception exception) when (IsStorageFailure(exception))
+        {
+            throw new MemoryServiceException(
+                MemoryOutboundErrorCodes.CommitFailed,
+                "记忆出站提交未能安全完成。",
+                exception);
+        }
+    }
+
     public async Task<IReadOnlyList<MemoryItem>> ListAsync(
         CancellationToken cancellationToken = default)
     {
@@ -415,4 +519,106 @@ public sealed class MemoryService(
 
     private static MemoryServiceException ProtectionFailure(Exception exception) =>
         new(MemoryServiceErrorCodes.ProtectionFailure, "记忆内容无法安全读取。", exception);
+
+    private static void ValidateOutboundRequest(MemoryOutboundPreparationRequest request)
+    {
+        if (request.CoordinatorInstanceId == Guid.Empty
+            || request.SessionId == Guid.Empty
+            || request.TurnId == Guid.Empty
+            || request.TurnVersion < 0
+            || string.IsNullOrWhiteSpace(request.ProviderId)
+            || string.IsNullOrWhiteSpace(request.ModelId)
+            || string.IsNullOrWhiteSpace(request.PromptId)
+            || string.IsNullOrWhiteSpace(request.PromptVersion)
+            || string.IsNullOrWhiteSpace(request.PromptContentHash)
+            || request.ProjectId == Guid.Empty
+            || request.Items is null
+            || request.Items.Count is < MemoryOutboundLimits.MinimumItems or > MemoryOutboundLimits.MaximumItems
+            || request.Items.Select(item => item.MemoryId).Distinct().Count() != request.Items.Count)
+        {
+            throw InvalidRequest("记忆出站请求不符合要求。");
+        }
+
+        try
+        {
+            _ = MemoryOutboundContract.NormalizeHttpsOrigin(request.DataDestination);
+        }
+        catch (MemoryValidationException exception)
+        {
+            throw new MemoryServiceException(
+                MemoryOutboundErrorCodes.DestinationUnverifiable,
+                "当前普通聊天目的地无法安全验证，未发送记忆。",
+                exception);
+        }
+    }
+
+    private MemoryOutboundPreparedConsent BuildPreparedOutbound(
+        MemoryOutboundPreparationRequest request,
+        IReadOnlyList<ProtectedMemoryItem> protectedItems,
+        DateTimeOffset now)
+    {
+        var items = protectedItems.Select(Unprotect).Select(item =>
+        {
+            var title = item.Title ?? throw new InvalidDataException("记忆标题缺失。");
+            var body = item.Body ?? throw new InvalidDataException("记忆正文缺失。");
+            return new MemoryOutboundPreparedItem(
+                item.Metadata.Id,
+                item.Metadata.Version,
+                item.Metadata.Category,
+                item.Metadata.Scope.Kind,
+                title,
+                body,
+                title.Length + body.Length);
+        }).ToArray();
+        var totalCharacters = items.Sum(item => item.CharacterCount);
+        if (totalCharacters > MemoryOutboundLimits.MaximumContentCharacters)
+        {
+            throw new MemoryServiceException(
+                MemoryOutboundErrorCodes.BudgetExceeded,
+                "所选记忆内容超过单次出站限制，请减少选择。");
+        }
+
+        var serialized = MemoryOutboundContract.SerializeContext(items);
+        if (serialized.Length > MemoryOutboundLimits.MaximumSerializedContextCharacters)
+        {
+            throw new MemoryServiceException(
+                MemoryOutboundErrorCodes.BudgetExceeded,
+                "所选记忆序列化后超过单次出站限制，请减少选择。");
+        }
+
+        var destinationOrigin = MemoryOutboundContract.NormalizeHttpsOrigin(request.DataDestination);
+        return new MemoryOutboundPreparedConsent
+        {
+            ConsentId = Guid.NewGuid(),
+            CoordinatorInstanceId = request.CoordinatorInstanceId,
+            SessionId = request.SessionId,
+            TurnId = request.TurnId,
+            TurnVersion = request.TurnVersion,
+            PreparedAtUtc = now,
+            ExpiresAtUtc = now.Add(MemoryOutboundLimits.MaximumPreparedLifetime),
+            ProviderId = request.ProviderId.Trim(),
+            ModelId = request.ModelId.Trim(),
+            DestinationOrigin = destinationOrigin,
+            PromptId = request.PromptId.Trim(),
+            PromptVersion = request.PromptVersion.Trim(),
+            PromptContentHash = request.PromptContentHash.Trim(),
+            ProjectId = request.ProjectId,
+            Items = items,
+            TotalCharacters = totalCharacters,
+            SerializedContext = serialized,
+            ManifestHash = MemoryOutboundContract.CreateManifestHash(
+                request,
+                destinationOrigin,
+                items,
+                totalCharacters)
+        };
+    }
+
+    private static bool Matches(MemoryOutboundPreparedItem prepared, MemoryItem current) =>
+        prepared.Id == current.Metadata.Id
+        && prepared.Version == current.Metadata.Version
+        && prepared.Category == current.Metadata.Category
+        && prepared.Scope == current.Metadata.Scope.Kind
+        && string.Equals(prepared.Title, current.Title, StringComparison.Ordinal)
+        && string.Equals(prepared.Body, current.Body, StringComparison.Ordinal);
 }

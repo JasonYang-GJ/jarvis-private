@@ -23,6 +23,13 @@ public interface IMemoryStore : IAsyncDisposable
         Guid id,
         CancellationToken cancellationToken = default);
 
+    Task<TResult> ExecuteOutboundSelectionAsync<TResult>(
+        IReadOnlyList<MemoryOutboundItemReference> references,
+        Guid? projectId,
+        DateTimeOffset nowUtc,
+        Func<IReadOnlyList<ProtectedMemoryItem>, TResult> action,
+        CancellationToken cancellationToken = default);
+
     Task CreateAsync(
         ProtectedMemoryItem item,
         CancellationToken cancellationToken = default);

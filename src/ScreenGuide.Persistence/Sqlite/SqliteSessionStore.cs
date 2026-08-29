@@ -1,5 +1,7 @@
 using System.Globalization;
+using System.Text.Json;
 using Microsoft.Data.Sqlite;
+using ScreenGuide.Core.Memories;
 using ScreenGuide.Core.Sessions;
 
 namespace ScreenGuide.Persistence.Sqlite;
@@ -282,6 +284,22 @@ public sealed class SqliteSessionStore : ISessionStore
                 requires_confirmation = $requiresConfirmation,
                 confirmation_granted = $confirmationGranted,
                 cancellation_requested = $cancellationRequested,
+                memory_outbound_state = $memoryOutboundState,
+                memory_consent_id = $memoryConsentId,
+                memory_prepared_at_utc = $memoryPreparedAtUtc,
+                memory_expires_at_utc = $memoryExpiresAtUtc,
+                memory_consumed_at_utc = $memoryConsumedAtUtc,
+                memory_origin_provider_id = $memoryProviderId,
+                memory_origin_model_id = $memoryModelId,
+                memory_origin_destination = $memoryDestination,
+                memory_prompt_id = $memoryPromptId,
+                memory_prompt_version = $memoryPromptVersion,
+                memory_prompt_hash = $memoryPromptHash,
+                memory_project_id = $memoryProjectId,
+                memory_item_refs_json = $memoryItemRefsJson,
+                memory_item_count = $memoryItemCount,
+                memory_total_characters = $memoryTotalCharacters,
+                memory_manifest_hash = $memoryManifestHash,
                 result_summary = $resultSummary, failure_code = $failureCode,
                 failure_message = $failureMessage, updated_at_utc = $changedAtUtc,
                 completed_at_utc = $completedAtUtc, version = version + 1
@@ -308,6 +326,7 @@ public sealed class SqliteSessionStore : ISessionStore
         command.Parameters.AddWithValue("$requiresConfirmation", turn.RequiresConfirmation ? 1 : 0);
         command.Parameters.AddWithValue("$confirmationGranted", turn.ConfirmationGranted ? 1 : 0);
         command.Parameters.AddWithValue("$cancellationRequested", turn.CancellationRequested ? 1 : 0);
+        AddMemoryOutbound(command, turn.MemoryOutboundState, turn.MemoryOutbound);
         command.Parameters.AddWithValue("$resultSummary", TextOrNull(turn.ResultSummary));
         command.Parameters.AddWithValue("$failureCode", TextOrNull(turn.FailureCode));
         command.Parameters.AddWithValue("$failureMessage", TextOrNull(turn.FailureMessage));
@@ -370,7 +389,7 @@ public sealed class SqliteSessionStore : ISessionStore
             query.Transaction = transaction;
             query.CommandText = """
                 SELECT id FROM session_turns
-                WHERE phase IN ('Understanding', 'Responding', 'Executing', 'ObservingWindow', 'ProgrammingTask', 'WaitingForUser');
+                WHERE phase IN ('Understanding', 'Responding', 'Executing', 'ObservingWindow', 'ProgrammingTask', 'WaitingForUser', 'WaitingForMemoryOutboundConsent');
                 """;
             await using var reader = await query.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
             while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
@@ -387,9 +406,14 @@ public sealed class SqliteSessionStore : ISessionStore
                 SET phase = 'Interrupted', missing_context = 'None',
                     failure_code = 'host_restarted',
                     failure_message = '元枢重启时这项工作仍在运行，已安全停止。',
+                    memory_outbound_state = CASE
+                        WHEN memory_outbound_state IN ('Prepared', 'WaitingForMemoryOutboundConsent', 'Committing')
+                        THEN 'Interrupted'
+                        ELSE memory_outbound_state
+                    END,
                     completed_at_utc = $recoveredAtUtc, updated_at_utc = $recoveredAtUtc,
                     version = version + 1
-                WHERE phase IN ('Understanding', 'Responding', 'Executing', 'ObservingWindow', 'ProgrammingTask', 'WaitingForUser');
+                WHERE phase IN ('Understanding', 'Responding', 'Executing', 'ObservingWindow', 'ProgrammingTask', 'WaitingForUser', 'WaitingForMemoryOutboundConsent');
 
                 UPDATE session_turns
                 SET phase = 'WaitingForWindow', missing_context = 'Window',
@@ -545,6 +569,12 @@ public sealed class SqliteSessionStore : ISessionStore
                 frozen_route_status, frozen_provider_id, frozen_model_id,
                 frozen_data_destination, frozen_sends_data_off_device,
                 frozen_at_utc, frozen_route_failure_code,
+                memory_outbound_state, memory_consent_id, memory_prepared_at_utc,
+                memory_expires_at_utc, memory_consumed_at_utc,
+                memory_origin_provider_id, memory_origin_model_id, memory_origin_destination,
+                memory_prompt_id, memory_prompt_version, memory_prompt_hash,
+                memory_project_id, memory_item_refs_json, memory_item_count,
+                memory_total_characters, memory_manifest_hash,
                 created_at_utc, updated_at_utc, completed_at_utc, version)
             VALUES(
                 $id, $sessionId, $sequenceNumber, $inputText, $inputModality, $idempotencyKey,
@@ -557,6 +587,12 @@ public sealed class SqliteSessionStore : ISessionStore
                 $frozenRouteStatus, $frozenProviderId, $frozenModelId,
                 $frozenDataDestination, $frozenSendsDataOffDevice,
                 $frozenAtUtc, $frozenRouteFailureCode,
+                $memoryOutboundState, NULL, NULL,
+                NULL, NULL,
+                NULL, NULL, NULL,
+                NULL, NULL, NULL,
+                NULL, NULL, NULL,
+                NULL, NULL,
                 $createdAtUtc, $updatedAtUtc, NULL, 0);
             """;
         Add(command, "$id", turn.Id);
@@ -584,6 +620,7 @@ public sealed class SqliteSessionStore : ISessionStore
                 : DBNull.Value);
         command.Parameters.AddWithValue("$frozenAtUtc", ToDb(turn.FrozenRoute.FrozenAtUtc));
         command.Parameters.AddWithValue("$frozenRouteFailureCode", TextOrNull(turn.FrozenRoute.FailureCode));
+        command.Parameters.AddWithValue("$memoryOutboundState", MemoryOutboundConsentState.None.ToString());
         command.Parameters.AddWithValue("$createdAtUtc", ToDb(turn.CreatedAtUtc));
         command.Parameters.AddWithValue("$updatedAtUtc", ToDb(turn.UpdatedAtUtc));
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
@@ -635,6 +672,8 @@ public sealed class SqliteSessionStore : ISessionStore
         RequiresConfirmation = reader.GetInt32(reader.GetOrdinal("requires_confirmation")) == 1,
         ConfirmationGranted = reader.GetInt32(reader.GetOrdinal("confirmation_granted")) == 1,
         CancellationRequested = reader.GetInt32(reader.GetOrdinal("cancellation_requested")) == 1,
+        MemoryOutboundState = ReadMemoryOutboundState(reader),
+        MemoryOutbound = ReadMemoryOutbound(reader),
         ResultSummary = ReadNullableString(reader, "result_summary"),
         FailureCode = ReadNullableString(reader, "failure_code"),
         FailureMessage = ReadNullableString(reader, "failure_message"),
@@ -663,6 +702,77 @@ public sealed class SqliteSessionStore : ISessionStore
             FailureCode = ReadNullableString(reader, "frozen_route_failure_code")
         });
     }
+
+    private static MemoryOutboundConsentState ReadMemoryOutboundState(SqliteDataReader reader)
+    {
+        var value = ReadNullableString(reader, "memory_outbound_state");
+        return value is null
+            ? MemoryOutboundConsentState.None
+            : Enum.Parse<MemoryOutboundConsentState>(value, ignoreCase: false);
+    }
+
+    private static MemoryOutboundAuditMetadata? ReadMemoryOutbound(SqliteDataReader reader)
+    {
+        var consentId = ReadNullableGuid(reader, "memory_consent_id");
+        if (consentId is null)
+        {
+            return null;
+        }
+
+        var referencesJson = ReadNullableString(reader, "memory_item_refs_json")
+            ?? throw new InvalidDataException("记忆出站引用元数据缺失。");
+        var references = JsonSerializer.Deserialize<MemoryOutboundItemReference[]>(referencesJson)
+            ?? throw new InvalidDataException("记忆出站引用元数据无效。");
+        return new MemoryOutboundAuditMetadata(
+            consentId.Value,
+            ReadNullableDate(reader, "memory_prepared_at_utc")
+                ?? throw new InvalidDataException("记忆出站准备时间缺失。"),
+            ReadNullableDate(reader, "memory_expires_at_utc")
+                ?? throw new InvalidDataException("记忆出站到期时间缺失。"),
+            ReadNullableDate(reader, "memory_consumed_at_utc"),
+            ReadRequiredString(reader, "memory_origin_provider_id"),
+            ReadRequiredString(reader, "memory_origin_model_id"),
+            ReadRequiredString(reader, "memory_origin_destination"),
+            ReadRequiredString(reader, "memory_prompt_id"),
+            ReadRequiredString(reader, "memory_prompt_version"),
+            ReadRequiredString(reader, "memory_prompt_hash"),
+            ReadNullableGuid(reader, "memory_project_id"),
+            references,
+            reader.GetInt32(reader.GetOrdinal("memory_item_count")),
+            reader.GetInt32(reader.GetOrdinal("memory_total_characters")),
+            ReadRequiredString(reader, "memory_manifest_hash"));
+    }
+
+    private static void AddMemoryOutbound(
+        SqliteCommand command,
+        MemoryOutboundConsentState state,
+        MemoryOutboundAuditMetadata? metadata)
+    {
+        command.Parameters.AddWithValue("$memoryOutboundState", state.ToString());
+        command.Parameters.AddWithValue("$memoryConsentId", GuidOrNull(metadata?.ConsentId));
+        command.Parameters.AddWithValue("$memoryPreparedAtUtc", DateOrNull(metadata?.PreparedAtUtc));
+        command.Parameters.AddWithValue("$memoryExpiresAtUtc", DateOrNull(metadata?.ExpiresAtUtc));
+        command.Parameters.AddWithValue("$memoryConsumedAtUtc", DateOrNull(metadata?.ConsumedAtUtc));
+        command.Parameters.AddWithValue("$memoryProviderId", TextOrNull(metadata?.ProviderId));
+        command.Parameters.AddWithValue("$memoryModelId", TextOrNull(metadata?.ModelId));
+        command.Parameters.AddWithValue("$memoryDestination", TextOrNull(metadata?.DestinationOrigin));
+        command.Parameters.AddWithValue("$memoryPromptId", TextOrNull(metadata?.PromptId));
+        command.Parameters.AddWithValue("$memoryPromptVersion", TextOrNull(metadata?.PromptVersion));
+        command.Parameters.AddWithValue("$memoryPromptHash", TextOrNull(metadata?.PromptContentHash));
+        command.Parameters.AddWithValue("$memoryProjectId", GuidOrNull(metadata?.ProjectId));
+        command.Parameters.AddWithValue(
+            "$memoryItemRefsJson",
+            metadata is null ? DBNull.Value : JsonSerializer.Serialize(metadata.Items));
+        command.Parameters.AddWithValue("$memoryItemCount", metadata?.ItemCount as object ?? DBNull.Value);
+        command.Parameters.AddWithValue(
+            "$memoryTotalCharacters",
+            metadata?.TotalCharacters as object ?? DBNull.Value);
+        command.Parameters.AddWithValue("$memoryManifestHash", TextOrNull(metadata?.ManifestHash));
+    }
+
+    private static string ReadRequiredString(SqliteDataReader reader, string name) =>
+        ReadNullableString(reader, name)
+        ?? throw new InvalidDataException($"记忆出站元数据缺少 {name}。");
 
     private static SessionTurnFrozenRoute ValidateFrozenRoute(SessionTurnFrozenRoute route)
     {

@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using ScreenGuide.AI.Core;
 using ScreenGuide.Core.Conversations;
+using ScreenGuide.Core.Memories;
 using ScreenGuide.Core.Sessions;
 using ScreenGuide.Core.Tasking;
 using ScreenGuide.DesktopProtocol;
@@ -16,7 +17,8 @@ public sealed record LocalSessionSnapshot(
     string? SelectedProjectName,
     IReadOnlyList<SessionTurnRecord> Turns,
     IReadOnlyList<SessionTurnRecord> ActiveTurns,
-    IReadOnlyList<ConversationMessageRecord> Messages);
+    IReadOnlyList<ConversationMessageRecord> Messages,
+    IReadOnlyList<MemoryOutboundPreparedConsent> MemoryOutboundConsents);
 
 public sealed record SessionSubmitResult(Guid SessionId, Guid TurnId, bool WasDuplicate);
 
@@ -31,6 +33,8 @@ public sealed class SessionCoordinator(
     LocalTaskEntryService tasks,
     DesktopHostState hostState,
     ModelRouter modelRouter,
+    PromptRegistry prompts,
+    MemoryService memories,
     TimeProvider timeProvider)
 {
     private const int MaximumInputLength = 20_000;
@@ -41,6 +45,10 @@ public sealed class SessionCoordinator(
     private readonly ConcurrentDictionary<Guid, SemaphoreSlim> _turnGates = new();
     private readonly ConcurrentDictionary<Guid, ActiveSessionWork> _activeWork = new();
     private readonly ConcurrentDictionary<Guid, ActiveTaskMonitor> _taskMonitors = new();
+    private readonly ConcurrentDictionary<Guid, IReadOnlyList<MemoryOutboundItemReference>>
+        _requestedMemorySelections = new();
+    private readonly ConcurrentDictionary<Guid, MemoryOutboundPreparedConsent>
+        _preparedMemoryConsents = new();
     private readonly object _changeGate = new();
     private TaskCompletionSource<long> _nextChange = NewChangeSource();
     private long _changeVersion = 1;
@@ -151,10 +159,12 @@ public sealed class SessionCoordinator(
         string? idempotencyKey,
         CancellationToken cancellationToken = default,
         string? expectedIntentKind = null,
-        string? expectedTarget = null)
+        string? expectedTarget = null,
+        IReadOnlyList<MemoryOutboundItemReference>? memoryItems = null)
     {
         RequireStartedHost();
         var normalized = NormalizeInput(text);
+        var normalizedMemoryItems = NormalizeMemorySelection(memoryItems);
         var expectation = NormalizeActionExpectation(expectedIntentKind, expectedTarget);
         await _currentSessionGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
@@ -204,6 +214,12 @@ public sealed class SessionCoordinator(
                             "同一个请求编号不能改成另一个电脑操作目标。 ");
                     }
 
+                    if (!MemorySelectionMatches(existingTurn, normalizedMemoryItems))
+                    {
+                        throw new InvalidOperationException(
+                            "同一个请求编号不能改成另一组长期记忆。");
+                    }
+
                     return new SessionSubmitResult(session.Id, existingTurn.Id, true);
                 }
 
@@ -232,6 +248,11 @@ public sealed class SessionCoordinator(
                     }
 
                     return new SessionSubmitResult(session.Id, registration.Turn.Id, true);
+                }
+
+                if (normalizedMemoryItems.Count > 0)
+                {
+                    _requestedMemorySelections[registeredTurn.Id] = normalizedMemoryItems;
                 }
 
                 if (expectation.IntentKind is not null)
@@ -597,6 +618,9 @@ public sealed class SessionCoordinator(
                 return await BuildSnapshotAsync(session, cancellationToken).ConfigureAwait(false);
             }
 
+            _preparedMemoryConsents.TryRemove(turn.Id, out _);
+            _requestedMemorySelections.TryRemove(turn.Id, out _);
+
             if (_activeWork.TryGetValue(turn.Id, out active))
             {
                 if (turn.Phase != SessionTurnPhase.Responding)
@@ -613,6 +637,12 @@ public sealed class SessionCoordinator(
                             Phase = SessionTurnPhase.Cancelled,
                             MissingContext = SessionMissingContext.None,
                             CancellationRequested = true,
+                            MemoryOutboundState = current.MemoryOutboundState is
+                                MemoryOutboundConsentState.Prepared or
+                                MemoryOutboundConsentState.WaitingForMemoryOutboundConsent or
+                                MemoryOutboundConsentState.Committing
+                                    ? MemoryOutboundConsentState.Cancelled
+                                    : current.MemoryOutboundState,
                             ResultSummary = "这次请求已取消。",
                             FailureCode = "user_cancelled",
                             FailureMessage = "用户取消了当前请求。",
@@ -830,6 +860,8 @@ public sealed class SessionCoordinator(
 
     public async Task StopAsync(CancellationToken cancellationToken = default)
     {
+        _preparedMemoryConsents.Clear();
+        _requestedMemorySelections.Clear();
         var active = _activeWork.Values.ToArray();
         foreach (var work in active)
         {
@@ -999,7 +1031,13 @@ public sealed class SessionCoordinator(
 
         turn = latest;
         var semanticRoute = RestoreReadyRoute(turn.FrozenRoute);
-        var persistedIntent = TryParsePersistedIntent(turn.IntentKind);
+        var memorySelectionRequested = _requestedMemorySelections.TryGetValue(
+                turn.Id,
+                out var requestedMemoryItems)
+            && requestedMemoryItems.Count > 0;
+        var persistedIntent = memorySelectionRequested
+            ? UniversalIntentKind.Conversation
+            : TryParsePersistedIntent(turn.IntentKind);
         var plan = await assistantCommands.PlanSessionAsync(
                 new PlanAssistantCommandRequestDto(
                     turn.InputText,
@@ -1163,7 +1201,20 @@ public sealed class SessionCoordinator(
 
         if (kind == UniversalIntentKind.Conversation)
         {
-            await RunConversationTurnAsync(session, turn, cancellationToken).ConfigureAwait(false);
+            if (memorySelectionRequested)
+            {
+                await PrepareMemoryOutboundConsentAsync(
+                        session,
+                        turn,
+                        requestedMemoryItems!,
+                        cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            else
+            {
+                await RunConversationTurnAsync(session, turn, memoryOutbound: null, cancellationToken)
+                    .ConfigureAwait(false);
+            }
             return;
         }
 
@@ -1278,9 +1329,202 @@ public sealed class SessionCoordinator(
             .ConfigureAwait(false);
     }
 
+    private async Task PrepareMemoryOutboundConsentAsync(
+        SessionRecord session,
+        SessionTurnRecord turn,
+        IReadOnlyList<MemoryOutboundItemReference> selection,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            if (turn.FrozenRoute is not
+                {
+                    Status: SessionTurnRouteStatus.Ready,
+                    ProviderId: { Length: > 0 } providerId,
+                    ModelId: { Length: > 0 } modelId,
+                    DataDestination: { Length: > 0 } destination
+                })
+            {
+                await TransitionAsync(
+                        turn.Id,
+                        current => current with
+                        {
+                            WorkKind = SessionWorkKind.Conversation,
+                            Phase = SessionTurnPhase.Failed,
+                            MemoryOutboundState = MemoryOutboundConsentState.Invalidated,
+                            FailureCode = turn.FrozenRoute?.FailureCode ?? "frozen_chat_route_invalid",
+                            FailureMessage = "当前普通聊天路由不可用，所选记忆没有发送。",
+                            CompletedAtUtc = timeProvider.GetUtcNow()
+                        },
+                        CancellationToken.None)
+                    .ConfigureAwait(false);
+                return;
+            }
+
+            var prompt = prompts.GetRequired("chat.general", "2", providerId);
+            var request = new MemoryOutboundPreparationRequest(
+                Guid.Parse(_coordinatorInstanceId),
+                session.Id,
+                turn.Id,
+                turn.Version,
+                providerId,
+                modelId,
+                destination,
+                prompt.PromptId,
+                prompt.Version,
+                prompt.ContentSha256,
+                turn.ProjectId ?? session.SelectedProjectId,
+                selection);
+            var prepared = await memories.PrepareOutboundAsync(request, cancellationToken)
+                .ConfigureAwait(false);
+            _preparedMemoryConsents[turn.Id] = prepared;
+            try
+            {
+                _ = await TransitionAsync(
+                        turn.Id,
+                        current => current with
+                        {
+                            WorkKind = SessionWorkKind.Conversation,
+                            IntentKind = "Conversation",
+                            Phase = SessionTurnPhase.WaitingForMemoryOutboundConsent,
+                            MissingContext = SessionMissingContext.None,
+                            MemoryOutboundState = MemoryOutboundConsentState.WaitingForMemoryOutboundConsent,
+                            MemoryOutbound = prepared.ToAuditMetadata(),
+                            ResultSummary = "请检查本次将发送的完整记忆内容、AI 服务和目的地后再确认。",
+                            FailureCode = null,
+                            FailureMessage = null
+                        },
+                        CancellationToken.None)
+                    .ConfigureAwait(false);
+                _requestedMemorySelections.TryRemove(turn.Id, out _);
+            }
+            catch
+            {
+                _preparedMemoryConsents.TryRemove(turn.Id, out _);
+                throw;
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (MemoryServiceException exception)
+        {
+            _preparedMemoryConsents.TryRemove(turn.Id, out _);
+            _requestedMemorySelections.TryRemove(turn.Id, out _);
+            await TransitionAsync(
+                    turn.Id,
+                    current => current with
+                    {
+                        WorkKind = SessionWorkKind.Conversation,
+                        Phase = SessionTurnPhase.Failed,
+                        MemoryOutboundState = MemoryOutboundConsentState.Invalidated,
+                        FailureCode = exception.Code,
+                        FailureMessage = exception.Message,
+                        CompletedAtUtc = timeProvider.GetUtcNow()
+                    },
+                    CancellationToken.None)
+                .ConfigureAwait(false);
+        }
+    }
+
+    private async Task CommitAndRunMemoryConversationAsync(
+        SessionRecord session,
+        SessionTurnRecord committing,
+        MemoryOutboundPreparedConsent prepared,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var envelope = await memories.CommitOutboundAsync(prepared, cancellationToken)
+                .ConfigureAwait(false);
+            _preparedMemoryConsents.TryRemove(committing.Id, out _);
+            _requestedMemorySelections.TryRemove(committing.Id, out _);
+            var consumed = await TransitionAsync(
+                    committing.Id,
+                    current => current with
+                    {
+                        MemoryOutboundState = MemoryOutboundConsentState.Consumed,
+                        MemoryOutbound = envelope.Audit,
+                        FailureCode = null,
+                        FailureMessage = null
+                    },
+                    CancellationToken.None)
+                .ConfigureAwait(false);
+            await RunConversationTurnAsync(session, consumed, envelope, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            await EndMemoryTurnAsync(
+                    committing.Id,
+                    SessionTurnPhase.Cancelled,
+                    MemoryOutboundConsentState.Cancelled,
+                    MemoryOutboundErrorCodes.Cancelled,
+                    "记忆出站已取消，没有复用本次确认。")
+                .ConfigureAwait(false);
+        }
+        catch (MemoryServiceException exception)
+        {
+            await EndMemoryTurnAsync(
+                    committing.Id,
+                    SessionTurnPhase.Failed,
+                    MemoryOutboundConsentState.Invalidated,
+                    exception.Code,
+                    exception.Message)
+                .ConfigureAwait(false);
+        }
+        catch (Exception)
+        {
+            await EndMemoryTurnAsync(
+                    committing.Id,
+                    SessionTurnPhase.Failed,
+                    MemoryOutboundConsentState.Invalidated,
+                    MemoryOutboundErrorCodes.CommitFailed,
+                    "记忆出站提交未能安全完成，没有发送。")
+                .ConfigureAwait(false);
+        }
+        finally
+        {
+            _preparedMemoryConsents.TryRemove(committing.Id, out _);
+            _requestedMemorySelections.TryRemove(committing.Id, out _);
+            RemoveActiveWork(committing.Id);
+            PublishChange();
+        }
+    }
+
+    private async Task EndMemoryTurnAsync(
+        Guid turnId,
+        SessionTurnPhase phase,
+        MemoryOutboundConsentState consentState,
+        string code,
+        string message)
+    {
+        try
+        {
+            await TransitionAsync(
+                    turnId,
+                    current => current with
+                    {
+                        Phase = phase,
+                        MemoryOutboundState = consentState,
+                        CancellationRequested = phase == SessionTurnPhase.Cancelled,
+                        FailureCode = code,
+                        FailureMessage = message,
+                        CompletedAtUtc = timeProvider.GetUtcNow()
+                    },
+                    CancellationToken.None)
+                .ConfigureAwait(false);
+        }
+        catch
+        {
+        }
+    }
+
     private async Task RunConversationTurnAsync(
         SessionRecord session,
         SessionTurnRecord sessionTurn,
+        MemoryOutboundEnvelope? memoryOutbound,
         CancellationToken cancellationToken)
     {
         try
@@ -1302,6 +1546,7 @@ public sealed class SessionCoordinator(
                     responding.FrozenRoute,
                     responding.InputText,
                     $"session-conversation-{responding.Id:N}",
+                    memoryOutbound,
                     cancellationToken)
                 .ConfigureAwait(false);
             await TransitionAsync(
@@ -1638,6 +1883,118 @@ public sealed class SessionCoordinator(
         }
     }
 
+    public async Task<LocalSessionSnapshot> ConfirmMemoryOutboundAsync(
+        Guid sessionId,
+        Guid turnId,
+        Guid consentId,
+        bool confirmed,
+        CancellationToken cancellationToken = default)
+    {
+        RequireStartedHost();
+        var gate = _turnGates.GetOrAdd(turnId, static _ => new SemaphoreSlim(1, 1));
+        await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        SessionRecord session;
+        try
+        {
+            (SessionRecord Session, SessionTurnRecord Turn) required;
+            try
+            {
+                required = await RequireWaitingTurnAsync(
+                        sessionId,
+                        turnId,
+                        SessionTurnPhase.WaitingForMemoryOutboundConsent,
+                        cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            catch (InvalidOperationException exception)
+            {
+                throw new MemoryServiceException(
+                    MemoryOutboundErrorCodes.ConsentStale,
+                    "记忆出站确认已失效，不能重复使用。",
+                    exception);
+            }
+            session = required.Session;
+            if (!_preparedMemoryConsents.TryGetValue(turnId, out var prepared)
+                || consentId == Guid.Empty
+                || prepared.ConsentId != consentId
+                || !PreparedConsentMatches(required.Session, required.Turn, prepared))
+            {
+                _preparedMemoryConsents.TryRemove(turnId, out _);
+                await TransitionAsync(
+                        turnId,
+                        current => current with
+                        {
+                            Phase = SessionTurnPhase.Failed,
+                            MissingContext = SessionMissingContext.None,
+                            MemoryOutboundState = MemoryOutboundConsentState.Invalidated,
+                            FailureCode = MemoryOutboundErrorCodes.ConsentStale,
+                            FailureMessage = "记忆出站确认已失效，请重新发送并检查。",
+                            CompletedAtUtc = timeProvider.GetUtcNow()
+                        },
+                        CancellationToken.None)
+                    .ConfigureAwait(false);
+                return await BuildSnapshotAsync(session, cancellationToken).ConfigureAwait(false);
+            }
+
+            if (!confirmed)
+            {
+                _preparedMemoryConsents.TryRemove(turnId, out _);
+                _requestedMemorySelections.TryRemove(turnId, out _);
+                await TransitionAsync(
+                        turnId,
+                        current => current with
+                        {
+                            Phase = SessionTurnPhase.Cancelled,
+                            MissingContext = SessionMissingContext.None,
+                            MemoryOutboundState = MemoryOutboundConsentState.Declined,
+                            CancellationRequested = true,
+                            FailureCode = MemoryOutboundErrorCodes.Cancelled,
+                            FailureMessage = "你未同意发送所选记忆，本次请求已取消。",
+                            CompletedAtUtc = timeProvider.GetUtcNow()
+                        },
+                        CancellationToken.None)
+                    .ConfigureAwait(false);
+                return await BuildSnapshotAsync(session, cancellationToken).ConfigureAwait(false);
+            }
+
+            var committing = await TransitionAsync(
+                    turnId,
+                    current => current with
+                    {
+                        Phase = SessionTurnPhase.Understanding,
+                        MemoryOutboundState = MemoryOutboundConsentState.Committing,
+                        MissingContext = SessionMissingContext.None,
+                        FailureCode = null,
+                        FailureMessage = null
+                    },
+                    CancellationToken.None)
+                .ConfigureAwait(false);
+            _preparedMemoryConsents.TryRemove(turnId, out _);
+            _requestedMemorySelections.TryRemove(turnId, out _);
+            var active = new ActiveSessionWork(turnId);
+            if (!_activeWork.TryAdd(turnId, active))
+            {
+                active.Cancellation.Dispose();
+                throw new InvalidOperationException("同一个会话请求已经在处理中。");
+            }
+
+            active.SetCompletion(Task.Run(
+                () => CommitAndRunMemoryConversationAsync(
+                    session,
+                    committing,
+                    prepared,
+                    active.Cancellation.Token),
+                CancellationToken.None));
+            PublishChange();
+        }
+        finally
+        {
+            gate.Release();
+        }
+
+        return await BuildSnapshotAsync(session, cancellationToken).ConfigureAwait(false);
+    }
+
     private static SessionWorkKind WorkKindFor(UniversalIntentKind kind) => kind switch
     {
         UniversalIntentKind.Conversation => SessionWorkKind.Conversation,
@@ -1730,6 +2087,11 @@ public sealed class SessionCoordinator(
                     },
                     CancellationToken.None)
                 .ConfigureAwait(false);
+            if (SessionTurnPhases.IsTerminal(phase))
+            {
+                _preparedMemoryConsents.TryRemove(turnId, out _);
+                _requestedMemorySelections.TryRemove(turnId, out _);
+            }
         }
         catch
         {
@@ -1775,7 +2137,11 @@ public sealed class SessionCoordinator(
                 selectedName,
                 await turnsTask.ConfigureAwait(false),
                 await activeTask.ConfigureAwait(false),
-                details?.Messages ?? []);
+                details?.Messages ?? [],
+                _preparedMemoryConsents.Values
+                    .Where(item => item.SessionId == session.Id)
+                    .OrderBy(item => item.PreparedAtUtc)
+                    .ToArray());
         }
 
         throw new InvalidOperationException("会话状态更新过于频繁，请稍后重试。 ");
@@ -1831,6 +2197,93 @@ public sealed class SessionCoordinator(
         }
 
         return value;
+    }
+
+    private static IReadOnlyList<MemoryOutboundItemReference> NormalizeMemorySelection(
+        IReadOnlyList<MemoryOutboundItemReference>? items)
+    {
+        if (items is null || items.Count == 0)
+        {
+            return [];
+        }
+
+        if (items.Count > MemoryOutboundLimits.MaximumItems
+            || items.Select(item => item.MemoryId).Distinct().Count() != items.Count)
+        {
+            throw new ArgumentException("每个 Turn 只能有序选择 1 到 8 条不同的长期记忆。", nameof(items));
+        }
+
+        return items.Select(item => new MemoryOutboundItemReference(
+            item.MemoryId,
+            item.ExpectedVersion)).ToArray();
+    }
+
+    private bool MemorySelectionMatches(
+        SessionTurnRecord turn,
+        IReadOnlyList<MemoryOutboundItemReference> requested)
+    {
+        var existing = _requestedMemorySelections.GetValueOrDefault(turn.Id)
+            ?? turn.MemoryOutbound?.Items
+            ?? [];
+        return existing.Count == requested.Count
+            && existing.Zip(requested).All(pair =>
+                pair.First.MemoryId == pair.Second.MemoryId
+                && pair.First.ExpectedVersion == pair.Second.ExpectedVersion);
+    }
+
+    private bool PreparedConsentMatches(
+        SessionRecord session,
+        SessionTurnRecord turn,
+        MemoryOutboundPreparedConsent prepared)
+    {
+        if (!string.Equals(
+                prepared.CoordinatorInstanceId.ToString("N"),
+                _coordinatorInstanceId,
+                StringComparison.OrdinalIgnoreCase)
+            || prepared.SessionId != session.Id
+            || prepared.TurnId != turn.Id
+            || turn.Version != prepared.TurnVersion + 1
+            || prepared.ProjectId != (turn.ProjectId ?? session.SelectedProjectId)
+            || turn.MemoryOutbound?.ConsentId != prepared.ConsentId
+            || !string.Equals(
+                turn.MemoryOutbound.ManifestHash,
+                prepared.ManifestHash,
+                StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        if (turn.FrozenRoute is not
+            {
+                Status: SessionTurnRouteStatus.Ready,
+                ProviderId: { Length: > 0 } providerId,
+                ModelId: { Length: > 0 } modelId,
+                DataDestination: { Length: > 0 } destination
+            }
+            || !string.Equals(providerId, prepared.ProviderId, StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(modelId, prepared.ModelId, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        try
+        {
+            var prompt = prompts.GetRequired("chat.general", "2", providerId);
+            return string.Equals(
+                    MemoryOutboundContract.NormalizeHttpsOrigin(destination),
+                    prepared.DestinationOrigin,
+                    StringComparison.OrdinalIgnoreCase)
+                && string.Equals(prompt.PromptId, prepared.PromptId, StringComparison.Ordinal)
+                && string.Equals(prompt.Version, prepared.PromptVersion, StringComparison.Ordinal)
+                && string.Equals(
+                    prompt.ContentSha256,
+                    prepared.PromptContentHash,
+                    StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private static string NormalizeModality(string value) =>

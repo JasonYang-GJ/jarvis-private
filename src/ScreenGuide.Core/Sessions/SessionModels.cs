@@ -1,3 +1,5 @@
+using ScreenGuide.Core.Memories;
+
 namespace ScreenGuide.Core.Sessions;
 
 public enum SessionStatus
@@ -24,6 +26,7 @@ public enum SessionTurnPhase
     WaitingForWindow,
     WaitingForWindowConsent,
     WaitingForConfirmation,
+    WaitingForMemoryOutboundConsent,
     Executing,
     ObservingWindow,
     ProgrammingTask,
@@ -105,6 +108,8 @@ public sealed record SessionTurnRecord
     public bool RequiresConfirmation { get; init; }
     public bool ConfirmationGranted { get; init; }
     public bool CancellationRequested { get; init; }
+    public MemoryOutboundConsentState MemoryOutboundState { get; init; } = MemoryOutboundConsentState.None;
+    public MemoryOutboundAuditMetadata? MemoryOutbound { get; init; }
     public string? ResultSummary { get; init; }
     public string? FailureCode { get; init; }
     public string? FailureMessage { get; init; }
@@ -134,6 +139,7 @@ public static class SessionTurnPhases
         SessionTurnPhase.WaitingForWindow or
         SessionTurnPhase.WaitingForWindowConsent or
         SessionTurnPhase.WaitingForConfirmation or
+        SessionTurnPhase.WaitingForMemoryOutboundConsent or
         SessionTurnPhase.Executing or
         SessionTurnPhase.ObservingWindow;
 }

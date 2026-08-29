@@ -9,7 +9,7 @@
 - V0.2.1 标签 `v0.2.1-baseline` 保留为上一版回滚点；回滚必须同时使用 pre-v7 备份或隔离数据目录。
 - V2 阶段 2“可替换 AI 大脑与模型路由”已通过：统一 Chat Model、Provider Registry、Model Router、Prompt Registry、DPAPI、安全停用的 Codex 普通聊天适配器、DeepSeek/千问普通聊天 Provider、设置 UI/IPC、语义建议和 schema v8 AI 调用审计。
 - 阶段 2 普通聊天发布目标是 DeepSeek + 千问；千问是手动备用，无自动 fallback/retry/resend。DeepSeek 真实证据已冻结，Qwen 真实 Health/聊天/取消和普通聊天选 Qwen 时的真实 Codex 编程隔离均已通过。Codex 普通聊天保持 `ProductionDisabled`/`PolicyDisabled`，不是发布目标。
-- S3-R1 本机加密记忆账本、schema/protocol v9 和 pre-v9 回滚已集成；S3-R2 正在验证用户主动触发的确定性本地相关记忆预览。记忆仍不进入模型上下文，也没有自动提取、RAG、向量数据库、用户画像、复杂多 Agent 或手机端。
+- S3-R1 本机加密记忆账本与 S3-R2 确定性本地预览已集成；S3-R3 正在验证 schema/protocol v10、chat.general@2 和逐 Turn 完整出站确认。默认 0 条，只有用户单次确认的普通聊天 Turn 才最多发送一次。
 
 ## 长期架构决策
 
@@ -22,7 +22,7 @@
 7. Conversation/Provider Thread、Session/Turn、编程 Task 和未来长期记忆是四种不同状态，不能混用。
 8. 安装产物不提交 Git，以版本标签、哈希、测试记录和外部快照关联。
 9. 正式版本只能在标签存在、干净源码构建和测试通过、安装验收通过、工作区干净后宣布冻结。
-10. 产品运行时长期记忆是独立状态真源，不得复用 Conversation、Session/Turn、编程 Task、Provider Thread 或 `ai_invocations`。S3-R1/S3-R2 只能由用户明确管理或主动预览，不能授予任何权限，也不能自动发送给模型。
+10. 产品运行时长期记忆是独立状态真源，不得复用 Conversation、Session/Turn、编程 Task、Provider Thread 或 `ai_invocations`。本地预览不等于同意；S3-R3 只允许用户为单个普通聊天 Turn 查看完整出站快照后单次确认，不能授予任何权限，也不能自动发送。
 
 ## 阶段 1 已确认决策
 
@@ -64,7 +64,7 @@
 - 普通聊天选为 Qwen 时，真实 Codex 编程回归仅 1 Task/1 attempt，指定文件为唯一 Git 变化，指定 `dotnet test` 通过，任务时窗内 `ai_invocations=0`。
 - 最终标签源码 locked restore、Client/Host win-x64 publish 和安装包编译通过；发布目录 538 个文件，Client/Host ProductVersion 均绑定 `33b5859d...`，安装包 64,128,304 bytes 且未签名。
 
-## 阶段 3 R1 / R2 候选决策
+## 阶段 3 R1 / R2 / R3 候选决策
 
 1. 记忆类别只允许 UserFact、UserPreference、ProjectNote、Decision；作用域只允许 Global 或精确已授权 Project ID；来源仅 `UserExplicit`，置信度固定 1.0。
 2. 标题和正文使用专用 DPAPI CurrentUser 保护器后存入 SQLite，不能复用 Provider 凭据存储；数据库、日志和错误证据不保存明文。
@@ -72,6 +72,8 @@
 4. schema v9 只新增记忆表/索引；protocol v9 只新增显式记忆 CRUD。v8 → v9 前建立 pre-v9 备份并原子迁移，V0.4.0 回滚使用该备份或隔离目录。
 5. S3-R1 不创建 Prompt、Provider、AI Invocation、向量或 RAG 入口；记忆不能改变当前输入、目标、项目/文件/窗口权限、同意或确认。
 6. S3-R2 只增加用户点击触发的本地词法预览：Active/未到期候选最多 200，结果最多 8 条/4,000 字符；查询和搜索替身不持久化，预览零状态写入、零模型调用。
+7. S3-R3 使用 protocol/schema v10 与 `chat.general@2`：有序选择 1–8 条、完整显示 Provider/Model/HTTPS origin/项目/正文后单次确认；原子复核失败时 Provider 与 Invocation 都为 0，确认消费后禁止 retry/fallback/resend。
+8. 出站 block 是临时 User JSON，不持久化；审计只保存 ID/version、路由、Prompt 身份、计数和 manifest，不保存 query、标题、正文、原始 block 或 plaintext hash。语义建议永不接收记忆。
 
 ## 阶段 1 已确认验收
 
@@ -102,7 +104,7 @@
 - Session 快照仍随完整会话历史增长；`SessionCoordinator.cs`、`MainWindow.xaml.cs` 和部分 SQLite Store 较大。
 - 单窗口授权已比较句柄、进程名和标题，但尚未保存进程 ID / 启动时间；同程序同标题窗口的极端句柄复用风险留待后续加固。
 - 安装包无数字签名；语音模型分发与许可证待定。
-- 阶段 3 的 S3-R1 已集成，S3-R2 本地预览仍是候选；后续模型使用、自动/语义检索或画像仍需新的独立批准。
+- 阶段 3 的 S3-R1/R2 已集成，S3-R3 逐 Turn 出站确认仍是候选；自动/语义检索、画像或其他模型使用仍需新的独立批准。
 
 ## 更新规则
 

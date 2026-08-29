@@ -1,3 +1,4 @@
+using ScreenGuide.Core.Memories;
 using ScreenGuide.Core.Sessions;
 
 namespace ScreenGuide.Core.Conversations;
@@ -32,6 +33,22 @@ public interface IConversationStore
         string idempotencyKey,
         DateTimeOffset startedAtUtc,
         CancellationToken cancellationToken = default);
+
+    Task<ConversationTurnRegistration> StartTurnWithMemoryAsync(
+        Guid conversationId,
+        Guid turnId,
+        string message,
+        string idempotencyKey,
+        MemoryOutboundAuditMetadata memoryOutbound,
+        DateTimeOffset startedAtUtc,
+        CancellationToken cancellationToken = default) =>
+        StartTurnAsync(
+            conversationId,
+            turnId,
+            message,
+            idempotencyKey,
+            startedAtUtc,
+            cancellationToken);
 
     Task RecordProviderStartedAsync(
         Guid conversationId,
@@ -77,7 +94,8 @@ public sealed record ConversationProviderRequest(
     string Message,
     string? ExternalThreadId,
     Guid? SessionTurnId = null,
-    SessionTurnFrozenRoute? FrozenRoute = null)
+    SessionTurnFrozenRoute? FrozenRoute = null,
+    MemoryOutboundEnvelope? MemoryOutbound = null)
 {
     public Guid TurnId => ConversationTurnId;
 }

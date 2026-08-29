@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Text.Json;
 using ScreenGuide.Core.Conversations;
+using ScreenGuide.Core.Memories;
 using ScreenGuide.Core.Sessions;
 using ScreenGuide.Core.Tasking;
 
@@ -81,6 +82,7 @@ public sealed class ConversationService(
                 frozenRoute: null,
                 message,
                 idempotencyKey,
+                memoryOutbound: null,
                 cancellationToken)
             .ConfigureAwait(false);
 
@@ -90,6 +92,7 @@ public sealed class ConversationService(
         SessionTurnFrozenRoute? frozenRoute,
         string message,
         string? idempotencyKey = null,
+        MemoryOutboundEnvelope? memoryOutbound = null,
         CancellationToken cancellationToken = default)
     {
         if (sessionTurnId == Guid.Empty)
@@ -103,6 +106,7 @@ public sealed class ConversationService(
                 frozenRoute,
                 message,
                 idempotencyKey,
+                memoryOutbound,
                 cancellationToken)
             .ConfigureAwait(false);
     }
@@ -113,19 +117,33 @@ public sealed class ConversationService(
         SessionTurnFrozenRoute? frozenRoute,
         string message,
         string? idempotencyKey,
+        MemoryOutboundEnvelope? memoryOutbound,
         CancellationToken cancellationToken)
     {
         RequireStartedHost();
         var normalized = NormalizeMessage(message);
         var turnId = Guid.NewGuid();
-        var registration = await conversationStore.StartTurnAsync(
-                conversationId,
-                turnId,
-                normalized,
-                string.IsNullOrWhiteSpace(idempotencyKey) ? Guid.NewGuid().ToString("N") : idempotencyKey.Trim(),
-                timeProvider.GetUtcNow(),
-                cancellationToken)
-            .ConfigureAwait(false);
+        var normalizedIdempotencyKey = string.IsNullOrWhiteSpace(idempotencyKey)
+            ? Guid.NewGuid().ToString("N")
+            : idempotencyKey.Trim();
+        var registration = memoryOutbound is null
+            ? await conversationStore.StartTurnAsync(
+                    conversationId,
+                    turnId,
+                    normalized,
+                    normalizedIdempotencyKey,
+                    timeProvider.GetUtcNow(),
+                    cancellationToken)
+                .ConfigureAwait(false)
+            : await conversationStore.StartTurnWithMemoryAsync(
+                    conversationId,
+                    turnId,
+                    normalized,
+                    normalizedIdempotencyKey,
+                    memoryOutbound.Audit,
+                    timeProvider.GetUtcNow(),
+                    cancellationToken)
+                .ConfigureAwait(false);
         if (!registration.Accepted)
         {
             return new ConversationSendResult(conversationId, registration.Turn.Id, true);
@@ -146,6 +164,7 @@ public sealed class ConversationService(
             sessionTurnId,
             frozenRoute,
             normalized,
+            memoryOutbound,
             active.Cancellation.Token);
         active.SetRun(run);
         _runningTurns[registration.Turn.Id] = active;
@@ -243,6 +262,7 @@ public sealed class ConversationService(
         Guid? sessionTurnId,
         SessionTurnFrozenRoute? frozenRoute,
         string message,
+        MemoryOutboundEnvelope? memoryOutbound,
         CancellationToken cancellationToken)
     {
         try
@@ -256,7 +276,8 @@ public sealed class ConversationService(
                         message,
                         conversation.ExternalThreadId,
                         sessionTurnId,
-                        frozenRoute),
+                        frozenRoute,
+                        memoryOutbound),
                     (threadId, processId) => conversationStore.RecordProviderStartedAsync(
                         conversationId,
                         turnId,

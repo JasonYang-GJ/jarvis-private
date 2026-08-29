@@ -147,13 +147,20 @@ public sealed record SessionIdRequestDto(Guid SessionId);
 
 public sealed record StartNewSessionRequestDto(string? Title = null);
 
+public sealed record MemoryOutboundItemReferenceDto(Guid MemoryId, int ExpectedVersion);
+
 public sealed record SessionInputRequestDto(
     string Text,
     string InputModality = "Text",
     string? IdempotencyKey = null,
     Guid? SessionId = null,
     string? ExpectedIntentKind = null,
-    string? ExpectedTarget = null);
+    string? ExpectedTarget = null,
+    IReadOnlyList<MemoryOutboundItemReferenceDto>? MemoryItems = null)
+{
+    public override string ToString() =>
+        $"SessionInputRequestDto {{ SessionId = {SessionId}, InputModality = {InputModality}, MemoryItemCount = {MemoryItems?.Count ?? 0}, Text = [REDACTED] }}";
+}
 
 public sealed record ProvideSessionProjectRequestDto(
     Guid SessionId,
@@ -173,6 +180,12 @@ public sealed record SessionWindowConsentRequestDto(
 public sealed record SessionTurnConfirmationRequestDto(
     Guid SessionId,
     Guid TurnId,
+    bool Confirmed);
+
+public sealed record SessionMemoryOutboundConsentRequestDto(
+    Guid SessionId,
+    Guid TurnId,
+    Guid ConsentId,
     bool Confirmed);
 
 public sealed record CancelSessionTurnRequestDto(
@@ -212,7 +225,43 @@ public sealed record UnifiedSessionTurnDto(
     DateTimeOffset? CompletedAtUtc,
     string? ExpectedIntentKind = null,
     string? ExpectedTarget = null,
-    string? PlanTarget = null);
+    string? PlanTarget = null,
+    string MemoryOutboundState = "None",
+    Guid? MemoryOutboundConsentId = null,
+    string? MemoryOutboundManifestHash = null);
+
+public sealed record MemoryOutboundPreparedItemDto(
+    Guid MemoryId,
+    int Version,
+    string Category,
+    string Scope,
+    string Title,
+    string Body,
+    int CharacterCount)
+{
+    public override string ToString() =>
+        $"MemoryOutboundPreparedItemDto {{ MemoryId = {MemoryId}, Version = {Version}, Category = {Category}, Scope = {Scope}, CharacterCount = {CharacterCount}, Content = [REDACTED] }}";
+}
+
+public sealed record MemoryOutboundConsentDto(
+    Guid ConsentId,
+    Guid TurnId,
+    string State,
+    string ProviderId,
+    string ModelId,
+    string DestinationOrigin,
+    Guid? ProjectId,
+    string? ProjectName,
+    IReadOnlyList<MemoryOutboundPreparedItemDto> Items,
+    int ItemCount,
+    int TotalCharacters,
+    DateTimeOffset PreparedAtUtc,
+    DateTimeOffset ExpiresAtUtc,
+    string ManifestHash)
+{
+    public override string ToString() =>
+        $"MemoryOutboundConsentDto {{ ConsentId = {ConsentId}, TurnId = {TurnId}, State = {State}, ProviderId = {ProviderId}, ModelId = {ModelId}, DestinationOrigin = {DestinationOrigin}, ProjectId = {ProjectId}, ItemCount = {ItemCount}, TotalCharacters = {TotalCharacters}, Content = [REDACTED] }}";
+}
 
 public sealed record SessionSnapshotDto(
     long ChangeVersion,
@@ -227,7 +276,8 @@ public sealed record SessionSnapshotDto(
     UnifiedSessionTurnDto? ForegroundTurn,
     IReadOnlyList<UnifiedSessionTurnDto> ActiveTurns,
     IReadOnlyList<UnifiedSessionTurnDto> Turns,
-    IReadOnlyList<ConversationMessageDto> Messages);
+    IReadOnlyList<ConversationMessageDto> Messages,
+    IReadOnlyList<MemoryOutboundConsentDto>? MemoryOutboundConsents = null);
 
 public sealed record CommandResultDto(Guid TaskId, bool WasDuplicate);
 

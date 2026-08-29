@@ -1,6 +1,8 @@
 using System.Globalization;
+using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using ScreenGuide.Core.Ai;
+using ScreenGuide.Core.Memories;
 
 namespace ScreenGuide.Persistence.Sqlite;
 
@@ -56,11 +58,17 @@ public sealed class SqliteAiInvocationStore : IAiInvocationStore
                 id, session_turn_id, conversation_turn_id, purpose, provider_id, model_id,
                 prompt_id, prompt_version, prompt_content_hash, data_destination, status,
                 started_at_utc, completed_at_utc, finish_reason, input_tokens, output_tokens,
-                total_tokens, provider_request_id, failure_code)
+                total_tokens, provider_request_id, failure_code,
+                memory_consent_id, memory_origin_provider_id, memory_origin_model_id,
+                memory_origin_destination, memory_item_refs_json, memory_item_count,
+                memory_total_characters, memory_manifest_hash)
             VALUES(
                 $id, $sessionTurnId, $conversationTurnId, $purpose, $providerId, $modelId,
                 $promptId, $promptVersion, $promptHash, $destination, $status,
-                $startedAtUtc, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
+                $startedAtUtc, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+                $memoryConsentId, $memoryProviderId, $memoryModelId,
+                $memoryDestination, $memoryItemRefsJson, $memoryItemCount,
+                $memoryTotalCharacters, $memoryManifestHash);
             """;
         command.Parameters.AddWithValue("$id", invocation.Id.ToString("D"));
         command.Parameters.AddWithValue("$sessionTurnId", DbGuid(invocation.SessionTurnId));
@@ -76,6 +84,7 @@ public sealed class SqliteAiInvocationStore : IAiInvocationStore
         command.Parameters.AddWithValue("$destination", Required(invocation.DataDestination, nameof(invocation.DataDestination)));
         command.Parameters.AddWithValue("$status", invocation.Status.ToString());
         command.Parameters.AddWithValue("$startedAtUtc", invocation.StartedAtUtc.ToString("O"));
+        AddMemoryOutbound(command, invocation.MemoryOutbound);
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 
@@ -299,8 +308,55 @@ public sealed class SqliteAiInvocationStore : IAiInvocationStore
                 ? null
                 : new AiTokenUsage(input.Value, output.Value, total.Value),
             ProviderRequestId = NullableText(reader, "provider_request_id"),
-            FailureCode = NullableText(reader, "failure_code")
+            FailureCode = NullableText(reader, "failure_code"),
+            MemoryOutbound = ReadMemoryOutbound(reader)
         };
+    }
+
+    private static MemoryOutboundAuditMetadata? ReadMemoryOutbound(SqliteDataReader reader)
+    {
+        var consentId = NullableGuid(reader, "memory_consent_id");
+        if (consentId is null)
+        {
+            return null;
+        }
+
+        var references = JsonSerializer.Deserialize<MemoryOutboundItemReference[]>(
+            NullableText(reader, "memory_item_refs_json") ?? "[]") ?? [];
+        return new MemoryOutboundAuditMetadata(
+            consentId.Value,
+            DateTimeOffset.MinValue,
+            DateTimeOffset.MinValue,
+            null,
+            Required(NullableText(reader, "memory_origin_provider_id"), "memory_origin_provider_id"),
+            Required(NullableText(reader, "memory_origin_model_id"), "memory_origin_model_id"),
+            Required(NullableText(reader, "memory_origin_destination"), "memory_origin_destination"),
+            Required(reader.GetString(reader.GetOrdinal("prompt_id")), "prompt_id"),
+            Required(reader.GetString(reader.GetOrdinal("prompt_version")), "prompt_version"),
+            Required(reader.GetString(reader.GetOrdinal("prompt_content_hash")), "prompt_content_hash"),
+            null,
+            references,
+            reader.GetInt32(reader.GetOrdinal("memory_item_count")),
+            reader.GetInt32(reader.GetOrdinal("memory_total_characters")),
+            Required(NullableText(reader, "memory_manifest_hash"), "memory_manifest_hash"));
+    }
+
+    private static void AddMemoryOutbound(
+        SqliteCommand command,
+        MemoryOutboundAuditMetadata? metadata)
+    {
+        command.Parameters.AddWithValue("$memoryConsentId", DbGuid(metadata?.ConsentId));
+        command.Parameters.AddWithValue("$memoryProviderId", DbText(metadata?.ProviderId));
+        command.Parameters.AddWithValue("$memoryModelId", DbText(metadata?.ModelId));
+        command.Parameters.AddWithValue("$memoryDestination", DbText(metadata?.DestinationOrigin));
+        command.Parameters.AddWithValue(
+            "$memoryItemRefsJson",
+            metadata is null ? DBNull.Value : JsonSerializer.Serialize(metadata.Items));
+        command.Parameters.AddWithValue("$memoryItemCount", (object?)metadata?.ItemCount ?? DBNull.Value);
+        command.Parameters.AddWithValue(
+            "$memoryTotalCharacters",
+            (object?)metadata?.TotalCharacters ?? DBNull.Value);
+        command.Parameters.AddWithValue("$memoryManifestHash", DbText(metadata?.ManifestHash));
     }
 
     private static object DbGuid(Guid? value) => value is null ? DBNull.Value : value.Value.ToString("D");

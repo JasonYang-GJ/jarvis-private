@@ -260,6 +260,171 @@ public sealed class MemoryServiceTests
         Assert.Equal(0, protector.UnprotectCount);
     }
 
+    [Fact]
+    public async Task OutboundPreparationBuildsAnOrderedBoundedSnapshotAndCommitRevalidatesVersionsAtomically()
+    {
+        await using var environment = await MemoryEnvironment.CreateAsync();
+        var first = await environment.Service.CreateAsync(MemoryDraft.Create(
+            MemoryCategory.UserPreference,
+            MemoryScope.Global,
+            "称呼偏好",
+            "请称呼我为小元",
+            null,
+            Now));
+        var second = await environment.Service.CreateAsync(MemoryDraft.Create(
+            MemoryCategory.ProjectNote,
+            MemoryScope.ForProject(environment.Project.Id),
+            "项目约束",
+            "只使用本地假数据",
+            null,
+            Now));
+        var request = new MemoryOutboundPreparationRequest(
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            TurnVersion: 4,
+            ProviderId: "deepseek",
+            ModelId: "deepseek-v4-pro",
+            DataDestination: "https://api.deepseek.com/v1/chat/completions",
+            PromptId: "chat.general",
+            PromptVersion: "2",
+            PromptContentHash: new string('A', 64),
+            ProjectId: environment.Project.Id,
+            Items:
+            [
+                new MemoryOutboundItemReference(second.Metadata.Id, second.Metadata.Version),
+                new MemoryOutboundItemReference(first.Metadata.Id, first.Metadata.Version)
+            ]);
+
+        var prepared = await environment.Service.PrepareOutboundAsync(request);
+
+        Assert.Equal([second.Metadata.Id, first.Metadata.Id], prepared.Items.Select(item => item.Id));
+        Assert.Equal("https://api.deepseek.com", prepared.DestinationOrigin);
+        Assert.Equal("项目约束", prepared.Items[0].Title);
+        Assert.Equal("请称呼我为小元", prepared.Items[1].Body);
+        Assert.InRange(prepared.TotalCharacters, 1, MemoryOutboundLimits.MaximumContentCharacters);
+        Assert.DoesNotContain(first.Metadata.Id.ToString("D"), prepared.SerializedContext, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(environment.Project.Id.ToString("D"), prepared.SerializedContext, StringComparison.OrdinalIgnoreCase);
+
+        _ = await environment.Service.UpdateAsync(
+            first.Metadata.Id,
+            first.Metadata.Version,
+            MemoryDraft.Create(
+                MemoryCategory.UserPreference,
+                MemoryScope.Global,
+                "称呼偏好",
+                "已经改变",
+                null,
+                Now),
+            Now.AddMinutes(1));
+
+        var stale = await Assert.ThrowsAsync<MemoryServiceException>(() =>
+            environment.Service.CommitOutboundAsync(prepared));
+
+        Assert.Equal(MemoryOutboundErrorCodes.ConsentStale, stale.Code);
+        Assert.DoesNotContain("已经改变", stale.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task OutboundPreparationRejectsUnverifiableDestinationAndBothContentBudgetsWithoutTruncation()
+    {
+        await using var environment = await MemoryEnvironment.CreateAsync();
+        var oversizedContent = new List<MemoryItem>();
+        for (var index = 0; index < 3; index++)
+        {
+            oversizedContent.Add(await environment.Service.CreateAsync(MemoryDraft.Create(
+                MemoryCategory.UserFact,
+                MemoryScope.Global,
+                $"T{index}",
+                new string('甲', 1_400),
+                null,
+                Now)));
+        }
+
+        var request = CreateOutboundRequest(
+            oversizedContent.Select(item =>
+                new MemoryOutboundItemReference(item.Metadata.Id, item.Metadata.Version)).ToArray(),
+            environment.Project.Id,
+            "https://api.deepseek.com/v1/chat/completions");
+        var contentFailure = await Assert.ThrowsAsync<MemoryServiceException>(() =>
+            environment.Service.PrepareOutboundAsync(request));
+
+        Assert.Equal(MemoryOutboundErrorCodes.BudgetExceeded, contentFailure.Code);
+
+        var escapedItems = new List<MemoryItem>();
+        for (var index = 0; index < 8; index++)
+        {
+            escapedItems.Add(await environment.Service.CreateAsync(MemoryDraft.Create(
+                MemoryCategory.UserPreference,
+                MemoryScope.Global,
+                $"Q{index}",
+                new string('"', 490),
+                null,
+                Now)));
+        }
+
+        var serializedFailure = await Assert.ThrowsAsync<MemoryServiceException>(() =>
+            environment.Service.PrepareOutboundAsync(CreateOutboundRequest(
+                escapedItems.Select(item =>
+                    new MemoryOutboundItemReference(item.Metadata.Id, item.Metadata.Version)).ToArray(),
+                environment.Project.Id,
+                "https://api.deepseek.com/v1/chat/completions")));
+        var destinationFailure = await Assert.ThrowsAsync<MemoryServiceException>(() =>
+            environment.Service.PrepareOutboundAsync(CreateOutboundRequest(
+                [new MemoryOutboundItemReference(escapedItems[0].Metadata.Id, escapedItems[0].Metadata.Version)],
+                environment.Project.Id,
+                "http://api.deepseek.com/v1/chat/completions")));
+
+        Assert.Equal(MemoryOutboundErrorCodes.BudgetExceeded, serializedFailure.Code);
+        Assert.Equal(MemoryOutboundErrorCodes.DestinationUnverifiable, destinationFailure.Code);
+    }
+
+    [Fact]
+    public async Task OutboundCommitRejectsARevokedProjectBeforeReturningAnEnvelope()
+    {
+        await using var environment = await MemoryEnvironment.CreateAsync();
+        var memory = await environment.Service.CreateAsync(MemoryDraft.Create(
+            MemoryCategory.ProjectNote,
+            MemoryScope.ForProject(environment.Project.Id),
+            "授权边界",
+            "撤权后不可发送",
+            null,
+            Now));
+        var prepared = await environment.Service.PrepareOutboundAsync(CreateOutboundRequest(
+            [new MemoryOutboundItemReference(memory.Metadata.Id, memory.Metadata.Version)],
+            environment.Project.Id,
+            "https://api.deepseek.com/v1/chat/completions"));
+        await environment.TaskStore.SetProjectAuthorizationAsync(environment.Project with
+        {
+            AuthorizationState = ProjectAuthorizationState.Revoked,
+            RevokedAtUtc = Now.AddMinutes(1),
+            UpdatedAtUtc = Now.AddMinutes(1)
+        });
+
+        var failure = await Assert.ThrowsAsync<MemoryServiceException>(() =>
+            environment.Service.CommitOutboundAsync(prepared));
+
+        Assert.Equal(MemoryOutboundErrorCodes.ProjectUnauthorized, failure.Code);
+        Assert.DoesNotContain("撤权后不可发送", failure.Message, StringComparison.Ordinal);
+    }
+
+    private static MemoryOutboundPreparationRequest CreateOutboundRequest(
+        IReadOnlyList<MemoryOutboundItemReference> items,
+        Guid projectId,
+        string destination) => new(
+        Guid.NewGuid(),
+        Guid.NewGuid(),
+        Guid.NewGuid(),
+        TurnVersion: 1,
+        ProviderId: "deepseek",
+        ModelId: "deepseek-v4-pro",
+        DataDestination: destination,
+        PromptId: "chat.general",
+        PromptVersion: "2",
+        PromptContentHash: new string('A', 64),
+        ProjectId: projectId,
+        Items: items);
+
     private sealed class MemoryEnvironment : IAsyncDisposable
     {
         private readonly string _root;

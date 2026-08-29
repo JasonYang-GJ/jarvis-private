@@ -127,6 +127,69 @@ public sealed class SqliteMemoryStore : IMemoryStore
         return await GetAsync(connection, null, id, cancellationToken).ConfigureAwait(false);
     }
 
+    public async Task<TResult> ExecuteOutboundSelectionAsync<TResult>(
+        IReadOnlyList<MemoryOutboundItemReference> references,
+        Guid? projectId,
+        DateTimeOffset nowUtc,
+        Func<IReadOnlyList<ProtectedMemoryItem>, TResult> action,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(references);
+        ArgumentNullException.ThrowIfNull(action);
+        if (projectId == Guid.Empty
+            || references.Count is < MemoryOutboundLimits.MinimumItems or > MemoryOutboundLimits.MaximumItems
+            || references.Select(item => item.MemoryId).Distinct().Count() != references.Count)
+        {
+            throw new MemoryValidationException("记忆出站选择无效。");
+        }
+
+        await using var connection = await OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+        await using var transaction = connection.BeginTransaction(deferred: false);
+        if (projectId is { } exactProjectId)
+        {
+            await using var projectCommand = connection.CreateCommand();
+            projectCommand.Transaction = transaction;
+            projectCommand.CommandText = """
+                SELECT COUNT(*)
+                FROM projects
+                INNER JOIN project_authorizations
+                    ON project_authorizations.project_id = projects.id
+                WHERE projects.id = $projectId
+                  AND projects.authorization_state = 'Authorized'
+                  AND project_authorizations.state = 'Authorized';
+                """;
+            projectCommand.Parameters.AddWithValue("$projectId", exactProjectId.ToString("D"));
+            if (Convert.ToInt32(
+                    await projectCommand.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false),
+                    CultureInfo.InvariantCulture) != 1)
+            {
+                throw new MemoryValidationException("记忆出站项目未获授权。");
+            }
+        }
+
+        var selected = new List<ProtectedMemoryItem>(references.Count);
+        foreach (var reference in references)
+        {
+            var item = await GetAsync(connection, transaction, reference.MemoryId, cancellationToken)
+                .ConfigureAwait(false);
+            if (item is null
+                || item.Metadata.Version != reference.ExpectedVersion
+                || item.Metadata.Status != MemoryStatus.Active
+                || item.Metadata.ExpiresAtUtc is { } expires && expires <= nowUtc
+                || item.Metadata.Scope.Kind == MemoryScopeKind.Project
+                    && item.Metadata.Scope.ProjectId != projectId)
+            {
+                throw new MemoryValidationException("记忆出站项目已变化或不可用。");
+            }
+
+            selected.Add(item);
+        }
+
+        var result = action(selected);
+        transaction.Commit();
+        return result;
+    }
+
     public async Task CreateAsync(
         ProtectedMemoryItem item,
         CancellationToken cancellationToken = default)

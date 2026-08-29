@@ -49,8 +49,10 @@ public sealed class DesktopIpcIntegrationTests
         await host.StopAsync();
     }
 
-    [Fact]
-    public async Task RejectsUnsupportedProtocolVersionWithStructuredError()
+    [Theory]
+    [InlineData(9)]
+    [InlineData(99)]
+    public async Task RejectsUnsupportedProtocolVersionWithStructuredError(int protocolVersion)
     {
         await using var environment = DesktopHostTestEnvironment.Create();
         using var host = environment.BuildHost();
@@ -70,7 +72,7 @@ public sealed class DesktopIpcIntegrationTests
                 requestId,
                 DesktopApiMethods.Ping,
                 DesktopProtocolJson.ToElement(new EmptyRequest()),
-                ProtocolVersion: 99));
+                ProtocolVersion: protocolVersion));
         var response = await DesktopIpcFraming.ReadAsync<DesktopApiResponse>(pipe);
         await host.StopAsync();
 

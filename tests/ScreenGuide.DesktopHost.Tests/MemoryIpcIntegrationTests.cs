@@ -56,7 +56,7 @@ public sealed class MemoryIpcIntegrationTests
             disabled.Version,
             Confirmed: true));
 
-        Assert.Equal(9, DesktopProtocolVersion.Current);
+        Assert.Equal(10, DesktopProtocolVersion.Current);
         Assert.Equal(created.Id, Assert.Single(listed).Id);
         Assert.Equal(title, fetched.Title);
         Assert.Equal(body, fetched.Body);
@@ -204,7 +204,7 @@ public sealed class MemoryIpcIntegrationTests
         Assert.DoesNotContain("全局预算", preview.ToString(), StringComparison.Ordinal);
         Assert.DoesNotContain("项目预算", preview.ToString(), StringComparison.Ordinal);
         Assert.DoesNotContain("项目预算", preview.Items[0].ToString(), StringComparison.Ordinal);
-        Assert.Equal(9, DesktopProtocolVersion.Current);
+        Assert.Equal(10, DesktopProtocolVersion.Current);
         Assert.Equal("memory.preview", DesktopApiMethods.PreviewMemories);
 
         var invalid = await Assert.ThrowsAsync<DesktopApiException>(() =>

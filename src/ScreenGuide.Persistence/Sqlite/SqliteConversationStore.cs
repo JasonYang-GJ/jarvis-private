@@ -1,6 +1,8 @@
 using System.Globalization;
+using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using ScreenGuide.Core.Conversations;
+using ScreenGuide.Core.Memories;
 
 namespace ScreenGuide.Persistence.Sqlite;
 
@@ -129,13 +131,47 @@ public sealed class SqliteConversationStore : IConversationStore
         return results;
     }
 
-    public async Task<ConversationTurnRegistration> StartTurnAsync(
+    public Task<ConversationTurnRegistration> StartTurnAsync(
         Guid conversationId,
         Guid turnId,
         string message,
         string idempotencyKey,
         DateTimeOffset startedAtUtc,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default) =>
+        StartTurnCoreAsync(
+            conversationId,
+            turnId,
+            message,
+            idempotencyKey,
+            memoryOutbound: null,
+            startedAtUtc,
+            cancellationToken);
+
+    public Task<ConversationTurnRegistration> StartTurnWithMemoryAsync(
+        Guid conversationId,
+        Guid turnId,
+        string message,
+        string idempotencyKey,
+        MemoryOutboundAuditMetadata memoryOutbound,
+        DateTimeOffset startedAtUtc,
+        CancellationToken cancellationToken = default) =>
+        StartTurnCoreAsync(
+            conversationId,
+            turnId,
+            message,
+            idempotencyKey,
+            memoryOutbound,
+            startedAtUtc,
+            cancellationToken);
+
+    private async Task<ConversationTurnRegistration> StartTurnCoreAsync(
+        Guid conversationId,
+        Guid turnId,
+        string message,
+        string idempotencyKey,
+        MemoryOutboundAuditMetadata? memoryOutbound,
+        DateTimeOffset startedAtUtc,
+        CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(message))
         {
@@ -202,7 +238,8 @@ public sealed class SqliteConversationStore : IConversationStore
             UserMessageId = userMessage.Id,
             IdempotencyKey = idempotencyKey,
             Status = ConversationTurnStatus.Running,
-            StartedAtUtc = startedAtUtc
+            StartedAtUtc = startedAtUtc,
+            MemoryOutbound = memoryOutbound
         };
         await InsertMessageAsync(connection, transaction, userMessage, cancellationToken)
             .ConfigureAwait(false);
@@ -213,11 +250,19 @@ public sealed class SqliteConversationStore : IConversationStore
                 INSERT INTO conversation_turns(
                     id, conversation_id, sequence_number, user_message_id,
                     assistant_message_id, idempotency_key, status, process_id,
-                    started_at_utc, completed_at_utc, failure_code, failure_message)
+                    started_at_utc, completed_at_utc, failure_code, failure_message,
+                    memory_derived, memory_consent_id, memory_origin_provider_id,
+                    memory_origin_model_id, memory_origin_destination,
+                    memory_item_refs_json, memory_item_count, memory_total_characters,
+                    memory_manifest_hash)
                 VALUES(
                     $id, $conversationId, $sequenceNumber, $userMessageId,
                     NULL, $idempotencyKey, $status, NULL,
-                    $startedAtUtc, NULL, NULL, NULL);
+                    $startedAtUtc, NULL, NULL, NULL,
+                    0, $memoryConsentId, $memoryProviderId,
+                    $memoryModelId, $memoryDestination,
+                    $memoryItemRefsJson, $memoryItemCount, $memoryTotalCharacters,
+                    $memoryManifestHash);
                 """;
             Add(command, "$id", turn.Id);
             Add(command, "$conversationId", conversationId);
@@ -226,6 +271,7 @@ public sealed class SqliteConversationStore : IConversationStore
             command.Parameters.AddWithValue("$idempotencyKey", idempotencyKey);
             command.Parameters.AddWithValue("$status", turn.Status.ToString());
             command.Parameters.AddWithValue("$startedAtUtc", ToDb(startedAtUtc));
+            AddMemoryOutbound(command, memoryOutbound);
             await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
         }
 
@@ -353,6 +399,7 @@ public sealed class SqliteConversationStore : IConversationStore
                 UPDATE conversation_turns
                 SET assistant_message_id = $assistantMessageId,
                     status = $status,
+                    memory_derived = CASE WHEN memory_consent_id IS NULL THEN 0 ELSE 1 END,
                     completed_at_utc = $completedAtUtc,
                     failure_code = NULL,
                     failure_message = NULL
@@ -695,8 +742,64 @@ public sealed class SqliteConversationStore : IConversationStore
         StartedAtUtc = ReadDate(reader, "started_at_utc"),
         CompletedAtUtc = ReadNullableDate(reader, "completed_at_utc"),
         FailureCode = ReadNullableString(reader, "failure_code"),
-        FailureMessage = ReadNullableString(reader, "failure_message")
+        FailureMessage = ReadNullableString(reader, "failure_message"),
+        MemoryDerived = reader.GetInt32(reader.GetOrdinal("memory_derived")) == 1,
+        MemoryOutbound = ReadMemoryOutbound(reader)
     };
+
+    private static MemoryOutboundAuditMetadata? ReadMemoryOutbound(SqliteDataReader reader)
+    {
+        var consentId = ReadNullableGuid(reader, "memory_consent_id");
+        if (consentId is null)
+        {
+            return null;
+        }
+
+        var references = JsonSerializer.Deserialize<MemoryOutboundItemReference[]>(
+            ReadNullableString(reader, "memory_item_refs_json") ?? "[]") ?? [];
+        return new MemoryOutboundAuditMetadata(
+            consentId.Value,
+            DateTimeOffset.MinValue,
+            DateTimeOffset.MinValue,
+            null,
+            ReadRequiredString(reader, "memory_origin_provider_id"),
+            ReadRequiredString(reader, "memory_origin_model_id"),
+            ReadRequiredString(reader, "memory_origin_destination"),
+            string.Empty,
+            string.Empty,
+            string.Empty,
+            null,
+            references,
+            reader.GetInt32(reader.GetOrdinal("memory_item_count")),
+            reader.GetInt32(reader.GetOrdinal("memory_total_characters")),
+            ReadRequiredString(reader, "memory_manifest_hash"));
+    }
+
+    private static void AddMemoryOutbound(
+        SqliteCommand command,
+        MemoryOutboundAuditMetadata? metadata)
+    {
+        command.Parameters.AddWithValue(
+            "$memoryConsentId",
+            metadata?.ConsentId.ToString("D") as object ?? DBNull.Value);
+        command.Parameters.AddWithValue("$memoryProviderId", metadata?.ProviderId as object ?? DBNull.Value);
+        command.Parameters.AddWithValue("$memoryModelId", metadata?.ModelId as object ?? DBNull.Value);
+        command.Parameters.AddWithValue(
+            "$memoryDestination",
+            metadata?.DestinationOrigin as object ?? DBNull.Value);
+        command.Parameters.AddWithValue(
+            "$memoryItemRefsJson",
+            metadata is null ? DBNull.Value : JsonSerializer.Serialize(metadata.Items));
+        command.Parameters.AddWithValue("$memoryItemCount", (object?)metadata?.ItemCount ?? DBNull.Value);
+        command.Parameters.AddWithValue(
+            "$memoryTotalCharacters",
+            (object?)metadata?.TotalCharacters ?? DBNull.Value);
+        command.Parameters.AddWithValue("$memoryManifestHash", metadata?.ManifestHash as object ?? DBNull.Value);
+    }
+
+    private static string ReadRequiredString(SqliteDataReader reader, string name) =>
+        ReadNullableString(reader, name)
+        ?? throw new InvalidDataException($"记忆出站元数据缺少 {name}。");
 
     private static void Add(SqliteCommand command, string name, Guid value) =>
         command.Parameters.AddWithValue(name, value.ToString("D"));

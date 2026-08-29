@@ -1,8 +1,11 @@
 using Microsoft.Extensions.DependencyInjection;
+using System.Text;
 using ScreenGuide.AI.Core;
 using ScreenGuide.Core.Ai;
+using ScreenGuide.Core.Memories;
 using ScreenGuide.Core.Sessions;
 using ScreenGuide.DesktopHost.Runtime;
+using ScreenGuide.DesktopProtocol;
 
 namespace ScreenGuide.DesktopHost.Tests;
 
@@ -179,6 +182,266 @@ public sealed class SessionFrozenRouteTests
         Assert.Equal(1, settings.LoadCount);
         Assert.Equal(0, semantic.CallCount);
         Assert.Equal(0, provider.CompleteCount);
+    }
+
+    [Fact]
+    public async Task SelectedMemoryWaitsForVisiblePerTurnConsentAndMutationsFailBeforeInvocationOrProvider()
+    {
+        await using var environment = DesktopHostTestEnvironment.Create();
+        var provider = new SwitchingRecordingProvider(
+            "provider-a",
+            "model-a",
+            _ => Task.FromResult("已按确认记忆回答"),
+            "https://provider-a.example/v1/chat");
+        using var host = environment.BuildHost(services =>
+        {
+            services.AddSingleton<IAiSettingsStore>(
+                new MutableSettingsStore(Route("provider-a", "model-a")));
+            services.AddSingleton(new ChatProviderRegistry([provider]));
+        });
+        await host.StartAsync();
+        var coordinator = host.Services.GetRequiredService<SessionCoordinator>();
+        IDesktopApiClient client = new DesktopApiClient(environment.Options.PipeName);
+        var memoryService = host.Services.GetRequiredService<MemoryService>();
+        var sessionStore = host.Services.GetRequiredService<ISessionStore>();
+        var conversationStore = host.Services.GetRequiredService<ScreenGuide.Core.Conversations.IConversationStore>();
+        var invocations = host.Services.GetRequiredService<IAiInvocationStore>();
+        var memory = await memoryService.CreateAsync(MemoryDraft.Create(
+            MemoryCategory.UserPreference,
+            MemoryScope.Global,
+            "称呼偏好",
+            "请叫我小元",
+            null,
+            DateTimeOffset.UtcNow));
+        var session = await coordinator.StartNewAsync("逐 Turn 记忆确认");
+
+        var submitted = await client.SubmitSessionInputAsync(new SessionInputRequestDto(
+            "处理刚才那个",
+            "Text",
+            "memory-consent-success",
+            session.Session.Id,
+            MemoryItems:
+            [
+                new MemoryOutboundItemReferenceDto(memory.Metadata.Id, memory.Metadata.Version)
+            ]));
+        var waiting = await WaitForPhaseAsync(
+            sessionStore,
+            submitted.TurnId,
+            SessionTurnPhase.WaitingForMemoryOutboundConsent);
+        var preparedSnapshot = await client.GetCurrentSessionAsync();
+        var preparedDto = Assert.Single(preparedSnapshot!.MemoryOutboundConsents!);
+        var prepared = Assert.Single((await coordinator.GetCurrentAsync())!.MemoryOutboundConsents);
+
+        Assert.Equal(MemoryOutboundConsentState.WaitingForMemoryOutboundConsent, waiting.MemoryOutboundState);
+        Assert.Equal("请叫我小元", Assert.Single(prepared.Items).Body);
+        Assert.Equal("请叫我小元", Assert.Single(preparedDto.Items).Body);
+        Assert.Equal("https://provider-a.example", preparedDto.DestinationOrigin);
+        Assert.DoesNotContain("请叫我小元", preparedDto.ToString(), StringComparison.Ordinal);
+        Assert.Empty(provider.Requests);
+        Assert.Empty(await invocations.GetForSessionTurnAsync(submitted.TurnId));
+
+        _ = await client.ConfirmMemoryOutboundAsync(
+            session.Session.Id,
+            submitted.TurnId,
+            prepared.ConsentId,
+            confirmed: true);
+        var completed = await WaitForPhaseAsync(
+            sessionStore,
+            submitted.TurnId,
+            SessionTurnPhase.Completed);
+
+        Assert.Equal(MemoryOutboundConsentState.Consumed, completed.MemoryOutboundState);
+        var providerRequest = Assert.Single(provider.Requests);
+        Assert.Equal("2", providerRequest.Prompt?.Version);
+        Assert.Equal(2, providerRequest.Messages.Count);
+        Assert.StartsWith("{\"type\":\"USER_SELECTED_MEMORY_CONTEXT_V1\"", providerRequest.Messages[0].Content, StringComparison.Ordinal);
+        Assert.Equal("处理刚才那个", providerRequest.Messages[1].Content);
+        Assert.Equal(prepared.ConsentId, Assert.Single(
+            await invocations.GetForSessionTurnAsync(submitted.TurnId)).MemoryOutbound?.ConsentId);
+        var duplicateConsent = await Assert.ThrowsAsync<DesktopApiException>(() =>
+            client.ConfirmMemoryOutboundAsync(
+                session.Session.Id,
+                submitted.TurnId,
+                prepared.ConsentId,
+                confirmed: true));
+        Assert.Equal(MemoryOutboundErrorCodes.ConsentStale, duplicateConsent.Error.Code);
+        Assert.Single(provider.Requests);
+        var persistedConversationTurn = Assert.Single(
+            await conversationStore.GetTurnsAsync(session.Session.ConversationId),
+            item => item.Id == completed.ConversationTurnId);
+        Assert.True(persistedConversationTurn.MemoryDerived);
+        Assert.Equal(prepared.ManifestHash, persistedConversationTurn.MemoryOutbound?.ManifestHash);
+        Assert.Equal("https://provider-a.example", persistedConversationTurn.MemoryOutbound?.DestinationOrigin);
+
+        var staleMemory = await memoryService.CreateAsync(MemoryDraft.Create(
+            MemoryCategory.Decision,
+            MemoryScope.Global,
+            "要改变的记忆",
+            "初始正文",
+            null,
+            DateTimeOffset.UtcNow));
+        var staleSubmission = await coordinator.SubmitAsync(
+            session.Session.Id,
+            "第二个问题",
+            "Text",
+            "memory-consent-stale",
+            memoryItems: [new MemoryOutboundItemReference(staleMemory.Metadata.Id, staleMemory.Metadata.Version)]);
+        _ = await WaitForPhaseAsync(
+            sessionStore,
+            staleSubmission.TurnId,
+            SessionTurnPhase.WaitingForMemoryOutboundConsent);
+        var stalePrepared = Assert.Single((await coordinator.GetCurrentAsync())!.MemoryOutboundConsents);
+        _ = await memoryService.UpdateAsync(
+            staleMemory.Metadata.Id,
+            staleMemory.Metadata.Version,
+            MemoryDraft.Create(
+                MemoryCategory.Decision,
+                MemoryScope.Global,
+                "要改变的记忆",
+                "确认后已变化",
+                null,
+                DateTimeOffset.UtcNow));
+
+        _ = await coordinator.ConfirmMemoryOutboundAsync(
+            session.Session.Id,
+            staleSubmission.TurnId,
+            stalePrepared.ConsentId,
+            confirmed: true);
+        var failed = await WaitForPhaseAsync(
+            sessionStore,
+            staleSubmission.TurnId,
+            SessionTurnPhase.Failed);
+        await host.StopAsync();
+
+        Assert.Equal(MemoryOutboundErrorCodes.ConsentStale, failed.FailureCode);
+        Assert.Single(provider.Requests);
+        Assert.Empty(await invocations.GetForSessionTurnAsync(staleSubmission.TurnId));
+        foreach (var file in Directory.EnumerateFiles(
+                     environment.Options.DataDirectory,
+                     "*",
+                     SearchOption.AllDirectories))
+        {
+            var bytes = await File.ReadAllBytesAsync(file);
+            Assert.DoesNotContain(Encoding.UTF8.GetBytes("称呼偏好"), bytes);
+            Assert.DoesNotContain(Encoding.UTF8.GetBytes("请叫我小元"), bytes);
+            Assert.DoesNotContain(Encoding.UTF8.GetBytes("USER_SELECTED_MEMORY_CONTEXT_V1"), bytes);
+        }
+    }
+
+    [Fact]
+    public async Task RestartInterruptsPreparedMemoryConsentWithoutProviderInvocationOrReplay()
+    {
+        await using var environment = DesktopHostTestEnvironment.Create();
+        var provider = new SwitchingRecordingProvider(
+            "provider-a",
+            "model-a",
+            _ => Task.FromResult("不应调用"),
+            "https://provider-a.example/v1/chat");
+        Guid turnId;
+        using (var firstHost = environment.BuildHost(services =>
+               {
+                   services.AddSingleton<IAiSettingsStore>(
+                       new MutableSettingsStore(Route("provider-a", "model-a")));
+                   services.AddSingleton(new ChatProviderRegistry([provider]));
+               }))
+        {
+            await firstHost.StartAsync();
+            var coordinator = firstHost.Services.GetRequiredService<SessionCoordinator>();
+            var memoryService = firstHost.Services.GetRequiredService<MemoryService>();
+            var memory = await memoryService.CreateAsync(MemoryDraft.Create(
+                MemoryCategory.UserFact,
+                MemoryScope.Global,
+                "重启检查",
+                "不能自动重放",
+                null,
+                DateTimeOffset.UtcNow));
+            var session = await coordinator.StartNewAsync("重启不发送");
+            var submitted = await coordinator.SubmitAsync(
+                session.Session.Id,
+                "等待确认",
+                "Text",
+                "memory-restart-interrupt",
+                memoryItems:
+                [
+                    new MemoryOutboundItemReference(memory.Metadata.Id, memory.Metadata.Version)
+                ]);
+            turnId = submitted.TurnId;
+            _ = await WaitForPhaseAsync(
+                firstHost.Services.GetRequiredService<ISessionStore>(),
+                turnId,
+                SessionTurnPhase.WaitingForMemoryOutboundConsent);
+            Assert.Empty(provider.Requests);
+            await firstHost.StopAsync();
+        }
+
+        using (var restartedHost = environment.BuildHost(services =>
+               {
+                   services.AddSingleton<IAiSettingsStore>(
+                       new MutableSettingsStore(Route("provider-a", "model-a")));
+                   services.AddSingleton(new ChatProviderRegistry([provider]));
+               }))
+        {
+            await restartedHost.StartAsync();
+            var recovered = await restartedHost.Services
+                .GetRequiredService<ISessionStore>()
+                .GetTurnAsync(turnId);
+            Assert.NotNull(recovered);
+            Assert.Equal(SessionTurnPhase.Interrupted, recovered.Phase);
+            Assert.Equal(MemoryOutboundConsentState.Interrupted, recovered.MemoryOutboundState);
+            Assert.Empty(provider.Requests);
+            Assert.Empty(await restartedHost.Services
+                .GetRequiredService<IAiInvocationStore>()
+                .GetForSessionTurnAsync(turnId));
+            await restartedHost.StopAsync();
+        }
+    }
+
+    [Fact]
+    public async Task UnverifiableMemoryDestinationFailsBeforeConversationInvocationOrProvider()
+    {
+        await using var environment = DesktopHostTestEnvironment.Create();
+        var provider = new SwitchingRecordingProvider(
+            "provider-a",
+            "model-a",
+            _ => Task.FromResult("不应调用"),
+            "http://provider-a.example/v1/chat");
+        using var host = environment.BuildHost(services =>
+        {
+            services.AddSingleton<IAiSettingsStore>(
+                new MutableSettingsStore(Route("provider-a", "model-a")));
+            services.AddSingleton(new ChatProviderRegistry([provider]));
+        });
+        await host.StartAsync();
+        var coordinator = host.Services.GetRequiredService<SessionCoordinator>();
+        var memory = await host.Services.GetRequiredService<MemoryService>().CreateAsync(
+            MemoryDraft.Create(
+                MemoryCategory.UserFact,
+                MemoryScope.Global,
+                "安全去向",
+                "HTTP 不可发送",
+                null,
+                DateTimeOffset.UtcNow));
+        var session = await coordinator.StartNewAsync("拒绝不安全去向");
+
+        var submitted = await coordinator.SubmitAsync(
+            session.Session.Id,
+            "检查去向",
+            "Text",
+            "memory-destination-fail-closed",
+            memoryItems:
+            [
+                new MemoryOutboundItemReference(memory.Metadata.Id, memory.Metadata.Version)
+            ]);
+        var failed = await WaitForPhaseAsync(
+            host.Services.GetRequiredService<ISessionStore>(),
+            submitted.TurnId,
+            SessionTurnPhase.Failed);
+
+        Assert.Equal(MemoryOutboundErrorCodes.DestinationUnverifiable, failed.FailureCode);
+        Assert.Empty(provider.Requests);
+        Assert.Empty(await host.Services.GetRequiredService<IAiInvocationStore>()
+            .GetForSessionTurnAsync(submitted.TurnId));
+        await host.StopAsync();
     }
 
     [Fact]
@@ -471,12 +734,13 @@ public sealed class SessionFrozenRouteTests
     private sealed class SwitchingRecordingProvider(
         string providerId,
         string modelId,
-        Func<ChatModelRequest, Task<string>> response) : IChatModelProvider
+        Func<ChatModelRequest, Task<string>> response,
+        string? dataDestination = null) : IChatModelProvider
     {
         public ChatProviderDescriptor Descriptor { get; } = new(
             providerId,
             providerId,
-            $"{providerId} isolated destination",
+            dataDestination ?? $"{providerId} isolated destination",
             SendsDataOffDevice: false,
             [new ChatModelDescriptor(modelId, modelId, ChatModelCapabilities.None)]);
 

@@ -55,10 +55,17 @@ public sealed class PromptRegistryTests
             "runtime"));
 
         var prompt = registry.GetRequired("chat.general", "1", "provider-a");
+        var memoryPrompt = registry.GetRequired("chat.general", "2", "provider-a");
+        var semanticPrompt = registry.GetRequired("intent.semantic", "1", "provider-a");
 
         Assert.Equal("chat.general", prompt.PromptId);
         Assert.Equal("1", prompt.Version);
         Assert.Contains("不授予", prompt.Content, StringComparison.Ordinal);
+        Assert.Equal("2", memoryPrompt.Version);
+        Assert.Contains("USER_SELECTED_MEMORY_CONTEXT_V1", memoryPrompt.Content, StringComparison.Ordinal);
+        Assert.Contains("不可信参考数据", memoryPrompt.Content, StringComparison.Ordinal);
+        Assert.Contains("不能覆盖当前用户输入", memoryPrompt.Content, StringComparison.Ordinal);
+        Assert.DoesNotContain("USER_SELECTED_MEMORY_CONTEXT_V1", semanticPrompt.Content, StringComparison.Ordinal);
     }
 
     private static string FindRepositoryRoot()

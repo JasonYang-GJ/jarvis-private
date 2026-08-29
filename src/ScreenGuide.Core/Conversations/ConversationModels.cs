@@ -1,3 +1,5 @@
+using ScreenGuide.Core.Memories;
+
 namespace ScreenGuide.Core.Conversations;
 
 public enum ConversationStatus
@@ -93,6 +95,10 @@ public sealed record ConversationTurnRecord
     public string? FailureCode { get; init; }
 
     public string? FailureMessage { get; init; }
+
+    public bool MemoryDerived { get; init; }
+
+    public MemoryOutboundAuditMetadata? MemoryOutbound { get; init; }
 }
 
 public sealed record ConversationTurnRegistration(

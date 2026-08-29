@@ -6,7 +6,7 @@ namespace ScreenGuide.DesktopClient.Tests;
 public sealed class AiSettingsUiTests
 {
     [Fact]
-    public void SettingsPageExposesExplicitLocalOnlyMemoryCrudWithoutAModelUseToggle()
+    public void SettingsPageExposesExplicitLocalOnlyMemoryCrudWithoutAutomaticModelUse()
     {
         var xaml = File.ReadAllText(Path.Combine(
             FindRepositoryRoot(),
@@ -22,8 +22,66 @@ public sealed class AiSettingsUiTests
         Assert.Contains("Click=\"SaveMemoryButton_Click\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Click=\"ToggleMemoryButton_Click\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Click=\"DeleteMemoryButton_Click\"", xaml, StringComparison.Ordinal);
-        Assert.DoesNotContain("将记忆发送给模型", xaml, StringComparison.Ordinal);
+        Assert.Contains("不会自动发送给模型", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("自动提取记忆", xaml, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ConversationRequiresAVisibleFullPerTurnMemoryOutboundConfirmation()
+    {
+        var repositoryRoot = FindRepositoryRoot();
+        var xaml = File.ReadAllText(Path.Combine(
+            repositoryRoot,
+            "src",
+            "ScreenGuide.DesktopClient",
+            "MainWindow.xaml"));
+        var code = File.ReadAllText(Path.Combine(
+            repositoryRoot,
+            "src",
+            "ScreenGuide.DesktopClient",
+            "MainWindow.xaml.cs"));
+        var normalizedCode = code.ReplaceLineEndings("\n");
+
+        Assert.Contains("默认 0 条，不会自动发送", xaml, StringComparison.Ordinal);
+        Assert.Contains("AutomationProperties.AutomationId=\"ConversationMemorySelection\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("AutomationProperties.AutomationId=\"MemoryOutboundConsent\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("HTTPS 去向", code, StringComparison.Ordinal);
+        Assert.Contains("项目绑定", code, StringComparison.Ordinal);
+        Assert.Contains("{item.Title}", code, StringComparison.Ordinal);
+        Assert.Contains("item.Body", code, StringComparison.Ordinal);
+        Assert.Contains("version {item.Version}", code, StringComparison.Ordinal);
+        Assert.Contains("{item.CharacterCount} 字符", code, StringComparison.Ordinal);
+        Assert.Contains("确认发送这一次", xaml, StringComparison.Ordinal);
+        Assert.Contains("ConfirmMemoryOutboundAsync", code, StringComparison.Ordinal);
+        Assert.Contains("private async void MemoryPreviewQueryTextBox_TextChanged", code, StringComparison.Ordinal);
+        Assert.Contains("private async void MemoryPreviewProjectComboBox_SelectionChanged", code, StringComparison.Ordinal);
+        Assert.Contains("if (selected is not null)\n            {\n                await InvalidateDisplayedMemoryConsentAsync();", normalizedCode, StringComparison.Ordinal);
+        Assert.DoesNotContain("自动携带", xaml, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void MemoryOutboundProtocolObjectsRedactUserInputAndMemoryContent()
+    {
+        const string input = "outbound-input-sentinel";
+        const string title = "outbound-title-sentinel";
+        const string body = "outbound-body-sentinel";
+        var item = new MemoryOutboundPreparedItemDto(
+            Guid.NewGuid(), 2, "UserFact", "Global", title, body, title.Length + body.Length);
+        var consent = new MemoryOutboundConsentDto(
+            Guid.NewGuid(), Guid.NewGuid(), "WaitingForMemoryOutboundConsent",
+            "qwen", "qwen3.7-plus", "https://dashscope.aliyuncs.com", null, null,
+            [item], 1, title.Length + body.Length, DateTimeOffset.UtcNow,
+            DateTimeOffset.UtcNow.AddMinutes(10), "SAFE-HASH");
+        var request = new SessionInputRequestDto(
+            input, MemoryItems: [new MemoryOutboundItemReferenceDto(item.MemoryId, item.Version)]);
+
+        Assert.DoesNotContain(input, request.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain(title, item.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain(body, item.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain(title, consent.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain(body, consent.ToString(), StringComparison.Ordinal);
+        Assert.Contains("[REDACTED]", request.ToString(), StringComparison.Ordinal);
+        Assert.Contains("[REDACTED]", consent.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]

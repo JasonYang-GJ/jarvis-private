@@ -67,6 +67,12 @@ public sealed class SqliteTaskStore : ILocalTaskStore
                 .ConfigureAwait(false);
         }
 
+        if (storedVersion == 9)
+        {
+            await ValidateVersion9ForVersion10MigrationAsync(connection, cancellationToken)
+                .ConfigureAwait(false);
+        }
+
         string? backupPath = null;
         if (storedVersion > 0 && storedVersion < V02Contract.SchemaVersion)
         {
@@ -130,6 +136,14 @@ public sealed class SqliteTaskStore : ILocalTaskStore
                 await ApplyMigrationAsync(connection, 9, SqliteSchema.CreateVersion9, cancellationToken)
                     .ConfigureAwait(false);
             }
+
+            if (storedVersion < 10)
+            {
+                await ApplyMigrationAsync(connection, 10, SqliteSchema.CreateVersion10, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+
+            await ValidateVersion10Async(connection, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception exception) when (backupPath is not null)
         {
@@ -2108,6 +2122,96 @@ public sealed class SqliteTaskStore : ILocalTaskStore
                 CultureInfo.InvariantCulture) != 4)
         {
             throw new InvalidOperationException("schema v8 不完整，AI Invocation 结构缺失。");
+        }
+    }
+
+    private static async Task ValidateVersion9ForVersion10MigrationAsync(
+        SqliteConnection connection,
+        CancellationToken cancellationToken)
+    {
+        var requiredMemoryColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "id",
+            "category",
+            "scope_kind",
+            "project_id",
+            "protected_title",
+            "protected_body",
+            "status",
+            "version"
+        };
+        await using (var command = connection.CreateCommand())
+        {
+            command.CommandText = "SELECT name FROM pragma_table_info('memory_items');";
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+            {
+                requiredMemoryColumns.Remove(reader.GetString(0));
+            }
+        }
+
+        if (requiredMemoryColumns.Count != 0)
+        {
+            throw new InvalidOperationException(
+                $"schema v9 不完整，缺少记忆列：{string.Join(", ", requiredMemoryColumns.Order())}。");
+        }
+
+        await using var objectCommand = connection.CreateCommand();
+        objectCommand.CommandText = """
+            SELECT COUNT(*) FROM sqlite_master
+            WHERE (type = 'table' AND name = 'memory_items')
+               OR (type = 'index' AND name IN (
+                    'ix_memory_items_status_expiry',
+                    'ix_memory_items_project'));
+            """;
+        if (Convert.ToInt32(
+                await objectCommand.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false),
+                CultureInfo.InvariantCulture) != 3)
+        {
+            throw new InvalidOperationException("schema v9 不完整，长期记忆结构缺失。");
+        }
+    }
+
+    private static async Task ValidateVersion10Async(
+        SqliteConnection connection,
+        CancellationToken cancellationToken)
+    {
+        var required = new Dictionary<string, string[]>(StringComparer.Ordinal)
+        {
+            ["session_turns"] =
+            [
+                "memory_outbound_state", "memory_consent_id", "memory_origin_destination",
+                "memory_prompt_hash", "memory_item_refs_json", "memory_manifest_hash"
+            ],
+            ["conversation_turns"] =
+            [
+                "memory_derived", "memory_consent_id", "memory_origin_destination",
+                "memory_item_refs_json", "memory_manifest_hash"
+            ],
+            ["ai_invocations"] =
+            [
+                "memory_consent_id", "memory_origin_destination",
+                "memory_item_refs_json", "memory_manifest_hash"
+            ]
+        };
+
+        foreach (var (table, expectedColumns) in required)
+        {
+            var missing = expectedColumns.ToHashSet(StringComparer.OrdinalIgnoreCase);
+            await using var command = connection.CreateCommand();
+            command.CommandText = $"SELECT name FROM pragma_table_info('{table}');";
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken)
+                .ConfigureAwait(false);
+            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+            {
+                missing.Remove(reader.GetString(0));
+            }
+
+            if (missing.Count != 0)
+            {
+                throw new InvalidOperationException(
+                    $"schema v10 不完整，{table} 缺少列：{string.Join(", ", missing.Order())}。");
+            }
         }
     }
 

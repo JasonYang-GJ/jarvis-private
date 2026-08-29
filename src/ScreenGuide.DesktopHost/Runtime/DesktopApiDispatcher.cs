@@ -165,6 +165,11 @@ public sealed class DesktopApiDispatcher(
                         await ConfirmSessionTurnAsync(
                             Deserialize<SessionTurnConfirmationRequestDto>(request),
                             cancellationToken).ConfigureAwait(false))!),
+                DesktopApiMethods.ConfirmMemoryOutbound =>
+                    DesktopProtocolJson.ToElement(MapSession(
+                        await ConfirmMemoryOutboundAsync(
+                            Deserialize<SessionMemoryOutboundConsentRequestDto>(request),
+                            cancellationToken).ConfigureAwait(false))!),
                 DesktopApiMethods.CancelSessionTurn =>
                     DesktopProtocolJson.ToElement(MapSession(
                         await CancelSessionTurnAsync(
@@ -512,7 +517,9 @@ public sealed class DesktopApiDispatcher(
                 request.IdempotencyKey,
                 cancellationToken,
                 request.ExpectedIntentKind,
-                request.ExpectedTarget)
+                request.ExpectedTarget,
+                request.MemoryItems?.Select(item =>
+                    new MemoryOutboundItemReference(item.MemoryId, item.ExpectedVersion)).ToArray())
             .ConfigureAwait(false);
         return new SessionTurnCommandResultDto(result.SessionId, result.TurnId, result.WasDuplicate);
     }
@@ -558,6 +565,16 @@ public sealed class DesktopApiDispatcher(
         sessions.ConfirmTurnAsync(
             request.SessionId,
             request.TurnId,
+            request.Confirmed,
+            cancellationToken);
+
+    private Task<LocalSessionSnapshot> ConfirmMemoryOutboundAsync(
+        SessionMemoryOutboundConsentRequestDto request,
+        CancellationToken cancellationToken) =>
+        sessions.ConfirmMemoryOutboundAsync(
+            request.SessionId,
+            request.TurnId,
+            request.ConsentId,
             request.Confirmed,
             cancellationToken);
 
@@ -618,7 +635,31 @@ public sealed class DesktopApiDispatcher(
                 message.SequenceNumber,
                 message.Role.ToString(),
                 message.Content,
-                message.CreatedAtUtc)).ToArray());
+                message.CreatedAtUtc)).ToArray(),
+            snapshot.MemoryOutboundConsents.Select(consent => new MemoryOutboundConsentDto(
+                consent.ConsentId,
+                consent.TurnId,
+                MemoryOutboundConsentState.WaitingForMemoryOutboundConsent.ToString(),
+                consent.ProviderId,
+                consent.ModelId,
+                consent.DestinationOrigin,
+                consent.ProjectId,
+                consent.ProjectId == snapshot.Session.SelectedProjectId
+                    ? snapshot.SelectedProjectName
+                    : null,
+                consent.Items.Select(item => new MemoryOutboundPreparedItemDto(
+                    item.Id,
+                    item.Version,
+                    item.Category.ToString(),
+                    item.Scope.ToString(),
+                    item.Title,
+                    item.Body,
+                    item.CharacterCount)).ToArray(),
+                consent.Items.Count,
+                consent.TotalCharacters,
+                consent.PreparedAtUtc,
+                consent.ExpiresAtUtc,
+                consent.ManifestHash)).ToArray());
     }
 
     private static UnifiedSessionTurnDto MapSessionTurn(SessionTurnRecord turn) => new(
@@ -645,7 +686,10 @@ public sealed class DesktopApiDispatcher(
         turn.CompletedAtUtc,
         turn.ExpectedIntentKind,
         turn.ExpectedTarget,
-        turn.PlanTarget);
+        turn.PlanTarget,
+        turn.MemoryOutboundState.ToString(),
+        turn.MemoryOutbound?.ConsentId,
+        turn.MemoryOutbound?.ManifestHash);
 
     private static ConversationSummaryDto MapConversation(ConversationRecord conversation) => new(
         conversation.Id,

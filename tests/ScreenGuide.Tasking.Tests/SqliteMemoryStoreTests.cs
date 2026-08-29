@@ -11,7 +11,44 @@ public sealed class SqliteMemoryStoreTests
         new(2026, 8, 29, 9, 0, 0, TimeSpan.Zero);
 
     [Fact]
-    public async Task Version8DatabaseMigratesAtomicallyToVersion9AndKeepsAPreVersion9Backup()
+    public async Task Version9DatabaseMigratesAtomicallyToVersion10AndKeepsAUniquePreVersion10Backup()
+    {
+        var root = NewRoot();
+        var databasePath = Path.Combine(root, "state", "tasking.db");
+        Directory.CreateDirectory(Path.GetDirectoryName(databasePath)!);
+        try
+        {
+            await CreateVersion9DatabaseAsync(databasePath);
+
+            await using var store = new SqliteTaskStore(databasePath);
+            await store.InitializeAsync();
+
+            Assert.Equal(10, await store.GetSchemaVersionAsync());
+            await using var connection = new SqliteConnection($"Data Source={databasePath}");
+            await connection.OpenAsync();
+            Assert.True(await ColumnExistsAsync(connection, "session_turns", "memory_outbound_state"));
+            Assert.True(await ColumnExistsAsync(connection, "conversation_turns", "memory_derived"));
+            Assert.True(await ColumnExistsAsync(connection, "ai_invocations", "memory_consent_id"));
+            Assert.Equal("v9-device-canary", await ReadDeviceCanaryAsync(connection));
+
+            var backup = Assert.Single(Directory.GetFiles(
+                Path.GetDirectoryName(databasePath)!,
+                "tasking.pre-v10-from-v9-*.backup.db"));
+            await using var backupConnection = new SqliteConnection($"Data Source={backup};Mode=ReadOnly");
+            await backupConnection.OpenAsync();
+            Assert.Equal(9, await ReadSchemaVersionAsync(backupConnection));
+            Assert.False(await ColumnExistsAsync(backupConnection, "session_turns", "memory_outbound_state"));
+            Assert.Equal("v9-device-canary", await ReadDeviceCanaryAsync(backupConnection));
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Version8DatabaseMigratesToVersion10AndKeepsAUniquePreVersion10Backup()
     {
         var root = NewRoot();
         var databasePath = Path.Combine(root, "state", "tasking.db");
@@ -23,17 +60,18 @@ public sealed class SqliteMemoryStoreTests
             await using var store = new SqliteTaskStore(databasePath);
             await store.InitializeAsync();
 
-            Assert.Equal(9, await store.GetSchemaVersionAsync());
+            Assert.Equal(10, await store.GetSchemaVersionAsync());
             await using var connection = new SqliteConnection($"Data Source={databasePath}");
             await connection.OpenAsync();
             Assert.True(await ObjectExistsAsync(connection, "table", "memory_items"));
             Assert.True(await ObjectExistsAsync(connection, "index", "ix_memory_items_status_expiry"));
             Assert.True(await ObjectExistsAsync(connection, "index", "ix_memory_items_project"));
+            Assert.True(await ColumnExistsAsync(connection, "session_turns", "memory_outbound_state"));
             Assert.Equal("v8-device-canary", await ReadDeviceCanaryAsync(connection));
 
             var backup = Assert.Single(Directory.GetFiles(
                 Path.GetDirectoryName(databasePath)!,
-                "tasking.pre-v9-from-v8-*.backup.db"));
+                "tasking.pre-v10-from-v8-*.backup.db"));
             await using var backupConnection = new SqliteConnection($"Data Source={backup};Mode=ReadOnly");
             await backupConnection.OpenAsync();
             Assert.Equal(8, await ReadSchemaVersionAsync(backupConnection));
@@ -48,7 +86,7 @@ public sealed class SqliteMemoryStoreTests
     }
 
     [Fact]
-    public async Task FailedVersion9MigrationRollsBackAndLeavesVersion8AndBackupIntact()
+    public async Task FailedVersion9MigrationRollsBackAndLeavesVersion8AndPreVersion10BackupIntact()
     {
         var root = NewRoot();
         var databasePath = Path.Combine(root, "state", "tasking.db");
@@ -72,7 +110,86 @@ public sealed class SqliteMemoryStoreTests
             Assert.Equal("v8-canary", await command.ExecuteScalarAsync());
             Assert.Single(Directory.GetFiles(
                 Path.GetDirectoryName(databasePath)!,
-                "tasking.pre-v9-from-v8-*.backup.db"));
+                "tasking.pre-v10-from-v8-*.backup.db"));
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task FailedVersion10MigrationRollsBackNewColumnsAndLeavesVersion9AndBackupIntact()
+    {
+        var root = NewRoot();
+        var databasePath = Path.Combine(root, "state", "tasking.db");
+        Directory.CreateDirectory(Path.GetDirectoryName(databasePath)!);
+        try
+        {
+            await CreateVersion9DatabaseAsync(databasePath, addConflictingVersion10Column: true);
+
+            await using var store = new SqliteTaskStore(databasePath);
+            var failure = await Assert.ThrowsAsync<InvalidOperationException>(
+                () => store.InitializeAsync());
+
+            Assert.Contains("备份", failure.Message, StringComparison.Ordinal);
+            await using var connection = new SqliteConnection($"Data Source={databasePath}");
+            await connection.OpenAsync();
+            Assert.Equal(9, await ReadSchemaVersionAsync(connection));
+            Assert.False(await ColumnExistsAsync(connection, "session_turns", "memory_outbound_state"));
+            Assert.True(await ColumnExistsAsync(connection, "session_turns", "memory_consent_id"));
+            Assert.False(await ColumnExistsAsync(connection, "conversation_turns", "memory_derived"));
+            Assert.Equal("v9-device-canary", await ReadDeviceCanaryAsync(connection));
+            var backup = Assert.Single(Directory.GetFiles(
+                Path.GetDirectoryName(databasePath)!,
+                "tasking.pre-v10-from-v9-*.backup.db"));
+            await using var backupConnection = new SqliteConnection($"Data Source={backup};Mode=ReadOnly");
+            await backupConnection.OpenAsync();
+            Assert.Equal(9, await ReadSchemaVersionAsync(backupConnection));
+            Assert.True(await ColumnExistsAsync(backupConnection, "session_turns", "memory_consent_id"));
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task IncompleteDatabaseMarkedVersion10FailsClosedWithoutModifyingTheDatabase()
+    {
+        var root = NewRoot();
+        var databasePath = Path.Combine(root, "state", "tasking.db");
+        Directory.CreateDirectory(Path.GetDirectoryName(databasePath)!);
+        try
+        {
+            await CreateVersion9DatabaseAsync(databasePath);
+            await using (var connection = new SqliteConnection($"Data Source={databasePath}"))
+            {
+                await connection.OpenAsync();
+                await using var command = connection.CreateCommand();
+                command.CommandText =
+                    "INSERT INTO schema_info(version, applied_at_utc) VALUES(10, '2026-08-30T01:00:00Z');";
+                await command.ExecuteNonQueryAsync();
+            }
+            SqliteConnection.ClearAllPools();
+            var before = await File.ReadAllBytesAsync(databasePath);
+
+            InvalidOperationException failure;
+            await using (var store = new SqliteTaskStore(databasePath))
+            {
+                failure = await Assert.ThrowsAsync<InvalidOperationException>(
+                    () => store.InitializeAsync());
+            }
+            SqliteConnection.ClearAllPools();
+            var after = await File.ReadAllBytesAsync(databasePath);
+
+            Assert.Contains("schema v10 不完整", failure.Message, StringComparison.Ordinal);
+            Assert.Equal(before, after);
+            Assert.Empty(Directory.GetFiles(
+                Path.GetDirectoryName(databasePath)!,
+                "tasking.pre-v10-*.backup.db"));
         }
         finally
         {
@@ -258,6 +375,35 @@ public sealed class SqliteMemoryStoreTests
         await command.ExecuteNonQueryAsync();
     }
 
+    private static async Task CreateVersion9DatabaseAsync(
+        string databasePath,
+        bool addConflictingVersion10Column = false)
+    {
+        await using var connection = new SqliteConnection($"Data Source={databasePath}");
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = SqliteSchema.CreateVersion1
+            + SqliteSchema.CreateVersion2
+            + SqliteSchema.CreateVersion3
+            + SqliteSchema.CreateVersion4
+            + SqliteSchema.CreateVersion5
+            + SqliteSchema.CreateVersion6
+            + SqliteSchema.CreateVersion7
+            + SqliteSchema.CreateVersion8
+            + SqliteSchema.CreateVersion9
+            + "INSERT INTO schema_info(version, applied_at_utc) VALUES "
+            + string.Join(",", Enumerable.Range(1, 9).Select(version => $"({version}, '2026-08-30T00:00:00Z')"))
+            + ";"
+            + "INSERT INTO devices(id, display_name, device_type, trust_state, created_at_utc) "
+            + "VALUES('11111111-1111-1111-1111-111111111111', 'v9-device-canary', "
+            + "'WindowsHost', 'Local', '2026-08-30T00:00:00Z');";
+        if (addConflictingVersion10Column)
+        {
+            command.CommandText += "ALTER TABLE session_turns ADD COLUMN memory_consent_id TEXT NULL;";
+        }
+        await command.ExecuteNonQueryAsync();
+    }
+
     private static async Task<int> ReadSchemaVersionAsync(SqliteConnection connection)
     {
         await using var command = connection.CreateCommand();
@@ -281,6 +427,17 @@ public sealed class SqliteMemoryStoreTests
         command.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type = $type AND name = $name;";
         command.Parameters.AddWithValue("$type", type);
         command.Parameters.AddWithValue("$name", name);
+        return Convert.ToInt32(await command.ExecuteScalarAsync()) == 1;
+    }
+
+    private static async Task<bool> ColumnExistsAsync(
+        SqliteConnection connection,
+        string table,
+        string column)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"SELECT COUNT(*) FROM pragma_table_info('{table}') WHERE name = $column;";
+        command.Parameters.AddWithValue("$column", column);
         return Convert.ToInt32(await command.ExecuteScalarAsync()) == 1;
     }
 }

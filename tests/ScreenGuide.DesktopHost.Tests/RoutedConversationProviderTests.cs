@@ -1,6 +1,7 @@
 using ScreenGuide.AI.Core;
 using ScreenGuide.Core.Ai;
 using ScreenGuide.Core.Conversations;
+using ScreenGuide.Core.Memories;
 using ScreenGuide.Core.Sessions;
 using ScreenGuide.DesktopHost.Runtime;
 
@@ -384,6 +385,82 @@ public sealed class RoutedConversationProviderTests
         Assert.Equal(0, settings.LoadCount);
     }
 
+    [Fact]
+    public async Task UserSelectedMemoryUsesPromptV2AndAnEphemeralJsonUserMessageBeforeCurrentInput()
+    {
+        var conversationId = Guid.NewGuid();
+        var history = new HistoryStore(conversationId);
+        history.Add(ConversationMessageRole.User, "当前问题");
+        var provider = new RecordingChatProvider(
+            "provider-a",
+            "model-a",
+            "https://provider-a.example/v1/chat");
+        var invocations = new RecordingInvocationStore();
+        var routed = new RoutedConversationProvider(
+            history,
+            new ModelRouter(
+                new ChatProviderRegistry([provider]),
+                new MutableAiSettingsStore("provider-a", "model-a")),
+            await LoadRepositoryPromptsAsync(),
+            invocations,
+            TimeProvider.System);
+        var memoryId = Guid.NewGuid();
+        const string context = "{\"type\":\"USER_SELECTED_MEMORY_CONTEXT_V1\",\"items\":[{\"category\":\"UserPreference\",\"scope\":\"Global\",\"title\":\"称呼\",\"body\":\"叫我小元\"}]}";
+        var audit = MemoryAudit(provider, memoryId);
+
+        var result = await routed.SendAsync(new ConversationProviderRequest(
+            conversationId,
+            Guid.NewGuid(),
+            "当前问题",
+            null,
+            Guid.NewGuid(),
+            Frozen(provider),
+            new MemoryOutboundEnvelope(context, audit)));
+
+        Assert.Equal(ConversationProviderOutcome.Succeeded, result.Outcome);
+        var request = Assert.Single(provider.Requests);
+        Assert.Equal("2", request.Prompt?.Version);
+        Assert.Equal([context, "当前问题"], request.Messages.Select(message => message.Content));
+        Assert.All(request.Messages, message => Assert.Equal(ChatMessageRole.User, message.Role));
+        var invocation = Assert.Single(invocations.Started);
+        Assert.Equal(audit.ConsentId, invocation.MemoryOutbound?.ConsentId);
+        Assert.Equal(memoryId, Assert.Single(invocation.MemoryOutbound!.Items).MemoryId);
+        Assert.DoesNotContain(memoryId.ToString("D"), context, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task MemoryDerivedHistoryWithAnotherOriginFailsBeforePromptInvocationOrProvider()
+    {
+        var conversationId = Guid.NewGuid();
+        var history = new HistoryStore(conversationId);
+        history.Add(ConversationMessageRole.User, "旧问题");
+        history.Add(ConversationMessageRole.Assistant, "旧回答");
+        history.AddDerivedTurn(MemoryAudit(
+            new RecordingChatProvider("provider-a", "model-a", "https://a.example"),
+            Guid.NewGuid()));
+        history.Add(ConversationMessageRole.User, "继续");
+        var providerB = new RecordingChatProvider(
+            "provider-b",
+            "model-b",
+            "https://b.example/v1/chat");
+        var invocations = new RecordingInvocationStore();
+        var routed = new RoutedConversationProvider(
+            history,
+            new ModelRouter(
+                new ChatProviderRegistry([providerB]),
+                new MutableAiSettingsStore("provider-b", "model-b")),
+            await LoadRepositoryPromptsAsync(),
+            invocations,
+            TimeProvider.System);
+
+        var result = await routed.SendAsync(Request(conversationId, "继续", providerB));
+
+        Assert.Equal(ConversationProviderOutcome.Failed, result.Outcome);
+        Assert.Equal(MemoryOutboundErrorCodes.DerivedHistoryRouteMismatch, result.FailureCode);
+        Assert.Empty(providerB.Requests);
+        Assert.Empty(invocations.Started);
+    }
+
     private static ConversationProviderRequest Request(
         Guid conversationId,
         string message,
@@ -406,6 +483,29 @@ public sealed class RoutedConversationProviderTests
         SendsDataOffDevice = provider.Descriptor.SendsDataOffDevice,
         FrozenAtUtc = DateTimeOffset.UtcNow
     };
+
+    private static MemoryOutboundAuditMetadata MemoryAudit(
+        IChatModelProvider provider,
+        Guid memoryId)
+    {
+        var now = DateTimeOffset.UtcNow;
+        return new MemoryOutboundAuditMetadata(
+            Guid.NewGuid(),
+            now,
+            now.AddMinutes(10),
+            now,
+            provider.Descriptor.ProviderId,
+            provider.Descriptor.Models[0].ModelId,
+            MemoryOutboundContract.NormalizeHttpsOrigin(provider.Descriptor.DataDestination),
+            "chat.general",
+            "2",
+            "82A414F8A3E829F957BA77614A993C908119D8C6A499C1B4717E2139DF656B67",
+            null,
+            [new MemoryOutboundItemReference(memoryId, 1)],
+            1,
+            9,
+            new string('B', 64));
+    }
 
     private static Task<PromptRegistry> LoadRepositoryPromptsAsync() =>
         PromptRegistry.LoadAsync(Path.Combine(FindRepositoryRoot(), "prompts", "runtime"));
@@ -451,12 +551,15 @@ public sealed class RoutedConversationProviderTests
         }
     }
 
-    private sealed class RecordingChatProvider(string providerId, string modelId) : IChatModelProvider
+    private sealed class RecordingChatProvider(
+        string providerId,
+        string modelId,
+        string? dataDestination = null) : IChatModelProvider
     {
         public ChatProviderDescriptor Descriptor { get; } = new(
             providerId,
             providerId,
-            $"{providerId} test destination",
+            dataDestination ?? $"{providerId} test destination",
             true,
             [new ChatModelDescriptor(modelId, modelId, ChatModelCapabilities.None)]);
 
@@ -766,6 +869,7 @@ public sealed class RoutedConversationProviderTests
     private sealed class HistoryStore(Guid conversationId) : IConversationStore
     {
         private readonly List<ConversationMessageRecord> _messages = [];
+        private readonly List<ConversationTurnRecord> _turns = [];
 
         public void Add(ConversationMessageRole role, string content) => _messages.Add(new ConversationMessageRecord
         {
@@ -782,11 +886,27 @@ public sealed class RoutedConversationProviderTests
             CancellationToken cancellationToken = default) =>
             Task.FromResult<IReadOnlyList<ConversationMessageRecord>>(_messages.ToArray());
 
+        public void AddDerivedTurn(MemoryOutboundAuditMetadata memoryOutbound) => _turns.Add(new ConversationTurnRecord
+        {
+            Id = Guid.NewGuid(),
+            ConversationId = conversationId,
+            SequenceNumber = _turns.Count + 1,
+            UserMessageId = _messages[0].Id,
+            AssistantMessageId = _messages[1].Id,
+            IdempotencyKey = Guid.NewGuid().ToString("N"),
+            Status = ConversationTurnStatus.Succeeded,
+            StartedAtUtc = DateTimeOffset.UtcNow,
+            CompletedAtUtc = DateTimeOffset.UtcNow,
+            MemoryDerived = true,
+            MemoryOutbound = memoryOutbound
+        });
+
         public Task InitializeAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task CreateConversationAsync(ConversationRecord conversation, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<ConversationRecord?> GetConversationAsync(Guid id, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<IReadOnlyList<ConversationRecord>> GetConversationsAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
-        public Task<IReadOnlyList<ConversationTurnRecord>> GetTurnsAsync(Guid id, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<IReadOnlyList<ConversationTurnRecord>> GetTurnsAsync(Guid id, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<ConversationTurnRecord>>(_turns.ToArray());
         public Task<ConversationTurnRegistration> StartTurnAsync(Guid id, Guid turnId, string message, string key, DateTimeOffset startedAt, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task RecordProviderStartedAsync(Guid id, Guid turnId, string thread, int processId, DateTimeOffset startedAt, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task CompleteTurnAsync(Guid id, Guid turnId, string reply, string? providerMessageId, DateTimeOffset completedAt, CancellationToken cancellationToken = default) => throw new NotSupportedException();

@@ -1,3 +1,5 @@
+using ScreenGuide.Core.Memories;
+
 namespace ScreenGuide.Core.Ai;
 
 public enum AiInvocationPurpose
@@ -76,4 +78,6 @@ public sealed record AiInvocationRecord
     public string? ProviderRequestId { get; init; }
 
     public string? FailureCode { get; init; }
+
+    public MemoryOutboundAuditMetadata? MemoryOutbound { get; init; }
 }

@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using ScreenGuide.AI.Core;
 using ScreenGuide.Core.Ai;
 using ScreenGuide.Core.Conversations;
+using ScreenGuide.Core.Memories;
 using ScreenGuide.Core.Sessions;
 using ScreenGuide.DesktopProtocol;
 
@@ -20,7 +21,8 @@ public sealed class RoutedConversationProvider(
     TimeProvider timeProvider) : IConversationProvider
 {
     private const string ChatPromptId = "chat.general";
-    private const string ChatPromptVersion = "1";
+    private const string DefaultChatPromptVersion = "1";
+    private const string MemoryChatPromptVersion = "2";
     private const int MaximumHistoryCharacters = 200_000;
     private readonly ConcurrentDictionary<Guid, ActiveRoute> _activeConversations = new();
 
@@ -75,7 +77,27 @@ public sealed class RoutedConversationProvider(
                 "这条消息保存的 AI 路由与当前注册信息不一致，因此没有发送。请重新发送一条新消息。");
         }
 
-        var prompt = prompts.GetRequired(ChatPromptId, ChatPromptVersion, route.ProviderId);
+        var turns = await conversations.GetTurnsAsync(request.ConversationId, cancellationToken)
+            .ConfigureAwait(false);
+        if (!HistoryOriginMatches(turns, route))
+        {
+            return Failed(
+                MemoryOutboundErrorCodes.DerivedHistoryRouteMismatch,
+                "这段对话包含由另一条 AI 路由生成的记忆相关回答。为避免跨服务泄露，请新建话题后再发送。");
+        }
+
+        var promptVersion = request.MemoryOutbound is null
+            ? DefaultChatPromptVersion
+            : MemoryChatPromptVersion;
+        var prompt = prompts.GetRequired(ChatPromptId, promptVersion, route.ProviderId);
+        if (request.MemoryOutbound is { } memoryOutbound
+            && !ValidateMemoryOutbound(memoryOutbound, route, prompt))
+        {
+            return Failed(
+                MemoryOutboundErrorCodes.ConsentStale,
+                "记忆出站确认与当前冻结路由或 Prompt 不一致，因此没有发送。请重新检查并确认。");
+        }
+
         var history = await conversations.GetMessagesAsync(request.ConversationId, cancellationToken)
             .ConfigureAwait(false);
         var messages = BuildHistory(request, history);
@@ -93,7 +115,8 @@ public sealed class RoutedConversationProvider(
             PromptContentHash = prompt.ContentSha256,
             DataDestination = route.DataDestination,
             Status = AiInvocationStatus.Running,
-            StartedAtUtc = timeProvider.GetUtcNow()
+            StartedAtUtc = timeProvider.GetUtcNow(),
+            MemoryOutbound = request.MemoryOutbound?.Audit
         };
         await invocations.StartAsync(invocation, cancellationToken).ConfigureAwait(false);
 
@@ -275,7 +298,8 @@ public sealed class RoutedConversationProvider(
         }
 
         var characterCount = 0;
-        var messages = new ChatMessage[history.Count];
+        var memoryOffset = request.MemoryOutbound is null ? 0 : 1;
+        var messages = new ChatMessage[history.Count + memoryOffset];
         for (var index = 0; index < history.Count; index++)
         {
             var item = history[index];
@@ -297,7 +321,29 @@ public sealed class RoutedConversationProvider(
                         IsRetryable: false));
             }
 
-            messages[index] = new ChatMessage(
+            var targetIndex = index;
+            if (request.MemoryOutbound is { } memoryOutbound && index == history.Count - 1)
+            {
+                characterCount = checked(characterCount + memoryOutbound.SerializedContext.Length);
+                if (characterCount > MaximumHistoryCharacters)
+                {
+                    throw new ChatModelException(
+                        "model-router",
+                        null,
+                        new ChatModelError(
+                            ChatModelErrorKind.InvalidRequest,
+                            "conversation_context_too_large",
+                            "当前会话内容过长，请新建一个会话后继续。",
+                            IsRetryable: false));
+                }
+
+                messages[index] = new ChatMessage(
+                    ChatMessageRole.User,
+                    memoryOutbound.SerializedContext);
+                targetIndex++;
+            }
+
+            messages[targetIndex] = new ChatMessage(
                 item.Role switch
                 {
                     ConversationMessageRole.User => ChatMessageRole.User,
@@ -309,6 +355,64 @@ public sealed class RoutedConversationProvider(
         }
 
         return messages;
+    }
+
+    private static bool ValidateMemoryOutbound(
+        MemoryOutboundEnvelope envelope,
+        FrozenChatModelRoute route,
+        PromptDefinition prompt)
+    {
+        if (string.IsNullOrWhiteSpace(envelope.SerializedContext)
+            || envelope.SerializedContext.Length > MemoryOutboundLimits.MaximumSerializedContextCharacters
+            || envelope.Audit.ItemCount is < MemoryOutboundLimits.MinimumItems or > MemoryOutboundLimits.MaximumItems
+            || envelope.Audit.Items.Count != envelope.Audit.ItemCount
+            || envelope.Audit.TotalCharacters > MemoryOutboundLimits.MaximumContentCharacters
+            || !string.Equals(envelope.Audit.ProviderId, route.ProviderId, StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(envelope.Audit.ModelId, route.ModelId, StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(envelope.Audit.PromptId, prompt.PromptId, StringComparison.Ordinal)
+            || !string.Equals(envelope.Audit.PromptVersion, prompt.Version, StringComparison.Ordinal)
+            || !string.Equals(envelope.Audit.PromptContentHash, prompt.ContentSha256, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        try
+        {
+            return string.Equals(
+                envelope.Audit.DestinationOrigin,
+                MemoryOutboundContract.NormalizeHttpsOrigin(route.DataDestination),
+                StringComparison.OrdinalIgnoreCase);
+        }
+        catch (MemoryValidationException)
+        {
+            return false;
+        }
+    }
+
+    private static bool HistoryOriginMatches(
+        IReadOnlyList<ConversationTurnRecord> turns,
+        FrozenChatModelRoute route)
+    {
+        var derived = turns.Where(turn => turn.MemoryDerived).ToArray();
+        if (derived.Length == 0)
+        {
+            return true;
+        }
+
+        string origin;
+        try
+        {
+            origin = MemoryOutboundContract.NormalizeHttpsOrigin(route.DataDestination);
+        }
+        catch (MemoryValidationException)
+        {
+            return false;
+        }
+
+        return derived.All(turn => turn.MemoryOutbound is { } audit
+            && string.Equals(audit.ProviderId, route.ProviderId, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(audit.ModelId, route.ModelId, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(audit.DestinationOrigin, origin, StringComparison.OrdinalIgnoreCase));
     }
 
     private static ConversationProviderResult Cancelled() => new(

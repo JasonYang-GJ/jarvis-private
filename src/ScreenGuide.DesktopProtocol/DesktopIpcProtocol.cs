@@ -8,9 +8,9 @@ namespace ScreenGuide.DesktopProtocol;
 
 public static class DesktopProtocolVersion
 {
-    public const int Current = 9;
+    public const int Current = 10;
 
-    public const int MinimumSupported = 1;
+    public const int MinimumSupported = 10;
 }
 
 public static class DesktopApiMethods
@@ -41,6 +41,7 @@ public static class DesktopApiMethods
     public const string StartNewSession = "sessions.new";
     public const string SetCurrentSession = "sessions.select";
     public const string SubmitSessionInput = "sessions.submit";
+    public const string ConfirmMemoryOutbound = "sessions.memory-outbound.confirm";
     public const string ProvideSessionProject = "sessions.context.project";
     public const string ProvideSessionFile = "sessions.context.file";
     public const string RespondSessionWindowConsent = "sessions.context.window-consent";

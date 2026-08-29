@@ -1,6 +1,6 @@
-# 元枢当前架构（V0.4.0 冻结基线 / V2 阶段 3 R2 候选 As-Built）
+# 元枢当前架构（V0.4.0 冻结基线 / V2 阶段 3 R3 候选 As-Built）
 
-> 本文描述 V0.4.0 Stage 2 冻结结构、已集成 S3-R1 及其上的 S3-R2 当前候选。更新时间：2026-08-30。阶段 3 记忆边界见 `docs/V2_STAGE3_CONTROLLABLE_MEMORY_DESIGN.md`；V0.4.0 精确身份仍见 `docs/baselines/V0.4.0_STAGE2.md`。
+> 本文描述 V0.4.0 Stage 2 冻结结构、已集成 S3-R1/R2 及其上的 S3-R3 当前候选。更新时间：2026-08-30。
 
 ## 1. 运行结构
 
@@ -15,7 +15,7 @@ DesktopClient（WPF）
   ├─ 设置页：普通聊天 Provider/Model、数据去向、凭据和健康状态
   ├─ 设置页：用户显式管理的本机长期记忆及主动本地预览（不自动发给模型）
   └─ 编程 Agent 独立显示为 Codex
-  ↓ 当前用户 Named Pipe，protocol v9
+  ↓ 当前用户 Named Pipe，protocol v10
 DesktopHost
   ├─ SessionCoordinator（唯一会话与前台 Turn 协调入口）
   │    ├─ ConversationService → RoutedConversationProvider
@@ -59,13 +59,13 @@ V0.4.0 Stage 2 正式源码由下面这些内容共同组成：
 | 模块 | 当前职责 | 不应承担 |
 |---|---|---|
 | `ScreenGuide.DesktopClient` | WPF 界面、托盘、可见确认、Host 生命周期、语音交互、Session 状态呈现 | 直接执行动作、直接读写 SQLite、直接调用 Codex |
-| `ScreenGuide.DesktopProtocol` | IPC protocol v9、Session/AI/显式记忆 DTO、当前用户 Pipe 客户端、跨 IPC 敏感文本清理 | 业务规则、权限判断、Key 或记忆密文持久化和模型调用 |
+| `ScreenGuide.DesktopProtocol` | IPC protocol v10、Session/AI/显式记忆与逐 Turn 出站确认 DTO、当前用户 Pipe 客户端、跨 IPC 敏感文本清理 | 业务规则、权限判断、Key 或记忆密文持久化和模型调用 |
 | `ScreenGuide.DesktopHost` | SessionCoordinator、业务编排、MemoryService、权限、恢复、审计、增量状态通知 | 让 UI 绕过 Host Service 直接访问存储 |
 | `ScreenGuide.AI.Core` | 供应商无关 Chat Model 契约、Provider Registry、Model Router、Prompt Registry、语义建议校验及确定性意图规划 | Provider HTTP/CLI 细节、自由执行工具或隐式授予权限 |
 | `ScreenGuide.AI.DeepSeek` | 固定 DeepSeek 官方目的地的普通聊天 HTTP/SSE Provider、错误和健康映射 | 保存 Key、决定 Session、编程 Agent 或电脑权限 |
 | `ScreenGuide.AI.Qwen` | 固定阿里云百炼兼容端点、仅 `qwen3.7-plus` 的普通聊天 HTTP/SSE Provider；消费但不公开 reasoning，拒绝 Tool Call | 自动 fallback、保存 Key、改变 Session/权限或替代 Codex 编程 Agent |
 | `ScreenGuide.Core` | Session、任务、对话、AI 调用审计、权限和独立 Memory Ledger 领域契约 | Windows、SQLite 或模型供应商细节 |
-| `ScreenGuide.Persistence` | SQLite schema v9 与 Session/任务/对话/AI 调用/受保护记忆存储 | UI、Key、记忆明文和模型调用 |
+| `ScreenGuide.Persistence` | SQLite schema v10 与 Session/任务/对话/AI 调用/受保护记忆及安全出站审计元数据存储 | UI、Key、记忆明文和模型调用 |
 | `ScreenGuide.Skills.*` | 可替换技能接口与 Windows 低风险动作 | 任意桌面控制 |
 | `ScreenGuide.Vision.*` | 单窗口捕获、敏感窗口拒绝、本机 OCR/UIA | 全桌面捕获和云端上传 |
 | `ScreenGuide.Voice.Windows` | 本机采音、离线识别、回声过滤、朗读 | 保存录音或后台隐蔽监听 |
@@ -166,7 +166,7 @@ V0.4.0 Stage 2 正式源码由下面这些内容共同组成：
 
 ## 8. IPC、AI 设置与状态更新
 
-- DesktopClient 与 DesktopHost 使用当前 Windows 用户专属 Named Pipe，当前候选 protocol v9，单条消息最大 4 MiB；v9 在 v8 的 AI 设置方法之外新增显式记忆 CRUD。
+- DesktopClient 与 DesktopHost 使用当前 Windows 用户专属 Named Pipe，当前候选 protocol v10；v10 增加逐 Turn 记忆选择和出站确认，v9/v10 不混用。
 - v8 新增 `ai.settings.get`、`ai.chat-route.set`、`ai.credentials.set/delete` 和 `ai.provider.health`。AI 设置 DTO 只返回 Provider/Model、能力、数据目的地、健康和配置状态，绝不返回完整 Key。
 - 普通聊天路由存入本地 `settings/ai-settings.json`；Key 单独存入 DPAPI 密文。设置页明确显示同一 Session 的既有历史会随下一条消息发送给新 Provider；当前运行回答不切换。
 - `sessions.wait` 使用最长 30 秒的本机长轮询：只有 ChangeVersion 变化或等待超时才返回快照；DesktopClient 当前使用 20 秒等待。
@@ -213,7 +213,7 @@ Codex 普通聊天适配器由 `CodexChatModelProvider` 承载，但生产策略
 
 确定性 Planner 仍是第一入口。只有它仍判断为普通聊天且文字命中有限候选条件时，`ModelSemanticIntentSuggester` 才把当前用户文字交给当前 Chat Provider。输出必须是严格五字段结构，并经过枚举、长度、置信度（至少 0.80）、歧义和缺失上下文组合校验。模型 target 不被采用；Host 只把通过门槛的意图类型重新交给确定性 Planner，并用真实本机上下文重算目标、上下文、确认和权限。失败、非法输出或低置信度都回到保守路径。
 
-电脑动作继续采用确定性 Intent Planner + Capability Policy + 白名单 Skill，不是开放式模型 Tool Calling。S3-R1 新增用户显式管理的本机加密记忆账本，S3-R2 只增加用户主动触发的确定性本地预览；两者都不参与模型 Prompt、语义建议、动作授权或 Session 状态。当前仍没有 RAG、向量数据库、自动画像或复杂多 Agent 产品编排。
+电脑动作继续采用确定性 Intent Planner + Capability Policy + 白名单 Skill，不是开放式模型 Tool Calling。S3-R1 新增本机加密记忆账本，S3-R2 增加确定性本地预览；S3-R3 只允许用户在单个普通聊天 Turn 查看完整出站内容后单次确认，且 `intent.semantic`、动作授权与 Capability Policy 永不接收记忆。
 
 ### 本机长期记忆账本
 
@@ -225,7 +225,7 @@ Codex 普通聊天适配器由 `CodexChatModelProvider` 承载，但生产策略
 
 - 默认运行数据：`%LOCALAPPDATA%\ScreenGuide\V01`。
 - SQLite：`state\tasking.db`；日志：`logs`；Codex 辅助数据：`codex`；任务证据：`evidence`；AI 路由：`settings\ai-settings.json`；DPAPI 密文：`secrets\<provider>.bin`。
-- schema v9 在完整 schema v8 上新增独立 `memory_items` 表和状态/项目索引，不改变 Session、Conversation、Task、`ai_invocations` 或凭据结构。v8 → v9 前生成 `tasking.pre-v9-from-v8-<时间>.backup.db`，再以单事务创建结构；失败不记录 v9。
+- schema v9 新增独立 `memory_items`；schema v10 只给 Session Turn、Conversation Turn 和 `ai_invocations` 增加内容无关的 consent/来源/manifest 元数据。v9 → v10 前生成唯一 pre-v10 备份并事务迁移；失败保持 v9。
 - V0.4.0 只支持 schema v8，不能打开 schema v9。回滚 Stage 2 必须保留 v9 主库并使用 pre-v9 备份或隔离数据目录；继续回滚 Stage 1 时仍遵守既有 pre-v8 边界，不能用当前源码冒充冻结历史版本。
 - 重启恢复：运行中的 Session Turn 先标记 `Interrupted`，再与已有 Conversation Turn / Task 终态对账；可安全等待的项目补充状态保留，不自动执行原请求。
 - 单窗口像素和录音不写入数据库或仓库；单窗口像素在本机分析后清零。
@@ -256,6 +256,6 @@ Codex 普通聊天适配器由 `CodexChatModelProvider` 承载，但生产策略
 - 每轮重建完整 Conversation 历史并以字符上限保护；Token 预算、摘要和上下文裁剪尚未实现。
 - DPAPI 保护静态密文，但不抵御已取得同一 Windows 用户权限、管理员权限或运行时内存读取能力的恶意程序。
 - 语义意图只覆盖有限候选句式，保守回退是有意安全选择；不能把它宣传为完整自然语言操作理解。
-- S3-R2 只支持显式本机预览；没有模型注入、RAG、向量库、自动/后台检索或跨 Session 自动个性化。Conversation 历史和 `ai_invocations` 仍不是长期记忆。
-- schema v9 对 V0.4.0 的 schema v8 向前不兼容；Stage 2 回滚必须管理 pre-v9 备份，Stage 1 回滚仍需对应 pre-v8 备份。
+- S3-R3 只支持逐 Turn 明确选择、完整可见确认和单次普通聊天发送；没有自动注入、RAG、向量库、后台检索或跨 Session 自动个性化。Conversation 历史和 `ai_invocations` 仍不是长期记忆。
+- schema v10 对 v9/V0.4.0 schema v8 向前不兼容；回滚必须保留 v10 主库并管理 pre-v10/pre-v9 备份，Stage 1 回滚仍需对应 pre-v8 备份。
 - 安装包未签名，语音模型未纳入可分发方案。

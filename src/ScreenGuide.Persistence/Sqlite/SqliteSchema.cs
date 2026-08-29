@@ -533,4 +533,49 @@ internal static class SqliteSchema
         CREATE INDEX ix_memory_items_project
             ON memory_items(project_id, status, updated_at_utc);
         """;
+
+    public const string CreateVersion10 = """
+        ALTER TABLE session_turns ADD COLUMN memory_outbound_state TEXT NULL;
+        ALTER TABLE session_turns ADD COLUMN memory_consent_id TEXT NULL;
+        ALTER TABLE session_turns ADD COLUMN memory_prepared_at_utc TEXT NULL;
+        ALTER TABLE session_turns ADD COLUMN memory_expires_at_utc TEXT NULL;
+        ALTER TABLE session_turns ADD COLUMN memory_consumed_at_utc TEXT NULL;
+        ALTER TABLE session_turns ADD COLUMN memory_origin_provider_id TEXT NULL;
+        ALTER TABLE session_turns ADD COLUMN memory_origin_model_id TEXT NULL;
+        ALTER TABLE session_turns ADD COLUMN memory_origin_destination TEXT NULL;
+        ALTER TABLE session_turns ADD COLUMN memory_prompt_id TEXT NULL;
+        ALTER TABLE session_turns ADD COLUMN memory_prompt_version TEXT NULL;
+        ALTER TABLE session_turns ADD COLUMN memory_prompt_hash TEXT NULL;
+        ALTER TABLE session_turns ADD COLUMN memory_project_id TEXT NULL;
+        ALTER TABLE session_turns ADD COLUMN memory_item_refs_json TEXT NULL;
+        ALTER TABLE session_turns ADD COLUMN memory_item_count INTEGER NULL;
+        ALTER TABLE session_turns ADD COLUMN memory_total_characters INTEGER NULL;
+        ALTER TABLE session_turns ADD COLUMN memory_manifest_hash TEXT NULL;
+
+        ALTER TABLE conversation_turns ADD COLUMN memory_derived INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE conversation_turns ADD COLUMN memory_consent_id TEXT NULL;
+        ALTER TABLE conversation_turns ADD COLUMN memory_origin_provider_id TEXT NULL;
+        ALTER TABLE conversation_turns ADD COLUMN memory_origin_model_id TEXT NULL;
+        ALTER TABLE conversation_turns ADD COLUMN memory_origin_destination TEXT NULL;
+        ALTER TABLE conversation_turns ADD COLUMN memory_item_refs_json TEXT NULL;
+        ALTER TABLE conversation_turns ADD COLUMN memory_item_count INTEGER NULL;
+        ALTER TABLE conversation_turns ADD COLUMN memory_total_characters INTEGER NULL;
+        ALTER TABLE conversation_turns ADD COLUMN memory_manifest_hash TEXT NULL;
+
+        ALTER TABLE ai_invocations ADD COLUMN memory_consent_id TEXT NULL;
+        ALTER TABLE ai_invocations ADD COLUMN memory_origin_provider_id TEXT NULL;
+        ALTER TABLE ai_invocations ADD COLUMN memory_origin_model_id TEXT NULL;
+        ALTER TABLE ai_invocations ADD COLUMN memory_origin_destination TEXT NULL;
+        ALTER TABLE ai_invocations ADD COLUMN memory_item_refs_json TEXT NULL;
+        ALTER TABLE ai_invocations ADD COLUMN memory_item_count INTEGER NULL;
+        ALTER TABLE ai_invocations ADD COLUMN memory_total_characters INTEGER NULL;
+        ALTER TABLE ai_invocations ADD COLUMN memory_manifest_hash TEXT NULL;
+
+        CREATE INDEX ix_session_turns_memory_consent
+            ON session_turns(memory_consent_id);
+        CREATE INDEX ix_conversation_turns_memory_origin
+            ON conversation_turns(memory_origin_provider_id, memory_origin_model_id);
+        CREATE INDEX ix_ai_invocations_memory_consent
+            ON ai_invocations(memory_consent_id);
+        """;
 }
