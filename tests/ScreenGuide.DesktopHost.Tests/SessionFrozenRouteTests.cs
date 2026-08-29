@@ -450,6 +450,128 @@ public sealed class SessionFrozenRouteTests
         await host.StopAsync();
     }
 
+    [Theory]
+    [InlineData("replacement-input")]
+    [InlineData("new-topic")]
+    [InlineData("session-switch")]
+    public async Task CancellationWinningBeforeConsentPublicationPreventsLateRepublish(
+        string interruption)
+    {
+        await using var environment = DesktopHostTestEnvironment.Create();
+        var observer = new BlockingMemoryConsentPublicationObserver();
+        var provider = new SwitchingRecordingProvider(
+            "provider-a",
+            "model-a",
+            _ => Task.FromResult("不应调用"),
+            "https://provider-a.example/v1/chat");
+        using var host = environment.BuildHost(services =>
+        {
+            services.AddSingleton<IAiSettingsStore>(
+                new MutableSettingsStore(Route("provider-a", "model-a")));
+            services.AddSingleton(new ChatProviderRegistry([provider]));
+            services.AddSingleton<ISessionMemoryConsentPublicationObserver>(observer);
+        });
+        await host.StartAsync();
+        var coordinator = host.Services.GetRequiredService<SessionCoordinator>();
+        IDesktopApiClient client = new DesktopApiClient(environment.Options.PipeName);
+        var memoryService = host.Services.GetRequiredService<MemoryService>();
+        var sessionStore = host.Services.GetRequiredService<ISessionStore>();
+        var invocations = host.Services.GetRequiredService<IAiInvocationStore>();
+        const string oldTitle = "并发清理标题";
+        const string oldBody = "并发清理正文";
+        var oldMemory = await memoryService.CreateAsync(MemoryDraft.Create(
+            MemoryCategory.UserPreference,
+            MemoryScope.Global,
+            oldTitle,
+            oldBody,
+            null,
+            environment.TimeProvider.GetUtcNow()));
+        var replacementMemory = await memoryService.CreateAsync(MemoryDraft.Create(
+            MemoryCategory.Decision,
+            MemoryScope.Global,
+            "替换请求标题",
+            "替换请求正文",
+            null,
+            environment.TimeProvider.GetUtcNow()));
+        var originalSession = await coordinator.StartNewAsync("发布竞态清理");
+        Guid? alternateSessionId = null;
+        if (string.Equals(interruption, "session-switch", StringComparison.Ordinal))
+        {
+            alternateSessionId = (await client.StartNewSessionAsync("并发切换目标")).SessionId;
+            _ = await client.SetCurrentSessionAsync(originalSession.Session.Id);
+        }
+
+        var submitted = await client.SubmitSessionInputAsync(new SessionInputRequestDto(
+            "尚未发布确认的旧输入",
+            "Text",
+            $"memory-publication-race-{interruption}",
+            originalSession.Session.Id,
+            MemoryItems:
+            [
+                new MemoryOutboundItemReferenceDto(oldMemory.Metadata.Id, oldMemory.Metadata.Version)
+            ]));
+        await observer.BeforePublishReached.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        async Task<SessionSnapshotDto> InterruptAsync()
+        {
+            if (string.Equals(interruption, "replacement-input", StringComparison.Ordinal))
+            {
+                _ = await client.SubmitSessionInputAsync(new SessionInputRequestDto(
+                    "替换并发旧输入",
+                    "Text",
+                    "memory-publication-race-replacement-new-turn",
+                    originalSession.Session.Id,
+                    MemoryItems:
+                    [
+                        new MemoryOutboundItemReferenceDto(
+                            replacementMemory.Metadata.Id,
+                            replacementMemory.Metadata.Version)
+                    ]));
+                return (await client.GetCurrentSessionAsync())!;
+            }
+
+            return string.Equals(interruption, "new-topic", StringComparison.Ordinal)
+                ? await client.StartNewSessionAsync("并发新话题")
+                : await client.SetCurrentSessionAsync(alternateSessionId!.Value);
+        }
+
+        var interruptionTask = InterruptAsync();
+        await observer.CancellationObserved.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        observer.ReleasePublication();
+        _ = await interruptionTask;
+
+        var snapshot = string.Equals(interruption, "replacement-input", StringComparison.Ordinal)
+            ? (await client.GetCurrentSessionAsync())!
+            : await client.SetCurrentSessionAsync(originalSession.Session.Id);
+        Assert.Equal(0, observer.AfterPublishForBlockedTurn);
+        Assert.DoesNotContain(
+            snapshot.MemoryOutboundConsents ?? [],
+            item => item.TurnId == submitted.TurnId);
+        Assert.DoesNotContain(
+            oldTitle,
+            (snapshot.MemoryOutboundConsents ?? [])
+                .SelectMany(item => item.Items)
+                .SelectMany(item => new[] { item.Title, item.Body }));
+        Assert.DoesNotContain(
+            oldBody,
+            (snapshot.MemoryOutboundConsents ?? [])
+                .SelectMany(item => item.Items)
+                .SelectMany(item => new[] { item.Title, item.Body }));
+        var cancelled = await sessionStore.GetTurnAsync(submitted.TurnId);
+        Assert.Equal(SessionTurnPhase.Cancelled, cancelled?.Phase);
+        Assert.DoesNotContain(snapshot.ActiveTurns, item => item.Id == submitted.TurnId);
+        var stale = await Assert.ThrowsAsync<DesktopApiException>(() =>
+            client.ConfirmMemoryOutboundAsync(
+                originalSession.Session.Id,
+                submitted.TurnId,
+                observer.ConsentId,
+                confirmed: true));
+        Assert.Equal(MemoryOutboundErrorCodes.ConsentStale, stale.Error.Code);
+        Assert.Empty(provider.Requests);
+        Assert.Empty(await invocations.GetForSessionTurnAsync(submitted.TurnId));
+        await host.StopAsync();
+    }
+
     [Fact]
     public async Task ExactMemoryConsentExpiryFailsBeforeInvocationOrProvider()
     {
@@ -881,6 +1003,58 @@ public sealed class SessionFrozenRouteTests
             AiSettings value,
             CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
+    }
+
+    private sealed class BlockingMemoryConsentPublicationObserver
+        : ISessionMemoryConsentPublicationObserver
+    {
+        private Guid? _blockedTurnId;
+
+        public TaskCompletionSource BeforePublishReached { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource CancellationObserved { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        private TaskCompletionSource PublicationReleased { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public Guid ConsentId { get; private set; }
+
+        public int AfterPublishForBlockedTurn { get; private set; }
+
+        public async Task BeforePublishAsync(
+            Guid turnId,
+            Guid consentId,
+            CancellationToken cancellationToken)
+        {
+            if (_blockedTurnId is not null)
+            {
+                return;
+            }
+
+            _blockedTurnId = turnId;
+            ConsentId = consentId;
+            using var registration = cancellationToken.Register(
+                () => CancellationObserved.TrySetResult());
+            BeforePublishReached.TrySetResult();
+            await PublicationReleased.Task;
+        }
+
+        public Task AfterPublishAsync(
+            Guid turnId,
+            Guid consentId,
+            CancellationToken cancellationToken)
+        {
+            if (turnId == _blockedTurnId && consentId == ConsentId)
+            {
+                AfterPublishForBlockedTurn++;
+            }
+
+            return Task.CompletedTask;
+        }
+
+        public void ReleasePublication() => PublicationReleased.TrySetResult();
     }
 
     private sealed class MetadataOnlyProvider(string providerId, string modelId) : IChatModelProvider

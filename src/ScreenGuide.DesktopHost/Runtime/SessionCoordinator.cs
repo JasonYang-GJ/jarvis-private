@@ -22,6 +22,13 @@ public sealed record LocalSessionSnapshot(
 
 public sealed record SessionSubmitResult(Guid SessionId, Guid TurnId, bool WasDuplicate);
 
+public interface ISessionMemoryConsentPublicationObserver
+{
+    Task BeforePublishAsync(Guid turnId, Guid consentId, CancellationToken cancellationToken);
+
+    Task AfterPublishAsync(Guid turnId, Guid consentId, CancellationToken cancellationToken);
+}
+
 /// <summary>
 /// Desktop Host 中唯一的当前会话与前台 Turn 协调入口。
 /// 它只协调状态和取消，不拥有任何项目、文件、窗口或电脑动作授权。
@@ -35,6 +42,7 @@ public sealed class SessionCoordinator(
     ModelRouter modelRouter,
     PromptRegistry prompts,
     MemoryService memories,
+    IEnumerable<ISessionMemoryConsentPublicationObserver> memoryConsentPublicationObservers,
     TimeProvider timeProvider)
 {
     private const int MaximumInputLength = 20_000;
@@ -1377,35 +1385,72 @@ public sealed class SessionCoordinator(
                 selection);
             var prepared = await memories.PrepareOutboundAsync(request, cancellationToken)
                 .ConfigureAwait(false);
-            _preparedMemoryConsents[turn.Id] = prepared;
+            foreach (var observer in memoryConsentPublicationObservers)
+            {
+                await observer.BeforePublishAsync(turn.Id, prepared.ConsentId, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+
+            var gate = _turnGates.GetOrAdd(turn.Id, static _ => new SemaphoreSlim(1, 1));
+            await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
             {
-                _ = await TransitionAsync(
-                        turn.Id,
-                        current => current with
-                        {
-                            WorkKind = SessionWorkKind.Conversation,
-                            IntentKind = "Conversation",
-                            Phase = SessionTurnPhase.WaitingForMemoryOutboundConsent,
-                            MissingContext = SessionMissingContext.None,
-                            MemoryOutboundState = MemoryOutboundConsentState.WaitingForMemoryOutboundConsent,
-                            MemoryOutbound = prepared.ToAuditMetadata(),
-                            ResultSummary = "请检查本次将发送的完整记忆内容、AI 服务和目的地后再确认。",
-                            FailureCode = null,
-                            FailureMessage = null
-                        },
-                        CancellationToken.None)
+                cancellationToken.ThrowIfCancellationRequested();
+                var latestSession = await sessionStore.GetSessionAsync(session.Id, cancellationToken)
                     .ConfigureAwait(false);
-                _requestedMemorySelections.TryRemove(turn.Id, out _);
+                var latestTurn = await sessionStore.GetTurnAsync(turn.Id, cancellationToken)
+                    .ConfigureAwait(false);
+                if (latestSession is null
+                    || latestTurn is null
+                    || !CanPublishPreparedConsent(latestSession, latestTurn, prepared, selection))
+                {
+                    throw new MemoryServiceException(
+                        MemoryOutboundErrorCodes.ConsentStale,
+                        "记忆出站确认已失效，请重新发送并检查。");
+                }
+
+                _preparedMemoryConsents[turn.Id] = prepared;
+                try
+                {
+                    _ = await TransitionAsync(
+                            turn.Id,
+                            current => current with
+                            {
+                                WorkKind = SessionWorkKind.Conversation,
+                                IntentKind = "Conversation",
+                                Phase = SessionTurnPhase.WaitingForMemoryOutboundConsent,
+                                MissingContext = SessionMissingContext.None,
+                                MemoryOutboundState = MemoryOutboundConsentState.WaitingForMemoryOutboundConsent,
+                                MemoryOutbound = prepared.ToAuditMetadata(),
+                                ResultSummary = "请检查本次将发送的完整记忆内容、AI 服务和目的地后再确认。",
+                                FailureCode = null,
+                                FailureMessage = null
+                            },
+                            CancellationToken.None)
+                        .ConfigureAwait(false);
+                    _requestedMemorySelections.TryRemove(turn.Id, out _);
+                }
+                catch
+                {
+                    _preparedMemoryConsents.TryRemove(turn.Id, out _);
+                    throw;
+                }
             }
-            catch
+            finally
             {
-                _preparedMemoryConsents.TryRemove(turn.Id, out _);
-                throw;
+                gate.Release();
+            }
+
+            foreach (var observer in memoryConsentPublicationObservers)
+            {
+                await observer.AfterPublishAsync(turn.Id, prepared.ConsentId, cancellationToken)
+                    .ConfigureAwait(false);
             }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
+            _preparedMemoryConsents.TryRemove(turn.Id, out _);
+            _requestedMemorySelections.TryRemove(turn.Id, out _);
             throw;
         }
         catch (MemoryServiceException exception)
@@ -1425,6 +1470,65 @@ public sealed class SessionCoordinator(
                     },
                     CancellationToken.None)
                 .ConfigureAwait(false);
+        }
+    }
+
+    private bool CanPublishPreparedConsent(
+        SessionRecord session,
+        SessionTurnRecord turn,
+        MemoryOutboundPreparedConsent prepared,
+        IReadOnlyList<MemoryOutboundItemReference> selection)
+    {
+        if (!session.IsCurrent
+            || prepared.CoordinatorInstanceId != Guid.Parse(_coordinatorInstanceId)
+            || prepared.SessionId != session.Id
+            || prepared.TurnId != turn.Id
+            || prepared.TurnVersion != turn.Version
+            || turn.Phase != SessionTurnPhase.Understanding
+            || SessionTurnPhases.IsTerminal(turn.Phase)
+            || turn.CancellationRequested
+            || turn.MemoryOutboundState != MemoryOutboundConsentState.None
+            || turn.MemoryOutbound is not null
+            || prepared.ProjectId != (turn.ProjectId ?? session.SelectedProjectId)
+            || !MemorySelectionMatches(turn, selection)
+            || prepared.Items.Count != selection.Count
+            || prepared.Items.Zip(selection).Any(pair =>
+                pair.First.Id != pair.Second.MemoryId
+                || pair.First.Version != pair.Second.ExpectedVersion))
+        {
+            return false;
+        }
+
+        if (turn.FrozenRoute is not
+            {
+                Status: SessionTurnRouteStatus.Ready,
+                ProviderId: { Length: > 0 } providerId,
+                ModelId: { Length: > 0 } modelId,
+                DataDestination: { Length: > 0 } destination
+            }
+            || !string.Equals(providerId, prepared.ProviderId, StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(modelId, prepared.ModelId, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        try
+        {
+            var prompt = prompts.GetRequired("chat.general", "2", providerId);
+            return string.Equals(
+                    MemoryOutboundContract.NormalizeHttpsOrigin(destination),
+                    prepared.DestinationOrigin,
+                    StringComparison.OrdinalIgnoreCase)
+                && string.Equals(prompt.PromptId, prepared.PromptId, StringComparison.Ordinal)
+                && string.Equals(prompt.Version, prepared.PromptVersion, StringComparison.Ordinal)
+                && string.Equals(
+                    prompt.ContentSha256,
+                    prepared.PromptContentHash,
+                    StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return false;
         }
     }
 
