@@ -203,14 +203,15 @@ public sealed class QwenChatModelProviderTests
     }
 
     [Fact]
-    public async Task HealthUsesTheExactFixedEndpointAndAFreshCredentialLease()
+    public async Task HealthUsesTheOfficialPermissionEndpointAndAFreshCredentialLease()
     {
         var credentials = new TestCredentialStore("fake-qwen-key");
         var observed = new List<Uri?>();
         var handler = new StubHttpMessageHandler((request, _) =>
         {
+            Assert.Equal(HttpMethod.Get, request.Method);
             observed.Add(request.RequestUri);
-            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK));
+            return Task.FromResult(PermissionResponse());
         });
         await using var provider = new QwenChatModelProvider(credentials, handler);
 
@@ -218,12 +219,192 @@ public sealed class QwenChatModelProviderTests
         var second = await provider.CheckHealthAsync();
 
         Assert.All(observed, uri => Assert.Equal(
-            "https://dashscope.aliyuncs.com/api/v1/models?model=qwen3.7-plus&page_no=1&page_size=1",
+            "https://dashscope.aliyuncs.com/api/v1/models/permissions?model=qwen3.7-plus&authorization_scope=AUTHORIZED&action=INFERENCE&page_no=1&page_size=1",
             uri?.AbsoluteUri));
         Assert.Equal(2, credentials.OpenLeaseCount);
         Assert.Equal(2, handler.SendCount);
+        Assert.True(credentials.LastLeaseDisposed);
         Assert.Equal(ChatProviderHealthState.Healthy, first.State);
         Assert.Equal(ChatProviderHealthState.Healthy, second.State);
+        Assert.DoesNotContain("FAKE_HEALTH_REQUEST_ID_MUST_NOT_ESCAPE", first.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("fake-qwen-key", first.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task HealthAcceptsExactPermissionWhenOptionalScopeAndActionEchoesAreAbsent()
+    {
+        var handler = new StubHttpMessageHandler((_, _) => Task.FromResult(PermissionResponse(
+            """{"success":true,"code":"","total":1,"page_no":1,"page_size":1,"data":[{"model":"qwen3.7-plus"}]}""")));
+        await using var provider = new QwenChatModelProvider(
+            new TestCredentialStore("fake-qwen-key"),
+            handler);
+
+        var health = await provider.CheckHealthAsync();
+
+        Assert.Equal(ChatProviderHealthState.Healthy, health.State);
+        Assert.Equal(1, handler.SendCount);
+    }
+
+    [Theory]
+    [MemberData(nameof(InvalidPermissionResponses))]
+    public async Task HealthFailsClosedForInvalidPermissionModelOrPaging(string json)
+    {
+        var handler = new StubHttpMessageHandler((_, _) => Task.FromResult(PermissionResponse(json)));
+        await using var provider = new QwenChatModelProvider(
+            new TestCredentialStore("fake-qwen-key"),
+            handler);
+
+        var health = await provider.CheckHealthAsync();
+
+        Assert.Equal(ChatProviderHealthState.Unavailable, health.State);
+        Assert.True(health.IsConfigured);
+        Assert.Equal(1, handler.SendCount);
+        Assert.DoesNotContain(json, health.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("https://dashscope.aliyuncs.com/api/v1/models?model=qwen3.7-plus&page_no=1&page_size=1", 200)]
+    [InlineData("https://proxy.invalid/api/v1/models/permissions?model=qwen3.7-plus", 200)]
+    [InlineData("https://dashscope.aliyuncs.com/api/v1/models/permissions?model=qwen3.7-plus&authorization_scope=AUTHORIZED&action=INFERENCE&page_no=1&page_size=1", 302)]
+    public async Task HealthRejectsOldEndpointOtherHostAndRedirect(string finalUri, int statusCode)
+    {
+        var handler = new StubHttpMessageHandler((_, _) => Task.FromResult(
+            PermissionResponse(
+                ValidPermissionJson,
+                (HttpStatusCode)statusCode,
+                new Uri(finalUri, UriKind.Absolute))));
+        await using var provider = new QwenChatModelProvider(
+            new TestCredentialStore("fake-qwen-key"),
+            handler);
+
+        var health = await provider.CheckHealthAsync();
+
+        Assert.Equal(ChatProviderHealthState.Unavailable, health.State);
+        Assert.Equal(1, handler.SendCount);
+    }
+
+    [Theory]
+    [InlineData(400, ChatProviderHealthState.Unavailable)]
+    [InlineData(401, ChatProviderHealthState.Unavailable)]
+    [InlineData(402, ChatProviderHealthState.Degraded)]
+    [InlineData(403, ChatProviderHealthState.Unavailable)]
+    [InlineData(404, ChatProviderHealthState.Unavailable)]
+    [InlineData(408, ChatProviderHealthState.Unavailable)]
+    [InlineData(429, ChatProviderHealthState.Degraded)]
+    [InlineData(500, ChatProviderHealthState.Unavailable)]
+    [InlineData(504, ChatProviderHealthState.Unavailable)]
+    public async Task HealthMapsHttpStatusWithoutRetry(int statusCode, ChatProviderHealthState expected)
+    {
+        const string responseSentinel = "HEALTH_RESPONSE_MUST_NOT_ESCAPE";
+        var handler = new StubHttpMessageHandler((_, _) => Task.FromResult(
+            PermissionResponse(
+                $$"""{"success":false,"code":"remote","message":"{{responseSentinel}}"}""",
+                (HttpStatusCode)statusCode)));
+        await using var provider = new QwenChatModelProvider(
+            new TestCredentialStore("fake-qwen-key"),
+            handler);
+
+        var health = await provider.CheckHealthAsync();
+
+        Assert.Equal(expected, health.State);
+        Assert.Equal(1, handler.SendCount);
+        Assert.DoesNotContain(responseSentinel, health.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task HealthMapsExplicitBalanceFailureToDegraded()
+    {
+        var handler = new StubHttpMessageHandler((_, _) => Task.FromResult(
+            PermissionResponse("""{"success":false,"code":"Arrearage","message":"balance unavailable"}""")));
+        await using var provider = new QwenChatModelProvider(
+            new TestCredentialStore("fake-qwen-key"),
+            handler);
+
+        var health = await provider.CheckHealthAsync();
+
+        Assert.Equal(ChatProviderHealthState.Degraded, health.State);
+        Assert.Equal(1, handler.SendCount);
+    }
+
+    [Fact]
+    public async Task HealthMapsNetworkFailureToUnavailableWithoutRetry()
+    {
+        var handler = new StubHttpMessageHandler((_, _) =>
+            throw new HttpRequestException("NETWORK_SENTINEL_MUST_NOT_ESCAPE"));
+        await using var provider = new QwenChatModelProvider(
+            new TestCredentialStore("fake-qwen-key"),
+            handler);
+
+        var health = await provider.CheckHealthAsync();
+
+        Assert.Equal(ChatProviderHealthState.Unavailable, health.State);
+        Assert.Equal(1, handler.SendCount);
+        Assert.DoesNotContain("NETWORK_SENTINEL_MUST_NOT_ESCAPE", health.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task HealthRejectsOversizedPermissionResponseWithoutLeakingIt()
+    {
+        const string responseSentinel = "OVERSIZED_PERMISSION_BODY_MUST_NOT_ESCAPE";
+        var handler = new StubHttpMessageHandler((_, _) => Task.FromResult(
+            PermissionResponse(ValidPermissionJson + new string(' ', 256) + responseSentinel)));
+        await using var provider = new QwenChatModelProvider(
+            new TestCredentialStore("fake-qwen-key"),
+            handler,
+            QwenProviderOptions.Default with { MaxErrorBodyCharacters = 128 });
+
+        var health = await provider.CheckHealthAsync();
+
+        Assert.Equal(ChatProviderHealthState.Unavailable, health.State);
+        Assert.Equal(1, handler.SendCount);
+        Assert.DoesNotContain(responseSentinel, health.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    public async Task HealthWithoutUsableCredentialIsNotConfiguredAndSendsNoHttp(string? secret)
+    {
+        var credentials = new TestCredentialStore(secret);
+        var handler = new StubHttpMessageHandler((_, _) => throw new InvalidOperationException("HTTP must not run."));
+        await using var provider = new QwenChatModelProvider(credentials, handler);
+
+        var health = await provider.CheckHealthAsync();
+
+        Assert.Equal(ChatProviderHealthState.NotConfigured, health.State);
+        Assert.False(health.IsConfigured);
+        Assert.Equal(0, handler.SendCount);
+        Assert.Equal(secret is not null, credentials.LastLeaseDisposed);
+    }
+
+    [Fact]
+    public async Task HealthCancellationPropagatesAndClearsHeaderBeforeDisposingLease()
+    {
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        HttpRequestMessage? observedRequest = null;
+        string? observedAuthorization = null;
+        var credentials = new TestCredentialStore("fake-qwen-key");
+        var handler = new StubHttpMessageHandler(async (request, cancellationToken) =>
+        {
+            observedRequest = request;
+            observedAuthorization = request.Headers.Authorization?.ToString();
+            started.TrySetResult();
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            return PermissionResponse();
+        });
+        await using var provider = new QwenChatModelProvider(credentials, handler);
+        using var cancellation = new CancellationTokenSource();
+
+        var check = provider.CheckHealthAsync(cancellation.Token);
+        await started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        cancellation.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => check);
+
+        Assert.Equal("Bearer fake-qwen-key", observedAuthorization);
+        Assert.NotNull(observedRequest);
+        Assert.Null(observedRequest.Headers.Authorization);
+        Assert.True(credentials.LastLeaseDisposed);
+        Assert.Equal(1, handler.SendCount);
     }
 
     [Fact]
@@ -385,6 +566,41 @@ public sealed class QwenChatModelProviderTests
     private static HttpResponseMessage SseResponse(string content) => new(HttpStatusCode.OK)
     {
         Content = new StringContent(content, Encoding.UTF8, "text/event-stream")
+    };
+
+    private const string ValidPermissionJson =
+        """{"success":true,"code":"","request_id":"FAKE_HEALTH_REQUEST_ID_MUST_NOT_ESCAPE","total":1,"page_no":1,"page_size":1,"data":[{"model":"qwen3.7-plus","authorization_scope":"AUTHORIZED","action":"INFERENCE"}]}""";
+
+    private static HttpResponseMessage PermissionResponse() => new(HttpStatusCode.OK)
+    {
+        Content = new StringContent(
+            ValidPermissionJson,
+            Encoding.UTF8,
+            "application/json")
+    };
+
+    private static HttpResponseMessage PermissionResponse(
+        string json,
+        HttpStatusCode statusCode = HttpStatusCode.OK,
+        Uri? finalUri = null) => new(statusCode)
+    {
+        Content = new StringContent(json, Encoding.UTF8, "application/json"),
+        RequestMessage = finalUri is null ? null : new HttpRequestMessage(HttpMethod.Get, finalUri)
+    };
+
+    public static TheoryData<string> InvalidPermissionResponses => new()
+    {
+        """{"success":true,"code":"","total":0,"page_no":1,"page_size":1,"data":[]}""",
+        """{"success":true,"code":"","total":2,"page_no":1,"page_size":1,"data":[{"model":"qwen3.7-plus"},{"model":"qwen3.7-plus"}]}""",
+        """{"success":true,"code":"","total":1,"page_no":1,"page_size":1,"data":[{"model":"qwen-other"}]}""",
+        """{"success":true,"code":"","total":1,"page_no":1,"page_size":1,"data":[{"model":"qwen3.7-plus","authorization_scope":"UNAUTHORIZED"}]}""",
+        """{"success":true,"code":"","total":1,"page_no":1,"page_size":1,"data":[{"model":"qwen3.7-plus","action":"TRAINING"}]}""",
+        """{"success":true,"code":"","total":1,"page_no":2,"page_size":1,"data":[{"model":"qwen3.7-plus"}]}""",
+        """{"success":true,"code":"","total":1,"page_no":1,"page_size":2,"data":[{"model":"qwen3.7-plus"}]}""",
+        """{"success":false,"code":"","total":1,"page_no":1,"page_size":1,"data":[{"model":"qwen3.7-plus"}]}""",
+        """{"success":true,"code":"permission_denied","total":1,"page_no":1,"page_size":1,"data":[{"model":"qwen3.7-plus"}]}""",
+        """{"success":true,"code":"","total":1,"page_no":1,"page_size":1,"data":{}}""",
+        "{"
     };
 
     private sealed class StubHttpMessageHandler(

@@ -16,8 +16,8 @@ public sealed class QwenChatModelProvider : IChatModelProvider
     private static readonly Uri ChatCompletionsEndpoint = new(
         "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
         UriKind.Absolute);
-    private static readonly Uri ModelsEndpoint = new(
-        "https://dashscope.aliyuncs.com/api/v1/models?model=qwen3.7-plus&page_no=1&page_size=1",
+    private static readonly Uri ModelPermissionsEndpoint = new(
+        "https://dashscope.aliyuncs.com/api/v1/models/permissions?model=qwen3.7-plus&authorization_scope=AUTHORIZED&action=INFERENCE&page_no=1&page_size=1",
         UriKind.Absolute);
 
     private readonly IProviderCredentialStore _credentialStore;
@@ -126,7 +126,7 @@ public sealed class QwenChatModelProvider : IChatModelProvider
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeout.Token);
         try
         {
-            using var request = new HttpRequestMessage(HttpMethod.Get, ModelsEndpoint);
+            using var request = new HttpRequestMessage(HttpMethod.Get, ModelPermissionsEndpoint);
             request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
             HttpResponseMessage response;
             using (lease)
@@ -150,7 +150,7 @@ public sealed class QwenChatModelProvider : IChatModelProvider
 
             using (response)
             {
-                if (!HasExactFinalUri(response, ModelsEndpoint)
+                if (!HasExactFinalUri(response, ModelPermissionsEndpoint)
                     || (int)response.StatusCode is >= 300 and < 400)
                 {
                     return Health(
@@ -162,17 +162,28 @@ public sealed class QwenChatModelProvider : IChatModelProvider
 
                 if (response.IsSuccessStatusCode)
                 {
+                    var successfulPermission = await ReadHealthPermissionAsync(response.Content, linked.Token)
+                        .ConfigureAwait(false);
                     return Health(
-                        ChatProviderHealthState.Healthy,
+                        successfulPermission.IsAuthorized
+                            ? ChatProviderHealthState.Healthy
+                            : successfulPermission.IsBalanceIssue
+                                ? ChatProviderHealthState.Degraded
+                                : ChatProviderHealthState.Unavailable,
                         true,
-                        "千问已配置并可连接。",
+                        successfulPermission.IsAuthorized
+                            ? "千问已配置并具有所选模型的推理权限。"
+                            : successfulPermission.IsBalanceIssue
+                                ? "千问账户余额不足或计费状态不可用。"
+                                : "千问当前没有返回所选模型的有效推理权限。",
                         checkedAt);
                 }
 
-                _ = await ReadBoundedErrorAsync(response.Content, linked.Token).ConfigureAwait(false);
+                var failurePermission = await ReadHealthPermissionAsync(response.Content, linked.Token)
+                    .ConfigureAwait(false);
                 var status = (int)response.StatusCode;
                 return Health(
-                    status is 402 or 429
+                    status is 402 or 429 || failurePermission.IsBalanceIssue
                         ? ChatProviderHealthState.Degraded
                         : ChatProviderHealthState.Unavailable,
                     true,
@@ -201,6 +212,150 @@ public sealed class QwenChatModelProvider : IChatModelProvider
             return Health(ChatProviderHealthState.Unavailable, true, "现在无法连接千问。", checkedAt);
         }
     }
+
+    private async Task<HealthPermissionEvidence> ReadHealthPermissionAsync(
+        HttpContent? content,
+        CancellationToken cancellationToken)
+    {
+        if (content is null)
+        {
+            return default;
+        }
+
+        await using var stream = await content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+        using var reader = new StreamReader(
+            stream,
+            Encoding.UTF8,
+            detectEncodingFromByteOrderMarks: true,
+            bufferSize: Math.Min(_options.MaxErrorBodyCharacters, 4096),
+            leaveOpen: false);
+        var buffer = new char[_options.MaxErrorBodyCharacters + 1];
+        var length = 0;
+        try
+        {
+            while (length < buffer.Length)
+            {
+                var read = await reader.ReadAsync(buffer.AsMemory(length), cancellationToken)
+                    .ConfigureAwait(false);
+                if (read == 0)
+                {
+                    break;
+                }
+
+                length += read;
+            }
+
+            if (length == 0 || length > _options.MaxErrorBodyCharacters)
+            {
+                return default;
+            }
+
+            using var document = JsonDocument.Parse(buffer.AsMemory(0, length));
+            var root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object)
+            {
+                return default;
+            }
+
+            var balanceIssue = IsExplicitBalanceIssue(root);
+            if (!root.TryGetProperty("success", out var success)
+                || success.ValueKind is not JsonValueKind.True
+                || !root.TryGetProperty("code", out var code)
+                || code.ValueKind != JsonValueKind.String
+                || code.GetString() is not "")
+            {
+                return new HealthPermissionEvidence(false, balanceIssue);
+            }
+
+            if (!TryReadExactInt32(root, "total", 1)
+                || !TryReadExactInt32(root, "page_no", 1)
+                || !TryReadExactInt32(root, "page_size", 1)
+                || !root.TryGetProperty("data", out var data)
+                || data.ValueKind != JsonValueKind.Array
+                || data.GetArrayLength() != 1)
+            {
+                return new HealthPermissionEvidence(false, balanceIssue);
+            }
+
+            var permission = data[0];
+            if (permission.ValueKind != JsonValueKind.Object
+                || !HasExactString(permission, "model", DefaultModelId)
+                || !HasOptionalExactString(permission, "authorization_scope", "AUTHORIZED")
+                || !HasOptionalExactString(permission, "action", "INFERENCE"))
+            {
+                return new HealthPermissionEvidence(false, balanceIssue);
+            }
+
+            return new HealthPermissionEvidence(true, false);
+        }
+        catch (JsonException)
+        {
+            return default;
+        }
+        finally
+        {
+            Array.Clear(buffer);
+        }
+    }
+
+    private static bool TryReadExactInt32(JsonElement element, string propertyName, int expected) =>
+        element.TryGetProperty(propertyName, out var value)
+        && value.ValueKind == JsonValueKind.Number
+        && value.TryGetInt32(out var actual)
+        && actual == expected;
+
+    private static bool HasExactString(JsonElement element, string propertyName, string expected) =>
+        element.TryGetProperty(propertyName, out var value)
+        && value.ValueKind == JsonValueKind.String
+        && string.Equals(value.GetString(), expected, StringComparison.Ordinal);
+
+    private static bool HasOptionalExactString(
+        JsonElement element,
+        string propertyName,
+        string expected) =>
+        !element.TryGetProperty(propertyName, out var value)
+        || value.ValueKind == JsonValueKind.String
+        && string.Equals(value.GetString(), expected, StringComparison.Ordinal);
+
+    private static bool IsExplicitBalanceIssue(JsonElement root)
+    {
+        string? code = null;
+        string? message = null;
+        if (root.TryGetProperty("code", out var codeElement)
+            && codeElement.ValueKind == JsonValueKind.String)
+        {
+            code = codeElement.GetString();
+        }
+
+        if (root.TryGetProperty("message", out var messageElement)
+            && messageElement.ValueKind == JsonValueKind.String)
+        {
+            message = messageElement.GetString();
+        }
+
+        if (root.TryGetProperty("error", out var error)
+            && error.ValueKind == JsonValueKind.Object)
+        {
+            if (error.TryGetProperty("code", out codeElement)
+                && codeElement.ValueKind == JsonValueKind.String)
+            {
+                code = codeElement.GetString();
+            }
+
+            if (error.TryGetProperty("message", out messageElement)
+                && messageElement.ValueKind == JsonValueKind.String)
+            {
+                message = messageElement.GetString();
+            }
+        }
+
+        return IsBalanceValue(code) || IsBalanceValue(message);
+    }
+
+    private static bool IsBalanceValue(string? value) =>
+        Contains(value, "balance")
+        || Contains(value, "insufficient")
+        || Contains(value, "arrearage");
 
     private async Task<ChatModelResponse> CompleteCoreAsync(
         ChatModelRequest request,
@@ -991,6 +1146,8 @@ public sealed class QwenChatModelProvider : IChatModelProvider
             }
         }
     }
+
+    private readonly record struct HealthPermissionEvidence(bool IsAuthorized, bool IsBalanceIssue);
 
     private sealed record ProviderErrorDetails(string? Code, string? Message);
 }
