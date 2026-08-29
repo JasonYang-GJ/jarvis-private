@@ -4,7 +4,7 @@
 
 ## 当前状态
 
-- 当前源码与功能基线：V0.4.0 / V2 阶段 2，标签 `v0.4.0-stage2`。标签目标提交、annotated tag object 和安装包哈希按两提交冻结流程回填到 `docs/baselines/V0.4.0_STAGE2.md`。完整同 AppId 安装生命周期尚待干净机验收，因此安装包未获对外分发放行。
+- 当前源码与功能基线：V0.4.0 / V2 阶段 2，标签 `v0.4.0-stage2` 指向 `33b5859dcaa697bacd5edc5036a58d162b723a0e`，annotated tag object 为 `47a2b3b70fc22904954e2291470e809e58303eca`。干净标签源码构建安装包 SHA-256 为 `222DC720E677202BBCAEC6D507F48ACFA8B2FCA31535FF7B03010DF80EE7DEE9`。完整同 AppId 安装生命周期尚待干净机验收，因此安装包未获对外分发放行。
 - V2 阶段 1“统一会话中枢”已经通过；363/363 自动化和实际 Release DesktopClient + DesktopHost 的真实桌面验收均通过。
 - V0.2.1 标签 `v0.2.1-baseline` 保留为上一版回滚点；回滚必须同时使用 pre-v7 备份或隔离数据目录。
 - V2 阶段 2“可替换 AI 大脑与模型路由”已通过：统一 Chat Model、Provider Registry、Model Router、Prompt Registry、DPAPI、安全停用的 Codex 普通聊天适配器、DeepSeek/千问普通聊天 Provider、设置 UI/IPC、语义建议和 schema v8 AI 调用审计。
@@ -61,6 +61,7 @@
 - Qwen `qwen3.7-plus` 在 `f7506a6013d83318572c63865607d78861e669bc` 通过真实 Health、Ordinary Chat 和 Cancellation：3/3 HTTP、2/2 模型请求，DeepSeek/Codex 普通聊天请求 0，无 retry/fallback/resend。
 - R4 离线 Release 定向 QA 173/173 通过；集成后 Qwen 56/56、R4 Runner 61/61、设置/无 fallback/工作负载隔离 3/3 通过。
 - 普通聊天选为 Qwen 时，真实 Codex 编程回归仅 1 Task/1 attempt，指定文件为唯一 Git 变化，指定 `dotnet test` 通过，任务时窗内 `ai_invocations=0`。
+- 最终标签源码 locked restore、Client/Host win-x64 publish 和安装包编译通过；发布目录 538 个文件，Client/Host ProductVersion 均绑定 `33b5859d...`，安装包 64,128,304 bytes 且未签名。
 
 ## 阶段 1 已确认验收
 
@@ -83,7 +84,6 @@
 ## 尚未解决
 
 - 没有用户长期记忆、RAG、向量数据库或跨 Session 相关信息检索。
-- 阶段 2 的千问真实账户/网络和实际 Release DesktopClient 尚未完成最终验收；Codex 普通聊天有意安全停用且不是发布目标。不能把模拟 Provider 测试写成真实可用。
 - 固定 Prompt 评测集已建立，但真实模型质量、Token/成本对比和长期回归趋势尚未形成发布证据。
 - Codex 普通聊天只保留 `codex-default` 描述并在生产策略下失败关闭，不提供真实普通聊天模型或 Usage；独立 Codex 编程 Agent 继续保留。
 - Provider 切换会把同一 Conversation 既有历史发送到新的数据目的地；UI 已提示，真实用户是否理解仍需验收。
@@ -92,7 +92,7 @@
 - Session 快照仍随完整会话历史增长；`SessionCoordinator.cs`、`MainWindow.xaml.cs` 和部分 SQLite Store 较大。
 - 单窗口授权已比较句柄、进程名和标题，但尚未保存进程 ID / 启动时间；同程序同标题窗口的极端句柄复用风险留待后续加固。
 - 安装包无数字签名；语音模型分发与许可证待定。
-- 阶段 3 尚未启动；阶段 2 未最终通过前不得进入长期记忆开发。
+- 阶段 3 尚未启动；必须等待项目负责人单独批准后才可进入长期记忆开发。
 
 ## 更新规则
 

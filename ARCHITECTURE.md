@@ -230,6 +230,8 @@ Codex 普通聊天适配器由 `CodexChatModelProvider` 承载，但生产策略
 - V0.3.0 冻结证据保持不变：全量自动化 363/363；实际 Release DesktopClient + DesktopHost + 真实 Codex Provider + 真实 Windows Notepad 已完成阶段 1 的 10 轮连续对话、3 次真取消和项目/文件/单窗口场景，证据目录为 `%LOCALAPPDATA%\ScreenGuide\Experiments\DesktopV01\20260823-184833`。
 - 阶段 2 离线 Release 定向 QA 173/173 通过；集成后 Qwen 56/56、R4 Runner 61/61、设置/无 fallback/工作负载隔离 3/3 通过。R1/R2/R3 已通过证据被复用，没有机械重跑全矩阵。
 - 阶段 2 普通聊天发布目标是 DeepSeek + 千问。DeepSeek 既有真实证据已冻结；Qwen 真实 Health、Ordinary Chat 和 Cancellation 通过。Codex 普通聊天不属于发布目标，普通聊天选 Qwen 时的独立真实 Codex 编程 Task 回归已通过。
+- 阶段 2 标签 `v0.4.0-stage2` 指向 `33b5859dcaa697bacd5edc5036a58d162b723a0e`，annotated tag object 为 `47a2b3b70fc22904954e2291470e809e58303eca`。独立干净标签源码 locked restore 和 Release build 通过，发布目录 538 个文件；Client/Host ProductVersion 均为 `0.4.0+33b5859dcaa697bacd5edc5036a58d162b723a0e`，FileVersion 均为 `0.4.0.0`。
+- V0.4.0 安装包 `artifacts/release/元枢-V0.4.0-安装包.exe` 为 64,128,304 bytes，SHA-256 为 `222DC720E677202BBCAEC6D507F48ACFA8B2FCA31535FF7B03010DF80EE7DEE9`，未签名。标签后的仅文档证据提交不改变标签源码或二进制来源。
 - 阶段 1 标签 `v0.3.0-stage1` 继续指向源码提交 `0a8cd9e164c35b86f67ffd94b9e0f17c312a2576`，annotated tag object 为 `9fc790ade57fa2d3c18bc5ee84e8dc9e7018aa89`。
 - 标签源码的 locked restore 通过。发布目录共 533 个文件；Client/Host ProductVersion 为 `0.3.0+0a8cd9e164c35b86f67ffd94b9e0f17c312a2576`，FileVersion 为 `0.3.0.0`。
 - 安装包 `artifacts/release/元枢-V0.3.0-安装包.exe` 为 64,039,656 bytes，SHA-256 为 `42C609E130B29C6D96784C2B0266473B6D3417BE0DC5FE9C81C7517CB100FCC7`，未签名。标签后的仅文档证据提交不改变标签源码或二进制来源。

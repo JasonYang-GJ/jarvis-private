@@ -27,6 +27,8 @@
 - 精确 SHA `f7506a6013d83318572c63865607d78861e669bc` 上 Qwen Health、Ordinary Chat 和 Cancellation 真实验收通过：3/3 HTTP、2/2 模型请求，无 retry/fallback/resend，取消三层终态均为 `Cancelled`。
 - R4 离线 Release 定向 QA 173/173 通过；集成后 Qwen 56/56、R4 Runner 61/61、设置/无 fallback/工作负载隔离 3/3 通过。
 - 普通聊天保存为 Qwen 时，真实 Codex 编程回归仅 1 个 Task/1 次 attempt，指定文件为唯一 Git 变化，指定 `dotnet test` 真实通过，普通聊天 Provider 请求为 0。
+- `v0.4.0-stage2` annotated tag 指向 `33b5859dcaa697bacd5edc5036a58d162b723a0e`；干净标签源码 locked restore、Client/Host publish 和安装包编译通过。
+- V0.4.0 安装包为 64,128,304 bytes，SHA-256 `222DC720E677202BBCAEC6D507F48ACFA8B2FCA31535FF7B03010DF80EE7DEE9`，`NotSigned`；本机未执行同 AppId 安装生命周期，尚未获对外分发放行。
 - 长期记忆、RAG、向量数据库、用户画像、复杂多 Agent 产品功能、手机端、云端远程控制和大规模 Tool Calling 不属于本条目。
 
 ## 0.3.0 - 2026-08-24（V2 阶段 1：通过）

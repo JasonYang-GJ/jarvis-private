@@ -30,6 +30,8 @@ V2 阶段 2“可替换 AI 大脑与模型路由”已完成。普通聊天发�
 | 依赖锁冻结 | locked restore PASS；受影响项目 6/6 Release build，0 warnings / 0 errors |
 | 普通聊天选 Qwen 时的真实 Codex Task | 1 Task / 1 attempt，`Succeeded/Verified`，普通聊天 Provider 请求 0 |
 | Git 集成 | fast-forward only，ancestry / clean PASS |
+| 最终冻结 | tag `v0.4.0-stage2` → `33b5859d...`；干净标签源码 locked restore / Release build PASS |
+| 安装包身份 | 64,128,304 bytes；SHA-256 `222DC720E677202BBCAEC6D507F48ACFA8B2FCA31535FF7B03010DF80EE7DEE9`；`NotSigned` |
 
 详细冻结身份、标签目标、安装包哈希和回滚边界以 [V0.4.0 Stage 2 基线](V0.4.0_STAGE2.md) 为准。
 
