@@ -345,7 +345,13 @@ public sealed class SessionCoordinatorAdversarialTests
     {
         await using var environment = DesktopHostTestEnvironment.Create();
         var foreground = new MutableForegroundProvider(
-            new ForegroundWindowSnapshot(8501, "窗口 A", "stage1-a", DateTimeOffset.UtcNow));
+            new ForegroundWindowSnapshot(
+                8501,
+                "窗口 A",
+                "stage1-a",
+                85010,
+                new DateTimeOffset(2026, 8, 30, 1, 0, 0, TimeSpan.Zero),
+                DateTimeOffset.UtcNow));
         var capture = new CountingCaptureService();
         var vision = new CountingVisionProvider();
         using var host = environment.BuildHost(services =>
@@ -374,6 +380,8 @@ public sealed class SessionCoordinatorAdversarialTests
             8502,
             "窗口 B",
             "stage1-b",
+            85020,
+            new DateTimeOffset(2026, 8, 30, 1, 1, 0, TimeSpan.Zero),
             DateTimeOffset.UtcNow);
         var retargeted = await client.RespondSessionWindowConsentAsync(
             session.SessionId,
@@ -394,7 +402,13 @@ public sealed class SessionCoordinatorAdversarialTests
     {
         await using var environment = DesktopHostTestEnvironment.Create();
         var foreground = new MutableForegroundProvider(
-            new ForegroundWindowSnapshot(8601, "授权测试窗口", "stage1-consent", DateTimeOffset.UtcNow));
+            new ForegroundWindowSnapshot(
+                8601,
+                "授权测试窗口",
+                "stage1-consent",
+                86010,
+                new DateTimeOffset(2026, 8, 30, 1, 0, 0, TimeSpan.Zero),
+                DateTimeOffset.UtcNow));
         var capture = new CountingCaptureService();
         var vision = new CountingVisionProvider();
         using var host = environment.BuildHost(services =>

@@ -43,6 +43,55 @@ public sealed class WindowVisionBoundaryTests
     }
 
     [Fact]
+    public async Task IdentityChangeBeforeStructuredReadFailsClosed()
+    {
+        var original = Snapshot();
+        var changed = original with { ProcessId = original.ProcessId + 1 };
+        var windows = new SequenceForegroundProvider(changed);
+        var capture = new RecordingCaptureService();
+        var vision = new RecordingVisionProvider();
+        var automation = new RecordingAutomation();
+        var service = new WindowUnderstandingService(
+            capture,
+            vision,
+            automation,
+            windows,
+            NullLogger<WindowUnderstandingService>.Instance);
+
+        var error = await Assert.ThrowsAsync<WindowIdentityException>(() =>
+            service.DescribeAsync(original, explicitConsent: true));
+
+        Assert.Equal(WindowIdentityErrorCodes.Changed, error.Code);
+        Assert.Equal(0, automation.DescribeCalls);
+        Assert.Equal(0, capture.Calls);
+        Assert.Null(vision.Target);
+    }
+
+    [Fact]
+    public async Task IdentityChangeAfterCaptureClearsFrameAndSkipsAnalysis()
+    {
+        var original = Snapshot();
+        var changed = original with { ProcessStartTimeUtc = original.ProcessStartTimeUtc.AddSeconds(1) };
+        var windows = new SequenceForegroundProvider(original, original, changed);
+        var ownedBytes = new byte[] { 7, 8, 9 };
+        var capture = new RecordingCaptureService(ownedBytes);
+        var vision = new RecordingVisionProvider();
+        var service = new WindowUnderstandingService(
+            capture,
+            vision,
+            new FixedAutomation(),
+            windows,
+            NullLogger<WindowUnderstandingService>.Instance);
+
+        var error = await Assert.ThrowsAsync<WindowIdentityException>(() =>
+            service.DescribeAsync(original, explicitConsent: true));
+
+        Assert.Equal(WindowIdentityErrorCodes.Changed, error.Code);
+        Assert.Null(vision.Target);
+        Assert.All(ownedBytes, value => Assert.Equal(0, value));
+    }
+
+    [Fact]
     public async Task CancellationStopsAnalysisAndClearsFrame()
     {
         var ownedBytes = new byte[] { 6, 5, 4 };
@@ -61,11 +110,50 @@ public sealed class WindowVisionBoundaryTests
     {
         var backend = new RecordingBackend();
         var service = new WindowsSingleWindowCaptureService(
-            backend, new FixedSensitivePolicy("包含密码输入框"));
+            backend,
+            new FixedSensitivePolicy("包含密码输入框"),
+            new RecordingTargetVerifier());
         var error = await Assert.ThrowsAsync<UnauthorizedAccessException>(() =>
             service.CaptureAsync(Target()));
         Assert.Contains("密码", error.Message);
         Assert.Equal(0, backend.Calls);
+    }
+
+    [Fact]
+    public async Task CaptureRevalidatesAfterBackendAndClearsRawFrameOnIdentityChange()
+    {
+        var bytes = new byte[] { 3, 2, 1 };
+        var backend = new RecordingBackend(bytes);
+        var verifier = new RecordingTargetVerifier(failOnCall: 2);
+        var service = new WindowsSingleWindowCaptureService(
+            backend,
+            new FixedSensitivePolicy(reason: null),
+            verifier);
+
+        var error = await Assert.ThrowsAsync<WindowIdentityException>(() =>
+            service.CaptureAsync(Target()));
+
+        Assert.Equal(WindowIdentityErrorCodes.Changed, error.Code);
+        Assert.Equal(2, verifier.Calls);
+        Assert.Equal(1, backend.Calls);
+        Assert.All(bytes, value => Assert.Equal(0, value));
+    }
+
+    [Fact]
+    public async Task ResilientBackendRevalidatesBeforeFallback()
+    {
+        var preferred = new ThrowingBackend();
+        var fallback = new RecordingBackend();
+        var verifier = new RecordingTargetVerifier(failOnCall: 2);
+        var backend = new ResilientExactWindowCaptureBackend(preferred, fallback, verifier);
+
+        var error = await Assert.ThrowsAsync<WindowIdentityException>(() =>
+            backend.CaptureAsync(Target(), CancellationToken.None));
+
+        Assert.Equal(WindowIdentityErrorCodes.Changed, error.Code);
+        Assert.Equal(2, verifier.Calls);
+        Assert.Equal(1, preferred.Calls);
+        Assert.Equal(0, fallback.Calls);
     }
 
     [Fact]
@@ -82,18 +170,66 @@ public sealed class WindowVisionBoundaryTests
 
     private static WindowUnderstandingService CreateService(
         IWindowCaptureService capture, IWindowVisionProvider vision) =>
-        new(capture, vision, new FixedAutomation(), NullLogger<WindowUnderstandingService>.Instance);
+        new(
+            capture,
+            vision,
+            new FixedAutomation(),
+            new SequenceForegroundProvider(Snapshot()),
+            NullLogger<WindowUnderstandingService>.Instance);
 
     private static ForegroundWindowSnapshot Snapshot() =>
-        new(41, "系统设置", "SystemSettings", DateTimeOffset.UtcNow);
+        new(
+            41,
+            "系统设置",
+            "SystemSettings",
+            4100,
+            new DateTimeOffset(2026, 8, 30, 2, 0, 0, TimeSpan.Zero),
+            DateTimeOffset.UtcNow);
 
     private static WindowCaptureTarget Target() =>
-        new(41, "系统设置", "SystemSettings", DateTimeOffset.UtcNow);
+        new(
+            41,
+            "系统设置",
+            "SystemSettings",
+            4100,
+            new DateTimeOffset(2026, 8, 30, 2, 0, 0, TimeSpan.Zero),
+            DateTimeOffset.UtcNow);
 
     private sealed class FixedAutomation : IReliableDesktopAutomation
     {
         public DesktopAutomationResult Search(long windowHandle, string query) => throw new NotSupportedException();
         public DesktopAutomationResult Describe(long windowHandle) => new(true, "按钮“系统”");
+    }
+
+    private sealed class RecordingAutomation : IReliableDesktopAutomation
+    {
+        public int DescribeCalls { get; private set; }
+        public DesktopAutomationResult Search(long windowHandle, string query) => throw new NotSupportedException();
+        public DesktopAutomationResult Describe(long windowHandle)
+        {
+            DescribeCalls++;
+            return new DesktopAutomationResult(true, "按钮“系统”");
+        }
+    }
+
+    private sealed class SequenceForegroundProvider(params ForegroundWindowSnapshot[] values)
+        : IForegroundWindowContextProvider
+    {
+        private int _next;
+
+        public ForegroundWindowSnapshot? GetLastExternalWindow() =>
+            values.Length == 0 ? null : values[0];
+
+        public ForegroundWindowSnapshot? ResolveWindow(long windowHandle)
+        {
+            if (values.Length == 0)
+            {
+                return null;
+            }
+
+            var index = Math.Min(Interlocked.Increment(ref _next) - 1, values.Length - 1);
+            return values[index];
+        }
     }
 
     private sealed class RecordingCaptureService(byte[]? bytes = null) : IWindowCaptureService
@@ -133,18 +269,49 @@ public sealed class WindowVisionBoundaryTests
         }
     }
 
-    private sealed class FixedSensitivePolicy(string reason) : ISensitiveWindowPolicy
+    private sealed class FixedSensitivePolicy(string? reason) : ISensitiveWindowPolicy
     {
-        public SensitiveWindowAssessment Assess(WindowCaptureTarget target) => new(true, reason);
+        public SensitiveWindowAssessment Assess(WindowCaptureTarget target) =>
+            new(reason is not null, reason);
     }
 
-    private sealed class RecordingBackend : IExactWindowCaptureBackend
+    private sealed class RecordingBackend(byte[]? bytes = null) : IExactWindowCaptureBackend
     {
         public int Calls { get; private set; }
         public Task<RawWindowFrame> CaptureAsync(WindowCaptureTarget target, CancellationToken cancellationToken)
         {
             Calls++;
-            return Task.FromResult(new RawWindowFrame([1], 1, 1, "mock"));
+            return Task.FromResult(new RawWindowFrame(bytes ?? [1], 1, 1, "mock"));
+        }
+    }
+
+    private sealed class ThrowingBackend : IExactWindowCaptureBackend
+    {
+        public int Calls { get; private set; }
+
+        public Task<RawWindowFrame> CaptureAsync(
+            WindowCaptureTarget target,
+            CancellationToken cancellationToken)
+        {
+            Calls++;
+            throw new InvalidOperationException("preferred unavailable");
+        }
+    }
+
+    private sealed class RecordingTargetVerifier(int? failOnCall = null)
+        : IWindowCaptureTargetVerifier
+    {
+        public int Calls { get; private set; }
+
+        public void Verify(WindowCaptureTarget target)
+        {
+            Calls++;
+            if (Calls == failOnCall)
+            {
+                throw new WindowIdentityException(
+                    WindowIdentityErrorCodes.Changed,
+                    "目标窗口身份已经变化，请重新选择并确认。 ");
+            }
         }
     }
 

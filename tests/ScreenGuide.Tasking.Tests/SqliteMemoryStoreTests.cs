@@ -11,7 +11,7 @@ public sealed class SqliteMemoryStoreTests
         new(2026, 8, 29, 9, 0, 0, TimeSpan.Zero);
 
     [Fact]
-    public async Task Version9DatabaseMigratesAtomicallyToVersion10AndKeepsAUniquePreVersion10Backup()
+    public async Task Version9DatabaseMigratesThroughVersion10ToCurrentAndKeepsCurrentBackup()
     {
         var root = NewRoot();
         var databasePath = Path.Combine(root, "state", "tasking.db");
@@ -23,7 +23,7 @@ public sealed class SqliteMemoryStoreTests
             await using var store = new SqliteTaskStore(databasePath);
             await store.InitializeAsync();
 
-            Assert.Equal(10, await store.GetSchemaVersionAsync());
+            Assert.Equal(V02Contract.SchemaVersion, await store.GetSchemaVersionAsync());
             await using var connection = new SqliteConnection($"Data Source={databasePath}");
             await connection.OpenAsync();
             Assert.True(await ColumnExistsAsync(connection, "session_turns", "memory_outbound_state"));
@@ -33,7 +33,7 @@ public sealed class SqliteMemoryStoreTests
 
             var backup = Assert.Single(Directory.GetFiles(
                 Path.GetDirectoryName(databasePath)!,
-                "tasking.pre-v10-from-v9-*.backup.db"));
+                "tasking.pre-v11-from-v9-*.backup.db"));
             await using var backupConnection = new SqliteConnection($"Data Source={backup};Mode=ReadOnly");
             await backupConnection.OpenAsync();
             Assert.Equal(9, await ReadSchemaVersionAsync(backupConnection));
@@ -48,7 +48,7 @@ public sealed class SqliteMemoryStoreTests
     }
 
     [Fact]
-    public async Task Version8DatabaseMigratesToVersion10AndKeepsAUniquePreVersion10Backup()
+    public async Task Version8DatabaseMigratesThroughVersion10ToCurrentAndKeepsCurrentBackup()
     {
         var root = NewRoot();
         var databasePath = Path.Combine(root, "state", "tasking.db");
@@ -60,7 +60,7 @@ public sealed class SqliteMemoryStoreTests
             await using var store = new SqliteTaskStore(databasePath);
             await store.InitializeAsync();
 
-            Assert.Equal(10, await store.GetSchemaVersionAsync());
+            Assert.Equal(V02Contract.SchemaVersion, await store.GetSchemaVersionAsync());
             await using var connection = new SqliteConnection($"Data Source={databasePath}");
             await connection.OpenAsync();
             Assert.True(await ObjectExistsAsync(connection, "table", "memory_items"));
@@ -71,7 +71,7 @@ public sealed class SqliteMemoryStoreTests
 
             var backup = Assert.Single(Directory.GetFiles(
                 Path.GetDirectoryName(databasePath)!,
-                "tasking.pre-v10-from-v8-*.backup.db"));
+                "tasking.pre-v11-from-v8-*.backup.db"));
             await using var backupConnection = new SqliteConnection($"Data Source={backup};Mode=ReadOnly");
             await backupConnection.OpenAsync();
             Assert.Equal(8, await ReadSchemaVersionAsync(backupConnection));
@@ -86,7 +86,7 @@ public sealed class SqliteMemoryStoreTests
     }
 
     [Fact]
-    public async Task FailedVersion9MigrationRollsBackAndLeavesVersion8AndPreVersion10BackupIntact()
+    public async Task FailedVersion9MigrationRollsBackAndLeavesVersion8AndCurrentBackupIntact()
     {
         var root = NewRoot();
         var databasePath = Path.Combine(root, "state", "tasking.db");
@@ -110,7 +110,7 @@ public sealed class SqliteMemoryStoreTests
             Assert.Equal("v8-canary", await command.ExecuteScalarAsync());
             Assert.Single(Directory.GetFiles(
                 Path.GetDirectoryName(databasePath)!,
-                "tasking.pre-v10-from-v8-*.backup.db"));
+                "tasking.pre-v11-from-v8-*.backup.db"));
         }
         finally
         {
@@ -143,7 +143,7 @@ public sealed class SqliteMemoryStoreTests
             Assert.Equal("v9-device-canary", await ReadDeviceCanaryAsync(connection));
             var backup = Assert.Single(Directory.GetFiles(
                 Path.GetDirectoryName(databasePath)!,
-                "tasking.pre-v10-from-v9-*.backup.db"));
+                "tasking.pre-v11-from-v9-*.backup.db"));
             await using var backupConnection = new SqliteConnection($"Data Source={backup};Mode=ReadOnly");
             await backupConnection.OpenAsync();
             Assert.Equal(9, await ReadSchemaVersionAsync(backupConnection));
@@ -189,7 +189,7 @@ public sealed class SqliteMemoryStoreTests
             Assert.Equal(before, after);
             Assert.Empty(Directory.GetFiles(
                 Path.GetDirectoryName(databasePath)!,
-                "tasking.pre-v10-*.backup.db"));
+                "tasking.pre-v11-*.backup.db"));
         }
         finally
         {

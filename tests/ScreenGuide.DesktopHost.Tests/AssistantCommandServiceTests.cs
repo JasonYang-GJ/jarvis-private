@@ -264,7 +264,10 @@ public sealed class AssistantCommandServiceTests
     private sealed class FixedForegroundProvider : IForegroundWindowContextProvider
     {
         public ForegroundWindowSnapshot GetLastExternalWindow() =>
-            new(72, "自动测试窗口", "testhost", DateTimeOffset.UtcNow);
+            new(72, "自动测试窗口", "testhost", 7200, TestProcessStart, DateTimeOffset.UtcNow);
+
+        private static readonly DateTimeOffset TestProcessStart =
+            new(2026, 8, 30, 1, 0, 0, TimeSpan.Zero);
     }
 
     private sealed class FixedCaptureService(byte[] bytes) : IWindowCaptureService

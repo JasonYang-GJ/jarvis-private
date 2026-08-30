@@ -112,11 +112,11 @@ S3-R3 已完成范围：
 
 ## 阶段 4：体验与分发加固
 
-状态：未开始。
+状态：进行中；仅 S4-R1 已获批准，S4-R2 及后续切片尚未开始。
 
-- 真实使用评测、语音/视觉失败率和延迟数据；
+- S4-R1 Window Identity v2：Host 可信 `{HWND, PID, ProcessStartTimeUtc, ProcessName, Title}`、schema v11/pre-v11、确认/UIA/捕获/回退/分析逐层 fail-closed；Desktop IPC 维持 v10。
+- S4-R2（未开始）：真实使用评测、语音/视觉失败率和延迟数据；
 - 长会话快照、Host 内部任务状态同步和 SessionCoordinator 大文件的渐进优化；
-- 单窗口授权加入进程 ID、进程启动时间等更稳定身份；
 - 语音模型许可证与下载更新方案；
 - 安装包数字签名、升级/回滚和发布自动化；
 - 在证据充分后再评估新的低风险动作范围。

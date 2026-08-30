@@ -73,6 +73,11 @@ public sealed class SqliteTaskStore : ILocalTaskStore
                 .ConfigureAwait(false);
         }
 
+        if (storedVersion == 10)
+        {
+            await ValidateVersion10Async(connection, cancellationToken).ConfigureAwait(false);
+        }
+
         string? backupPath = null;
         if (storedVersion > 0 && storedVersion < V02Contract.SchemaVersion)
         {
@@ -143,7 +148,13 @@ public sealed class SqliteTaskStore : ILocalTaskStore
                     .ConfigureAwait(false);
             }
 
-            await ValidateVersion10Async(connection, cancellationToken).ConfigureAwait(false);
+            if (storedVersion < 11)
+            {
+                await ApplyMigrationAsync(connection, 11, SqliteSchema.CreateVersion11, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+
+            await ValidateVersion11Async(connection, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception exception) when (backupPath is not null)
         {
@@ -2212,6 +2223,32 @@ public sealed class SqliteTaskStore : ILocalTaskStore
                 throw new InvalidOperationException(
                     $"schema v10 不完整，{table} 缺少列：{string.Join(", ", missing.Order())}。");
             }
+        }
+    }
+
+    private static async Task ValidateVersion11Async(
+        SqliteConnection connection,
+        CancellationToken cancellationToken)
+    {
+        await ValidateVersion10Async(connection, cancellationToken).ConfigureAwait(false);
+        var missing = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "window_process_id",
+            "window_process_started_at_utc"
+        };
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT name FROM pragma_table_info('session_turns');";
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken)
+            .ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            missing.Remove(reader.GetString(0));
+        }
+
+        if (missing.Count != 0)
+        {
+            throw new InvalidOperationException(
+                $"schema v11 不完整，session_turns 缺少列：{string.Join(", ", missing.Order())}。");
         }
     }
 

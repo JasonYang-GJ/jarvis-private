@@ -4,7 +4,7 @@
 
 ## 当前状态
 
-- 当前正式源码与功能基线：V0.5.0 / V2 阶段 3；`v0.5.0-stage3` 指向 `d553e7e9d606037df87d98e99250de5498f5934a`，S3-R1/R2/R3、离线 Release 门禁、实际 Release 本机流程和标签源码产物核验均已通过。Stage 3 已冻结，不自动开始 Stage 4。
+- 当前正式发布基线仍为 V0.5.0 / V2 阶段 3；`v0.5.0-stage3` 指向 `d553e7e9d606037df87d98e99250de5498f5934a`。Stage 4 已获批准且只推进 S4-R1 Window Identity v2；S4-R2 尚未开始。
 - V2 阶段 1“统一会话中枢”已经通过；363/363 自动化和实际 Release DesktopClient + DesktopHost 的真实桌面验收均通过。
 - V0.2.1 标签 `v0.2.1-baseline` 保留为上一版回滚点；回滚必须同时使用 pre-v7 备份或隔离数据目录。
 - V2 阶段 2“可替换 AI 大脑与模型路由”已通过：统一 Chat Model、Provider Registry、Model Router、Prompt Registry、DPAPI、安全停用的 Codex 普通聊天适配器、DeepSeek/千问普通聊天 Provider、设置 UI/IPC、语义建议和 schema v8 AI 调用审计。
@@ -23,6 +23,7 @@
 8. 安装产物不提交 Git，以版本标签、哈希、测试记录和外部快照关联。
 9. 正式版本只能在标签存在、干净源码构建和测试通过、安装验收通过、工作区干净后宣布冻结。
 10. 产品运行时长期记忆是独立状态真源，不得复用 Conversation、Session/Turn、编程 Task、Provider Thread 或 `ai_invocations`。本地预览不等于同意；S3-R3 只允许用户为单个普通聊天 Turn 查看完整出站快照后单次确认，不能授予任何权限，也不能自动发送。
+11. 单窗口授权的可信身份是 `{HWND, PID, ProcessStartTimeUtc, ProcessName, Title}`。schema v11 在 Session Turn 内持久化 PID 与启动时间，protocol 维持 v10；确认、UIA、捕获后端/回退和分析前任一身份缺失或变化都必须清帧并重新确认，历史 v10 Turn 不得复用旧授权。
 
 ## 阶段 1 已确认决策
 

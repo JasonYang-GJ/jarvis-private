@@ -689,7 +689,13 @@ public sealed class SessionCoordinatorP1RegressionTests
     private sealed class FixedForegroundProvider : IForegroundWindowContextProvider
     {
         public ForegroundWindowSnapshot GetLastExternalWindow() =>
-            new(9951, "P1 测试窗口", "p1-window", DateTimeOffset.UtcNow);
+            new(
+                9951,
+                "P1 测试窗口",
+                "p1-window",
+                99510,
+                new DateTimeOffset(2026, 8, 30, 1, 0, 0, TimeSpan.Zero),
+                DateTimeOffset.UtcNow);
     }
 
     private sealed class CountingCaptureService : IWindowCaptureService

@@ -5,6 +5,7 @@ using System.IO;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Windows.Automation;
+using ScreenGuide.Skills.Windows;
 using ScreenGuide.Vision.Abstractions;
 
 namespace ScreenGuide.Vision.Windows;
@@ -69,9 +70,90 @@ public interface IExactWindowCaptureBackend
 
 public sealed record RawWindowFrame(byte[] PngBytes, int PixelWidth, int PixelHeight, string Technology);
 
+public sealed class WindowsWindowCaptureTargetVerifier : IWindowCaptureTargetVerifier
+{
+    public void Verify(WindowCaptureTarget target)
+    {
+        ArgumentNullException.ThrowIfNull(target);
+        if (target.ProcessId <= 0 || target.ProcessStartTimeUtc == default)
+        {
+            throw new WindowIdentityException(
+                WindowIdentityErrorCodes.Missing,
+                "这条窗口授权缺少可信身份，请重新选择窗口并确认。 ");
+        }
+
+        var handle = new IntPtr(target.WindowHandle);
+        if (handle == IntPtr.Zero || !IsWindow(handle))
+        {
+            throw Changed();
+        }
+
+        try
+        {
+            _ = GetWindowThreadProcessId(handle, out var processId);
+            if (processId == 0 || processId > int.MaxValue || processId != target.ProcessId)
+            {
+                throw Changed();
+            }
+
+            using var process = Process.GetProcessById((int)processId);
+            var startTimeUtc = new DateTimeOffset(process.StartTime.ToUniversalTime());
+            if (startTimeUtc != target.ProcessStartTimeUtc
+                || !string.Equals(process.ProcessName, target.ProcessName, StringComparison.OrdinalIgnoreCase)
+                || !string.Equals(GetTitle(handle), target.WindowTitle, StringComparison.Ordinal))
+            {
+                throw Changed();
+            }
+        }
+        catch (WindowIdentityException)
+        {
+            throw;
+        }
+        catch (Exception exception) when (exception is
+            ArgumentException or
+            InvalidOperationException or
+            System.ComponentModel.Win32Exception or
+            NotSupportedException)
+        {
+            throw Changed();
+        }
+    }
+
+    private static WindowIdentityException Changed() => new(
+        WindowIdentityErrorCodes.Changed,
+        "目标窗口身份已经变化，请重新选择窗口并确认。 ");
+
+    private static string GetTitle(IntPtr handle)
+    {
+        var length = GetWindowTextLength(handle);
+        if (length <= 0)
+        {
+            return string.Empty;
+        }
+
+        var buffer = new char[Math.Min(length + 1, 512)];
+        var written = GetWindowText(handle, buffer, buffer.Length);
+        return written > 0 ? new string(buffer, 0, written).Trim() : string.Empty;
+    }
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool IsWindow(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern int GetWindowText(IntPtr hWnd, char[] text, int maxCount);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern int GetWindowTextLength(IntPtr hWnd);
+}
+
 public sealed class WindowsSingleWindowCaptureService(
     IExactWindowCaptureBackend backend,
-    ISensitiveWindowPolicy sensitiveWindowPolicy) : IWindowCaptureService
+    ISensitiveWindowPolicy sensitiveWindowPolicy,
+    IWindowCaptureTargetVerifier identityVerifier) : IWindowCaptureService
 {
     public async Task<CapturedWindowFrame> CaptureAsync(
         WindowCaptureTarget target,
@@ -79,6 +161,7 @@ public sealed class WindowsSingleWindowCaptureService(
     {
         ArgumentNullException.ThrowIfNull(target);
         cancellationToken.ThrowIfCancellationRequested();
+        identityVerifier.Verify(target);
         var assessment = sensitiveWindowPolicy.Assess(target);
         if (assessment.IsSensitive)
         {
@@ -89,6 +172,7 @@ public sealed class WindowsSingleWindowCaptureService(
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
+            identityVerifier.Verify(target);
             return new CapturedWindowFrame(raw.PngBytes, raw.PixelWidth, raw.PixelHeight, raw.Technology);
         }
         catch
@@ -104,7 +188,8 @@ public sealed class WindowsSingleWindowCaptureService(
 /// This is the conservative Windows fallback while the provider-neutral boundary allows a
 /// Windows Graphics Capture implementation to replace it without changing Host or UI code.
 /// </summary>
-public sealed class PrintWindowCaptureBackend : IExactWindowCaptureBackend
+public sealed class PrintWindowCaptureBackend(
+    IWindowCaptureTargetVerifier identityVerifier) : IExactWindowCaptureBackend
 {
     private const uint DwmwaExtendedFrameBounds = 9;
     private const uint PwRenderFullContent = 2;
@@ -116,7 +201,7 @@ public sealed class PrintWindowCaptureBackend : IExactWindowCaptureBackend
     {
         cancellationToken.ThrowIfCancellationRequested();
         var handle = new IntPtr(target.WindowHandle);
-        ValidateTarget(handle, target);
+        identityVerifier.Verify(target);
         var bounds = GetBounds(handle);
         var width = bounds.Right - bounds.Left;
         var height = bounds.Bottom - bounds.Top;
@@ -156,26 +241,6 @@ public sealed class PrintWindowCaptureBackend : IExactWindowCaptureBackend
             bytes, width, height, "Windows.PrintWindow.SingleHwnd"));
     }
 
-    private static void ValidateTarget(IntPtr handle, WindowCaptureTarget target)
-    {
-        if (handle == IntPtr.Zero || !IsWindow(handle))
-        {
-            throw new InvalidOperationException("目标窗口已经关闭，请重新切回目标软件后再试。 ");
-        }
-
-        _ = GetWindowThreadProcessId(handle, out var processId);
-        if (processId == 0)
-        {
-            throw new InvalidOperationException("无法确认目标窗口所属程序，因此没有读取画面。 ");
-        }
-
-        using var process = Process.GetProcessById((int)processId);
-        if (!string.Equals(process.ProcessName, target.ProcessName, StringComparison.OrdinalIgnoreCase))
-        {
-            throw new InvalidOperationException("目标窗口已经变化，请重新切回后再试。 ");
-        }
-    }
-
     private static Rect GetBounds(IntPtr handle)
     {
         if (DwmGetWindowAttribute(
@@ -199,13 +264,6 @@ public sealed class PrintWindowCaptureBackend : IExactWindowCaptureBackend
         public int Right;
         public int Bottom;
     }
-
-    [DllImport("user32.dll")]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool IsWindow(IntPtr hWnd);
-
-    [DllImport("user32.dll")]
-    private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
 
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]

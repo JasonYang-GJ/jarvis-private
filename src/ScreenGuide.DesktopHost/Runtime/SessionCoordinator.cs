@@ -5,6 +5,7 @@ using ScreenGuide.Core.Memories;
 using ScreenGuide.Core.Sessions;
 using ScreenGuide.Core.Tasking;
 using ScreenGuide.DesktopProtocol;
+using ScreenGuide.Skills.Windows;
 using AgentTaskStatus = ScreenGuide.Core.Tasking.TaskStatus;
 
 namespace ScreenGuide.DesktopHost.Runtime;
@@ -43,6 +44,7 @@ public sealed class SessionCoordinator(
     PromptRegistry prompts,
     MemoryService memories,
     IEnumerable<ISessionMemoryConsentPublicationObserver> memoryConsentPublicationObservers,
+    IForegroundWindowContextProvider foregroundWindows,
     TimeProvider timeProvider)
 {
     private const int MaximumInputLength = 20_000;
@@ -475,10 +477,19 @@ public sealed class SessionCoordinator(
                         "实际操作目标与刚才确认的目标不一致，已拒绝执行。 ");
                 }
 
-                active = StartAuthorizedContinuation(
-                    required.Session,
-                    required.Turn,
-                    observationConsent: true);
+                if (IsWindowBoundTurn(required.Turn)
+                    && !MatchesPersistedWindowIdentity(required.Turn))
+                {
+                    await RequireFreshWindowConfirmationAsync(required.Turn, cancellationToken)
+                        .ConfigureAwait(false);
+                }
+                else
+                {
+                    active = StartAuthorizedContinuation(
+                        required.Session,
+                        required.Turn,
+                        observationConsent: true);
+                }
             }
         }
         finally
@@ -581,10 +592,19 @@ public sealed class SessionCoordinator(
                         "实际操作目标与刚才确认的目标不一致，已拒绝执行。 ");
                 }
 
-                active = StartAuthorizedContinuation(
-                    required.Session,
-                    required.Turn,
-                    observationConsent: false);
+                if (IsWindowBoundTurn(required.Turn)
+                    && !MatchesPersistedWindowIdentity(required.Turn))
+                {
+                    await RequireFreshWindowConfirmationAsync(required.Turn, cancellationToken)
+                        .ConfigureAwait(false);
+                }
+                else
+                {
+                    active = StartAuthorizedContinuation(
+                        required.Session,
+                        required.Turn,
+                        observationConsent: false);
+                }
             }
         }
         finally
@@ -1081,6 +1101,12 @@ public sealed class SessionCoordinator(
             return;
         }
 
+        var kind = ParseIntentKind(plan.IntentKind);
+        var plannedWindow = kind is UniversalIntentKind.DescribeForeground
+            or UniversalIntentKind.SearchForeground
+            ? ResolvePlannedWindow(plan.ForegroundApplication)
+            : null;
+
         turn = await TransitionAsync(
                 turn.Id,
                 current => current with
@@ -1095,22 +1121,11 @@ public sealed class SessionCoordinator(
             return;
         }
 
-        var kind = ParseIntentKind(plan.IntentKind);
         var workKind = WorkKindFor(kind);
 
         if (executeReadyPlan
             && kind is UniversalIntentKind.DescribeForeground or UniversalIntentKind.SearchForeground
-            && turn.WindowHandle is { } authorizedWindow
-            && (plan.ForegroundApplication is not { } currentWindow
-                || currentWindow.WindowHandle != authorizedWindow
-                || !string.Equals(
-                    currentWindow.ProcessName,
-                    turn.WindowProcessName,
-                    StringComparison.OrdinalIgnoreCase)
-                || !string.Equals(
-                    currentWindow.WindowTitle,
-                    turn.WindowTitle,
-                    StringComparison.Ordinal)))
+            && !MatchesPersistedWindowIdentity(turn, plannedWindow))
         {
             var changedPhase = kind == UniversalIntentKind.DescribeForeground
                 ? SessionTurnPhase.WaitingForWindowConsent
@@ -1125,18 +1140,20 @@ public sealed class SessionCoordinator(
                         WorkKind = workKind,
                         IntentKind = plan.IntentKind,
                         PlanId = null,
-                        Phase = plan.ForegroundApplication is null
+                        Phase = plannedWindow is null
                             ? SessionTurnPhase.WaitingForWindow
                             : changedPhase,
-                        MissingContext = plan.ForegroundApplication is null
+                        MissingContext = plannedWindow is null
                             ? SessionMissingContext.Window
                             : changedMissing,
-                        WindowHandle = plan.ForegroundApplication?.WindowHandle,
-                        WindowTitle = plan.ForegroundApplication?.WindowTitle,
-                        WindowProcessName = plan.ForegroundApplication?.ProcessName,
+                        WindowHandle = plannedWindow?.WindowHandle,
+                        WindowTitle = plannedWindow?.WindowTitle,
+                        WindowProcessName = plannedWindow?.ProcessName,
+                        WindowProcessId = plannedWindow?.ProcessId,
+                        WindowProcessStartTimeUtc = plannedWindow?.ProcessStartTimeUtc,
                         ConfirmationGranted = false,
                         RequiresConfirmation = true,
-                        ResultSummary = plan.ForegroundApplication is null
+                        ResultSummary = plannedWindow is null
                             ? "目标窗口已经不可用，请切换到要操作的窗口后继续。"
                             : "前台窗口已经变化，请确认新的目标窗口后再继续。",
                         FailureCode = "window_target_changed",
@@ -1150,6 +1167,12 @@ public sealed class SessionCoordinator(
         if (string.Equals(plan.Readiness, IntentPlanReadiness.NeedsContext.ToString(), StringComparison.Ordinal))
         {
             var (phase, missing) = MissingContextState(kind, plan);
+            if (kind is UniversalIntentKind.DescribeForeground or UniversalIntentKind.SearchForeground
+                && plannedWindow is null)
+            {
+                phase = SessionTurnPhase.WaitingForWindow;
+                missing = SessionMissingContext.Window;
+            }
             if (kind == UniversalIntentKind.CodingTask
                 && (turn.ProjectId ?? session.SelectedProjectId) is not null)
             {
@@ -1173,9 +1196,11 @@ public sealed class SessionCoordinator(
                         ProjectId = kind == UniversalIntentKind.CodingTask
                             ? null
                             : current.ProjectId,
-                        WindowHandle = plan.ForegroundApplication?.WindowHandle,
-                        WindowTitle = plan.ForegroundApplication?.WindowTitle,
-                        WindowProcessName = plan.ForegroundApplication?.ProcessName,
+                        WindowHandle = plannedWindow?.WindowHandle,
+                        WindowTitle = plannedWindow?.WindowTitle,
+                        WindowProcessName = plannedWindow?.ProcessName,
+                        WindowProcessId = plannedWindow?.ProcessId,
+                        WindowProcessStartTimeUtc = plannedWindow?.ProcessStartTimeUtc,
                         RequiresConfirmation = phase == SessionTurnPhase.WaitingForWindowConsent,
                         ResultSummary = plan.UserSummary,
                         FailureCode = null,
@@ -1240,9 +1265,11 @@ public sealed class SessionCoordinator(
                         MissingContext = SessionMissingContext.Confirmation,
                         ProjectId = turn.ProjectId ?? session.SelectedProjectId,
                         FilePath = turn.FilePath,
-                        WindowHandle = plan.ForegroundApplication?.WindowHandle,
-                        WindowTitle = plan.ForegroundApplication?.WindowTitle,
-                        WindowProcessName = plan.ForegroundApplication?.ProcessName,
+                        WindowHandle = plannedWindow?.WindowHandle,
+                        WindowTitle = plannedWindow?.WindowTitle,
+                        WindowProcessName = plannedWindow?.ProcessName,
+                        WindowProcessId = plannedWindow?.ProcessId,
+                        WindowProcessStartTimeUtc = plannedWindow?.ProcessStartTimeUtc,
                         RequiresConfirmation = true,
                         ResultSummary = plan.ConfirmationText ?? plan.UserSummary,
                         FailureCode = null,
@@ -1253,7 +1280,13 @@ public sealed class SessionCoordinator(
             return;
         }
 
-        await ExecutePlanAsync(session, turn, plan, directVoiceAction, cancellationToken)
+        await ExecutePlanAsync(
+                session,
+                turn,
+                plan,
+                plannedWindow,
+                directVoiceAction,
+                cancellationToken)
             .ConfigureAwait(false);
     }
 
@@ -1261,6 +1294,7 @@ public sealed class SessionCoordinator(
         SessionRecord session,
         SessionTurnRecord turn,
         AssistantIntentPlanDto plan,
+        ForegroundWindowSnapshot? plannedWindow,
         bool directVoiceAction,
         CancellationToken cancellationToken)
     {
@@ -1281,9 +1315,12 @@ public sealed class SessionCoordinator(
                     MissingContext = SessionMissingContext.None,
                     OperationId = operationId,
                     ProjectId = current.ProjectId ?? session.SelectedProjectId,
-                    WindowHandle = plan.ForegroundApplication?.WindowHandle ?? current.WindowHandle,
-                    WindowTitle = plan.ForegroundApplication?.WindowTitle ?? current.WindowTitle,
-                    WindowProcessName = plan.ForegroundApplication?.ProcessName ?? current.WindowProcessName,
+                    WindowHandle = plannedWindow?.WindowHandle ?? current.WindowHandle,
+                    WindowTitle = plannedWindow?.WindowTitle ?? current.WindowTitle,
+                    WindowProcessName = plannedWindow?.ProcessName ?? current.WindowProcessName,
+                    WindowProcessId = plannedWindow?.ProcessId ?? current.WindowProcessId,
+                    WindowProcessStartTimeUtc = plannedWindow?.ProcessStartTimeUtc
+                        ?? current.WindowProcessStartTimeUtc,
                     RequiresConfirmation = plan.RequiresConfirmation,
                     FailureCode = null,
                     FailureMessage = null
@@ -1293,6 +1330,13 @@ public sealed class SessionCoordinator(
         cancellationToken.ThrowIfCancellationRequested();
         if (SessionTurnPhases.IsTerminal(running.Phase) || running.Phase != runningPhase)
         {
+            return;
+        }
+
+        if (IsWindowBoundTurn(running) && !MatchesPersistedWindowIdentity(running))
+        {
+            await RequireFreshWindowConfirmationAsync(running, CancellationToken.None)
+                .ConfigureAwait(false);
             return;
         }
 
@@ -2390,6 +2434,109 @@ public sealed class SessionCoordinator(
         {
             return false;
         }
+    }
+
+    private ForegroundWindowSnapshot? ResolvePlannedWindow(ForegroundApplicationDto? planned)
+    {
+        if (planned is null)
+        {
+            return null;
+        }
+
+        var resolved = foregroundWindows.ResolveWindow(planned.WindowHandle);
+        if (resolved is null
+            || resolved.ProcessId <= 0
+            || resolved.ProcessStartTimeUtc == default
+            || resolved.WindowHandle != planned.WindowHandle
+            || !string.Equals(
+                resolved.ProcessName,
+                planned.ProcessName,
+                StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(resolved.WindowTitle, planned.WindowTitle, StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        return resolved;
+    }
+
+    private static bool IsWindowBoundTurn(SessionTurnRecord turn) =>
+        string.Equals(turn.IntentKind, UniversalIntentKind.DescribeForeground.ToString(), StringComparison.Ordinal)
+        || string.Equals(turn.IntentKind, UniversalIntentKind.SearchForeground.ToString(), StringComparison.Ordinal);
+
+    private bool MatchesPersistedWindowIdentity(
+        SessionTurnRecord turn,
+        ForegroundWindowSnapshot? resolved = null)
+    {
+        if (turn.WindowHandle is not { } windowHandle
+            || turn.WindowProcessId is not { } processId
+            || turn.WindowProcessStartTimeUtc is not { } processStartTimeUtc
+            || string.IsNullOrWhiteSpace(turn.WindowProcessName)
+            || string.IsNullOrWhiteSpace(turn.WindowTitle))
+        {
+            return false;
+        }
+
+        var expected = new ForegroundWindowSnapshot(
+            windowHandle,
+            turn.WindowTitle,
+            turn.WindowProcessName,
+            processId,
+            processStartTimeUtc,
+            DateTimeOffset.MinValue);
+        return WindowIdentityContract.Matches(
+            expected,
+            resolved ?? foregroundWindows.ResolveWindow(windowHandle));
+    }
+
+    private async Task RequireFreshWindowConfirmationAsync(
+        SessionTurnRecord turn,
+        CancellationToken cancellationToken)
+    {
+        var candidate = foregroundWindows.GetLastExternalWindow();
+        var current = candidate is null
+            ? null
+            : foregroundWindows.ResolveWindow(candidate.WindowHandle);
+        if (candidate is null || !WindowIdentityContract.Matches(candidate, current))
+        {
+            current = null;
+        }
+
+        var describe = string.Equals(
+            turn.IntentKind,
+            UniversalIntentKind.DescribeForeground.ToString(),
+            StringComparison.Ordinal);
+        await TransitionAsync(
+                turn.Id,
+                value => value with
+                {
+                    PlanId = null,
+                    Phase = current is null
+                        ? SessionTurnPhase.WaitingForWindow
+                        : describe
+                            ? SessionTurnPhase.WaitingForWindowConsent
+                            : SessionTurnPhase.WaitingForConfirmation,
+                    MissingContext = current is null
+                        ? SessionMissingContext.Window
+                        : describe
+                            ? SessionMissingContext.WindowConsent
+                            : SessionMissingContext.Confirmation,
+                    WindowHandle = current?.WindowHandle,
+                    WindowTitle = current?.WindowTitle,
+                    WindowProcessName = current?.ProcessName,
+                    WindowProcessId = current?.ProcessId,
+                    WindowProcessStartTimeUtc = current?.ProcessStartTimeUtc,
+                    ConfirmationGranted = false,
+                    RequiresConfirmation = true,
+                    ResultSummary = current is null
+                        ? "目标窗口已经不可用，请切换到要操作的窗口后继续。"
+                        : "前台窗口已经变化（身份不再一致），请确认新的目标窗口后再继续。",
+                    FailureCode = "window_identity_changed",
+                    FailureMessage = "授权后目标窗口身份发生变化。",
+                    CompletedAtUtc = null
+                },
+                cancellationToken)
+            .ConfigureAwait(false);
     }
 
     private static string NormalizeModality(string value) =>

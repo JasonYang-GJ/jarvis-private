@@ -22,6 +22,7 @@ public sealed class WindowUnderstandingService(
     IWindowCaptureService capture,
     IWindowVisionProvider vision,
     IReliableDesktopAutomation structuredInterface,
+    IForegroundWindowContextProvider foregroundWindows,
     ILogger<WindowUnderstandingService> logger)
 {
     public async Task<WindowUnderstandingResult> DescribeAsync(
@@ -35,10 +36,14 @@ public sealed class WindowUnderstandingService(
             throw new UnauthorizedAccessException("需要你明确同意本次查看后，元枢才会读取这个窗口。 ");
         }
 
+        RequireCurrentIdentity(foreground);
+
         var target = new WindowCaptureTarget(
             foreground.WindowHandle,
             foreground.WindowTitle,
             foreground.ProcessName,
+            foreground.ProcessId,
+            foreground.ProcessStartTimeUtc,
             foreground.ObservedAtUtc);
         var targetHash = Convert.ToHexString(SHA256.HashData(
             Encoding.UTF8.GetBytes($"{target.ProcessName}|{target.WindowHandle}")))[..12];
@@ -61,10 +66,14 @@ public sealed class WindowUnderstandingService(
                 exception.GetType().Name);
         }
 
+
+        RequireCurrentIdentity(foreground);
+
         await using var frame = await capture.CaptureAsync(target, cancellationToken)
             .ConfigureAwait(false);
         try
         {
+            RequireCurrentIdentity(foreground);
             var result = await vision.AnalyzeAsync(
                     new WindowVisionRequest(target, frame, structure),
                     cancellationToken)
@@ -89,5 +98,11 @@ public sealed class WindowUnderstandingService(
                 vision.ProviderId);
             throw;
         }
+    }
+
+    private void RequireCurrentIdentity(ForegroundWindowSnapshot expected)
+    {
+        var current = foregroundWindows.ResolveWindow(expected.WindowHandle);
+        WindowIdentityContract.RequireMatch(expected, current);
     }
 }

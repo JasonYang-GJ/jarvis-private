@@ -233,7 +233,13 @@ public sealed class SessionContextContinuationTests
     private sealed class FixedForegroundProvider : IForegroundWindowContextProvider
     {
         public ForegroundWindowSnapshot GetLastExternalWindow() =>
-            new(812, "阶段一测试窗口", "stage1-window", DateTimeOffset.UtcNow);
+            new(
+                812,
+                "阶段一测试窗口",
+                "stage1-window",
+                8120,
+                new DateTimeOffset(2026, 8, 30, 1, 0, 0, TimeSpan.Zero),
+                DateTimeOffset.UtcNow);
     }
 
     private sealed class FixedCaptureService(byte[] bytes) : IWindowCaptureService

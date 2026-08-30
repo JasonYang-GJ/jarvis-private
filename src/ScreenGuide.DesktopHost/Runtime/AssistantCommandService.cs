@@ -154,6 +154,17 @@ public sealed class AssistantCommandService(
             ? request with { Confirmed = true }
             : request;
 
+        if (plan.Kind is UniversalIntentKind.SearchForeground or UniversalIntentKind.DescribeForeground)
+        {
+            var expected = pending.Foreground
+                ?? throw new WindowIdentityException(
+                    WindowIdentityErrorCodes.Missing,
+                    "这条窗口授权缺少可信身份，请重新选择窗口并确认。 ");
+            WindowIdentityContract.RequireMatch(
+                expected,
+                foregroundWindows.ResolveWindow(expected.WindowHandle));
+        }
+
         return plan.Kind switch
         {
             UniversalIntentKind.Conversation => await ExecuteConversationAsync(plan, effectiveRequest, cancellationToken)

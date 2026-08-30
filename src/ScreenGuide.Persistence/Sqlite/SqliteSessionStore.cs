@@ -281,6 +281,8 @@ public sealed class SqliteSessionStore : ISessionStore
                 operation_id = $operationId, project_id = $projectId, file_path = $filePath,
                 window_handle = $windowHandle, window_title = $windowTitle,
                 window_process_name = $windowProcessName,
+                window_process_id = $windowProcessId,
+                window_process_started_at_utc = $windowProcessStartedAtUtc,
                 requires_confirmation = $requiresConfirmation,
                 confirmation_granted = $confirmationGranted,
                 cancellation_requested = $cancellationRequested,
@@ -323,6 +325,10 @@ public sealed class SqliteSessionStore : ISessionStore
         command.Parameters.AddWithValue("$windowHandle", (object?)turn.WindowHandle ?? DBNull.Value);
         command.Parameters.AddWithValue("$windowTitle", TextOrNull(turn.WindowTitle));
         command.Parameters.AddWithValue("$windowProcessName", TextOrNull(turn.WindowProcessName));
+        command.Parameters.AddWithValue("$windowProcessId", (object?)turn.WindowProcessId ?? DBNull.Value);
+        command.Parameters.AddWithValue(
+            "$windowProcessStartedAtUtc",
+            DateOrNull(turn.WindowProcessStartTimeUtc));
         command.Parameters.AddWithValue("$requiresConfirmation", turn.RequiresConfirmation ? 1 : 0);
         command.Parameters.AddWithValue("$confirmationGranted", turn.ConfirmationGranted ? 1 : 0);
         command.Parameters.AddWithValue("$cancellationRequested", turn.CancellationRequested ? 1 : 0);
@@ -669,6 +675,8 @@ public sealed class SqliteSessionStore : ISessionStore
         WindowHandle = ReadNullableLong(reader, "window_handle"),
         WindowTitle = ReadNullableString(reader, "window_title"),
         WindowProcessName = ReadNullableString(reader, "window_process_name"),
+        WindowProcessId = ReadNullableInt(reader, "window_process_id"),
+        WindowProcessStartTimeUtc = ReadNullableDate(reader, "window_process_started_at_utc"),
         RequiresConfirmation = reader.GetInt32(reader.GetOrdinal("requires_confirmation")) == 1,
         ConfirmationGranted = reader.GetInt32(reader.GetOrdinal("confirmation_granted")) == 1,
         CancellationRequested = reader.GetInt32(reader.GetOrdinal("cancellation_requested")) == 1,
@@ -822,6 +830,7 @@ public sealed class SqliteSessionStore : ISessionStore
     private static Guid ReadGuid(SqliteDataReader reader, string name) => Guid.Parse(reader.GetString(reader.GetOrdinal(name)));
     private static Guid? ReadNullableGuid(SqliteDataReader reader, string name) => reader.IsDBNull(reader.GetOrdinal(name)) ? null : Guid.Parse(reader.GetString(reader.GetOrdinal(name)));
     private static long? ReadNullableLong(SqliteDataReader reader, string name) => reader.IsDBNull(reader.GetOrdinal(name)) ? null : reader.GetInt64(reader.GetOrdinal(name));
+    private static int? ReadNullableInt(SqliteDataReader reader, string name) => reader.IsDBNull(reader.GetOrdinal(name)) ? null : reader.GetInt32(reader.GetOrdinal(name));
     private static bool? ReadNullableBoolean(SqliteDataReader reader, string name) => reader.IsDBNull(reader.GetOrdinal(name)) ? null : reader.GetInt32(reader.GetOrdinal(name)) == 1;
     private static string? ReadNullableString(SqliteDataReader reader, string name) => reader.IsDBNull(reader.GetOrdinal(name)) ? null : reader.GetString(reader.GetOrdinal(name));
     private static string? NullIfWhiteSpace(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();

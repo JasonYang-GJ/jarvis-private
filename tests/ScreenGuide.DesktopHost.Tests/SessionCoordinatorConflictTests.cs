@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Data.Sqlite;
 using ScreenGuide.Core.Conversations;
 using ScreenGuide.DesktopProtocol;
 using ScreenGuide.Skills.Windows;
@@ -172,6 +173,8 @@ public sealed class SessionCoordinatorConflictTests
             9301,
             "等待授权窗口",
             "consent-wait-test",
+            93010,
+            new DateTimeOffset(2026, 8, 30, 1, 0, 0, TimeSpan.Zero),
             DateTimeOffset.UtcNow));
         var capture = new CountingCaptureService();
         var vision = new CountingVisionProvider();
@@ -368,6 +371,8 @@ public sealed class SessionCoordinatorConflictTests
             9401,
             "后来切回的窗口",
             "retry-window-test",
+            94010,
+            new DateTimeOffset(2026, 8, 30, 1, 0, 0, TimeSpan.Zero),
             DateTimeOffset.UtcNow);
 
         var retried = await client.RetrySessionTurnAsync(session.SessionId, submitted.TurnId);
@@ -394,6 +399,8 @@ public sealed class SessionCoordinatorConflictTests
             9501,
             "搜索窗口 A",
             "search-target-a",
+            95010,
+            new DateTimeOffset(2026, 8, 30, 1, 0, 0, TimeSpan.Zero),
             DateTimeOffset.UtcNow));
         var automation = new RecordingDesktopAutomation();
         using var host = environment.BuildHost(services =>
@@ -417,6 +424,8 @@ public sealed class SessionCoordinatorConflictTests
             9501,
             "搜索窗口 B",
             "search-target-b",
+            95020,
+            new DateTimeOffset(2026, 8, 30, 1, 1, 0, TimeSpan.Zero),
             DateTimeOffset.UtcNow);
 
         var mustConfirmAgain = await client.ConfirmSessionTurnAsync(
@@ -437,6 +446,106 @@ public sealed class SessionCoordinatorConflictTests
         Assert.Contains("窗口已经变化", afterChange.ResultSummary, StringComparison.Ordinal);
         Assert.Equal(0, automation.SearchCallCount);
         Assert.Null(automation.LastQuery);
+    }
+
+    [Fact]
+    public async Task SameVisibleWindowWithDifferentProcessIdentityRequiresNewConfirmation()
+    {
+        await using var environment = DesktopHostTestEnvironment.Create();
+        var started = new DateTimeOffset(2026, 8, 30, 1, 0, 0, TimeSpan.Zero);
+        var foreground = new MutableForegroundProvider(new ForegroundWindowSnapshot(
+            9601,
+            "外观完全相同的窗口",
+            "same-visible-target",
+            96010,
+            started,
+            DateTimeOffset.UtcNow));
+        var automation = new RecordingDesktopAutomation();
+        using var host = environment.BuildHost(services =>
+        {
+            services.AddSingleton<IForegroundWindowContextProvider>(foreground);
+            services.AddSingleton<IReliableDesktopAutomation>(automation);
+        });
+        await host.StartAsync();
+        IDesktopApiClient client = new DesktopApiClient(environment.Options.PipeName);
+        var session = await client.StartNewSessionAsync("PID 复用防护");
+        var submitted = await client.SubmitSessionInputAsync(new SessionInputRequestDto(
+            "在当前窗口搜索天气",
+            "Text",
+            "same-visible-different-process",
+            session.SessionId));
+        await WaitForTurnPhaseAsync(client, submitted.TurnId, "WaitingForConfirmation");
+        foreground.Current = new ForegroundWindowSnapshot(
+            9601,
+            "外观完全相同的窗口",
+            "same-visible-target",
+            96011,
+            started.AddSeconds(1),
+            DateTimeOffset.UtcNow);
+
+        var result = await client.ConfirmSessionTurnAsync(
+            session.SessionId,
+            submitted.TurnId,
+            confirmed: true);
+        await host.StopAsync();
+
+        var turn = result.Turns.Single(item => item.Id == submitted.TurnId);
+        Assert.Equal("WaitingForConfirmation", turn.Phase);
+        Assert.Contains("身份不再一致", turn.ResultSummary, StringComparison.Ordinal);
+        Assert.Equal(0, automation.SearchCallCount);
+    }
+
+    [Fact]
+    public async Task HistoricalTurnWithoutProcessIdentityCannotReuseWindowConsent()
+    {
+        await using var environment = DesktopHostTestEnvironment.Create();
+        var foreground = new MutableForegroundProvider(new ForegroundWindowSnapshot(
+            9701,
+            "历史窗口",
+            "historical-target",
+            97010,
+            new DateTimeOffset(2026, 8, 30, 1, 0, 0, TimeSpan.Zero),
+            DateTimeOffset.UtcNow));
+        var capture = new CountingCaptureService();
+        using var host = environment.BuildHost(services =>
+        {
+            services.AddSingleton<IForegroundWindowContextProvider>(foreground);
+            services.AddSingleton<IWindowCaptureService>(capture);
+        });
+        await host.StartAsync();
+        IDesktopApiClient client = new DesktopApiClient(environment.Options.PipeName);
+        var session = await client.StartNewSessionAsync("历史授权不可复用");
+        var submitted = await client.SubmitSessionInputAsync(new SessionInputRequestDto(
+            "看看这个窗口是什么",
+            "Text",
+            "historical-window-identity",
+            session.SessionId));
+        await WaitForTurnPhaseAsync(client, submitted.TurnId, "WaitingForWindowConsent");
+
+        await using (var connection = new SqliteConnection(
+                         $"Data Source={environment.Options.DatabasePath};Pooling=False"))
+        {
+            await connection.OpenAsync();
+            await using var command = connection.CreateCommand();
+            command.CommandText = """
+                UPDATE session_turns
+                SET window_process_id = NULL, window_process_started_at_utc = NULL
+                WHERE id = $id;
+                """;
+            command.Parameters.AddWithValue("$id", submitted.TurnId.ToString("D"));
+            await command.ExecuteNonQueryAsync();
+        }
+
+        var result = await client.RespondSessionWindowConsentAsync(
+            session.SessionId,
+            submitted.TurnId,
+            granted: true);
+        await host.StopAsync();
+
+        var turn = result.Turns.Single(item => item.Id == submitted.TurnId);
+        Assert.Equal("WaitingForWindowConsent", turn.Phase);
+        Assert.Contains("身份不再一致", turn.ResultSummary, StringComparison.Ordinal);
+        Assert.Equal(0, capture.CallCount);
     }
 
     private static async Task<SessionSnapshotDto> WaitForTurnPhaseAsync(

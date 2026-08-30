@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.ComponentModel;
 using System.Runtime.InteropServices;
 using System.Windows.Automation;
 using System.Windows.Forms;
@@ -9,13 +10,66 @@ public sealed record ForegroundWindowSnapshot(
     long WindowHandle,
     string WindowTitle,
     string ProcessName,
+    int ProcessId,
+    DateTimeOffset ProcessStartTimeUtc,
     DateTimeOffset ObservedAtUtc);
+
+public static class WindowIdentityErrorCodes
+{
+    public const string Missing = "window_identity_missing";
+    public const string Changed = "window_identity_changed";
+}
+
+public sealed class WindowIdentityException(string code, string message)
+    : InvalidOperationException(message)
+{
+    public string Code { get; } = code;
+}
+
+public static class WindowIdentityContract
+{
+    public static bool Matches(
+        ForegroundWindowSnapshot expected,
+        ForegroundWindowSnapshot? actual) =>
+        actual is not null
+        && expected.WindowHandle == actual.WindowHandle
+        && expected.ProcessId > 0
+        && expected.ProcessId == actual.ProcessId
+        && expected.ProcessStartTimeUtc == actual.ProcessStartTimeUtc
+        && string.Equals(expected.ProcessName, actual.ProcessName, StringComparison.OrdinalIgnoreCase)
+        && string.Equals(expected.WindowTitle, actual.WindowTitle, StringComparison.Ordinal);
+
+    public static void RequireMatch(
+        ForegroundWindowSnapshot expected,
+        ForegroundWindowSnapshot? actual)
+    {
+        if (expected.ProcessId <= 0 || expected.ProcessStartTimeUtc == default)
+        {
+            throw new WindowIdentityException(
+                WindowIdentityErrorCodes.Missing,
+                "这条窗口授权缺少可信身份，请重新选择窗口并确认。 ");
+        }
+
+        if (!Matches(expected, actual))
+        {
+            throw new WindowIdentityException(
+                WindowIdentityErrorCodes.Changed,
+                "目标窗口身份已经变化，请重新选择窗口并确认。 ");
+        }
+    }
+}
 
 public sealed record DesktopAutomationResult(bool Verified, string Summary, string? TechnicalDetail = null);
 
 public interface IForegroundWindowContextProvider
 {
     ForegroundWindowSnapshot? GetLastExternalWindow();
+
+    ForegroundWindowSnapshot? ResolveWindow(long windowHandle)
+    {
+        var current = GetLastExternalWindow();
+        return current?.WindowHandle == windowHandle ? current : null;
+    }
 }
 
 public interface IReliableDesktopAutomation
@@ -43,6 +97,9 @@ public sealed class ForegroundWindowTracker : IForegroundWindowContextProvider, 
 
     public ForegroundWindowSnapshot? GetLastExternalWindow() => Volatile.Read(ref _lastExternal);
 
+    public ForegroundWindowSnapshot? ResolveWindow(long windowHandle) =>
+        TryReadWindow(new IntPtr(windowHandle));
+
     public void Dispose() => _timer.Dispose();
 
     private void Poll()
@@ -60,28 +117,15 @@ public sealed class ForegroundWindowTracker : IForegroundWindowContextProvider, 
                 return;
             }
 
-            _ = GetWindowThreadProcessId(handle, out var processId);
-            if (processId == 0)
+            var snapshot = TryReadWindow(handle);
+            if (snapshot is null
+                || snapshot.ProcessId == Environment.ProcessId
+                || snapshot.ProcessName.StartsWith("ScreenGuide.", StringComparison.OrdinalIgnoreCase))
             {
                 return;
             }
 
-            using var process = Process.GetProcessById((int)processId);
-            var processName = process.ProcessName;
-            if (process.Id == Environment.ProcessId
-                || processName.StartsWith("ScreenGuide.", StringComparison.OrdinalIgnoreCase))
-            {
-                return;
-            }
-
-            var title = GetTitle(handle);
-            if (string.IsNullOrWhiteSpace(title))
-            {
-                return;
-            }
-
-            Volatile.Write(ref _lastExternal, new ForegroundWindowSnapshot(
-                handle.ToInt64(), title.Trim(), processName, DateTimeOffset.UtcNow));
+            Volatile.Write(ref _lastExternal, snapshot);
         }
         catch (ArgumentException)
         {
@@ -91,9 +135,59 @@ public sealed class ForegroundWindowTracker : IForegroundWindowContextProvider, 
         {
             // The foreground process can exit between Win32 calls.
         }
+        catch (Win32Exception)
+        {
+            // Windows can deny process metadata while the foreground target changes.
+        }
+        catch (NotSupportedException)
+        {
+            // Some protected processes do not expose a start time.
+        }
         finally
         {
             Volatile.Write(ref _polling, 0);
+        }
+    }
+
+    private static ForegroundWindowSnapshot? TryReadWindow(IntPtr handle)
+    {
+        if (handle == IntPtr.Zero || !IsWindow(handle))
+        {
+            return null;
+        }
+
+        try
+        {
+            _ = GetWindowThreadProcessId(handle, out var processId);
+            if (processId == 0 || processId > int.MaxValue)
+            {
+                return null;
+            }
+
+            using var process = Process.GetProcessById((int)processId);
+            var processName = process.ProcessName;
+            var processStartTimeUtc = new DateTimeOffset(process.StartTime.ToUniversalTime());
+            var title = GetTitle(handle).Trim();
+            if (string.IsNullOrWhiteSpace(title))
+            {
+                return null;
+            }
+
+            return new ForegroundWindowSnapshot(
+                handle.ToInt64(),
+                title,
+                processName,
+                process.Id,
+                processStartTimeUtc,
+                DateTimeOffset.UtcNow);
+        }
+        catch (Exception exception) when (exception is
+            ArgumentException or
+            InvalidOperationException or
+            Win32Exception or
+            NotSupportedException)
+        {
+            return null;
         }
     }
 

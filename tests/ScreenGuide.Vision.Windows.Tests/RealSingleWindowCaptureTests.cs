@@ -43,8 +43,11 @@ public sealed class RealSingleWindowCaptureTests
                 handle,
                 "元枢单窗口读取自动验收",
                 process.ProcessName,
+                process.Id,
+                new DateTimeOffset(process.StartTime.ToUniversalTime()),
                 DateTimeOffset.UtcNow);
-            var backend = new WindowsGraphicsCaptureBackend();
+            var backend = new WindowsGraphicsCaptureBackend(
+                new WindowsWindowCaptureTargetVerifier());
             var raw = await backend.CaptureAsync(target, CancellationToken.None);
             await using var frame = new CapturedWindowFrame(
                 raw.PngBytes, raw.PixelWidth, raw.PixelHeight, raw.Technology);

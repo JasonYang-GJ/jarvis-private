@@ -105,6 +105,8 @@ public sealed record SessionTurnRecord
     public long? WindowHandle { get; init; }
     public string? WindowTitle { get; init; }
     public string? WindowProcessName { get; init; }
+    public int? WindowProcessId { get; init; }
+    public DateTimeOffset? WindowProcessStartTimeUtc { get; init; }
     public bool RequiresConfirmation { get; init; }
     public bool ConfirmationGranted { get; init; }
     public bool CancellationRequested { get; init; }

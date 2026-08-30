@@ -6,7 +6,14 @@ public sealed record WindowCaptureTarget(
     long WindowHandle,
     string WindowTitle,
     string ProcessName,
+    int ProcessId,
+    DateTimeOffset ProcessStartTimeUtc,
     DateTimeOffset ObservedAtUtc);
+
+public interface IWindowCaptureTargetVerifier
+{
+    void Verify(WindowCaptureTarget target);
+}
 
 public sealed record SensitiveWindowAssessment(bool IsSensitive, string? Reason = null);
 

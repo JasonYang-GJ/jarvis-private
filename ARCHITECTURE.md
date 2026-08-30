@@ -65,7 +65,7 @@ V0.4.0 Stage 2 正式源码由下面这些内容共同组成：
 | `ScreenGuide.AI.DeepSeek` | 固定 DeepSeek 官方目的地的普通聊天 HTTP/SSE Provider、错误和健康映射 | 保存 Key、决定 Session、编程 Agent 或电脑权限 |
 | `ScreenGuide.AI.Qwen` | 固定阿里云百炼兼容端点、仅 `qwen3.7-plus` 的普通聊天 HTTP/SSE Provider；消费但不公开 reasoning，拒绝 Tool Call | 自动 fallback、保存 Key、改变 Session/权限或替代 Codex 编程 Agent |
 | `ScreenGuide.Core` | Session、任务、对话、AI 调用审计、权限和独立 Memory Ledger 领域契约 | Windows、SQLite 或模型供应商细节 |
-| `ScreenGuide.Persistence` | SQLite schema v10 与 Session/任务/对话/AI 调用/受保护记忆及安全出站审计元数据存储 | UI、Key、记忆明文和模型调用 |
+| `ScreenGuide.Persistence` | SQLite schema v11 与 Session/任务/对话/AI 调用/受保护记忆、窗口身份及安全出站审计元数据存储 | UI、Key、记忆明文和模型调用 |
 | `ScreenGuide.Skills.*` | 可替换技能接口与 Windows 低风险动作 | 任意桌面控制 |
 | `ScreenGuide.Vision.*` | 单窗口捕获、敏感窗口拒绝、本机 OCR/UIA | 全桌面捕获和云端上传 |
 | `ScreenGuide.Voice.Windows` | 本机采音、离线识别、回声过滤、朗读 | 保存录音或后台隐蔽监听 |
@@ -92,7 +92,7 @@ V0.4.0 Stage 2 正式源码由下面这些内容共同组成：
 - 原始文字、输入方式、会话内顺序号和幂等键；
 - 工作类型：普通聊天、桌面动作、窗口观察、编程任务或未知；
 - 当前阶段和缺失上下文；
-- 关联的 Plan、Conversation Turn、Task、Operation、项目、文件和单窗口身份；
+- 关联的 Plan、Conversation Turn、Task、Operation、项目、文件和单窗口身份 `{HWND, PID, ProcessStartTimeUtc, ProcessName, Title}`；
 - UI 已确认的 Expected Intent/Target 与 Host 规划得到的 Canonical Plan Target；
 - 是否需要确认、是否已经确认、是否请求取消；
 - 结果、错误、完成时间和并发版本。
@@ -225,8 +225,8 @@ Codex 普通聊天适配器由 `CodexChatModelProvider` 承载，但生产策略
 
 - 默认运行数据：`%LOCALAPPDATA%\ScreenGuide\V01`。
 - SQLite：`state\tasking.db`；日志：`logs`；Codex 辅助数据：`codex`；任务证据：`evidence`；AI 路由：`settings\ai-settings.json`；DPAPI 密文：`secrets\<provider>.bin`。
-- schema v9 新增独立 `memory_items`；schema v10 只给 Session Turn、Conversation Turn 和 `ai_invocations` 增加内容无关的 consent/来源/manifest 元数据。迁移按打开时的原始版本生成唯一备份：直接 v8→v10 使用 `pre-v10-from-v8`，v9→v10 使用 `pre-v10-from-v9`；每个版本步骤单独事务提交，失败保留该步骤开始前的版本。
-- V0.4.0 只支持 schema v8，不能打开 schema v9/v10。直接 v8→v10 的 Stage 2 回滚使用 `pre-v10-from-v8`；v9 来源先用 `pre-v10-from-v9` 回到 v9，再使用升级前已有的 v8 备份或隔离数据目录，不能假定 v9→v10 会生成 pre-v9。继续回滚 Stage 1 时仍遵守既有 pre-v8 边界，不能用当前源码冒充冻结历史版本。
+- schema v9 新增独立 `memory_items`；schema v10 给 Session Turn、Conversation Turn 和 `ai_invocations` 增加内容无关的 consent/来源/manifest 元数据；schema v11 只给 `session_turns` 增加 `window_process_id` 与 `window_process_started_at_utc`。迁移按打开时的原始版本生成唯一 `pre-v11-from-vN` 备份；v10→v11 是单事务，失败保持 v10。历史 v10 Turn 的新列为 NULL，窗口确认与执行必须失败关闭并重新取证。
+- V0.5.0 只支持 schema v10，不能打开 schema v11。回滚必须保留 v11 主库，并在隔离目录使用匹配来源的 pre-v11 备份；继续回滚 Stage 2/Stage 1 时仍遵守既有 pre-v10/pre-v8 边界，不能用当前源码冒充冻结历史版本。
 - 重启恢复：运行中的 Session Turn 先标记 `Interrupted`，再与已有 Conversation Turn / Task 终态对账；可安全等待的项目补充状态保留，不自动执行原请求。
 - 单窗口像素和录音不写入数据库或仓库；单窗口像素在本机分析后清零。
 
@@ -252,7 +252,7 @@ Codex 普通聊天适配器由 `CodexChatModelProvider` 承载，但生产策略
 - `SessionCoordinator.cs`、`MainWindow.xaml.cs`、`SqliteTaskStore.cs` 等文件较大；阶段 1 为稳定边界保留了集中实现，后续只能在测试保护下逐步拆分。
 - Session 快照随完整会话历史增长；ChangeVersion 是单 Host 进程内信号，实例 ID/启动时间只解决重启后的快照世代判断，不是跨进程持久事件日志。
 - 编程任务监视器仍在 Host 内部定时查询 Task 状态；这不等于 DesktopClient 的全量轮询，但仍可在后续改为更直接的任务事件。
-- 单窗口授权当前绑定窗口句柄、进程名和标题；这比只比较句柄更安全，但同一程序重新创建同标题窗口时仍可能碰到 Windows 句柄复用。后续应加入进程 ID 与进程启动时间等更稳定身份。
+- 单窗口身份已绑定 HWND、PID、进程启动时间、进程名和标题；动态标题变化会保守地要求重新确认，这是防止 HWND/PID 复用和目标漂移的安全取舍。
 - DeepSeek/Qwen 真实验收是已冻结的精确 SHA 证据；日后修改 Provider 或模型合同时必须对新 SHA 重新获得最小真实请求授权，不得泛化旧结论。
 - Codex 普通聊天只保留 `codex-default` 描述并在生产策略下失败关闭，不提供真实普通聊天模型或 Usage；这不影响独立 Codex 编程 Agent。
 - Provider 切换会把同一 Conversation 的既有历史交给新的数据目的地；UI 已明确提示，但仍需真实用户体验验收。
@@ -260,5 +260,5 @@ Codex 普通聊天适配器由 `CodexChatModelProvider` 承载，但生产策略
 - DPAPI 保护静态密文，但不抵御已取得同一 Windows 用户权限、管理员权限或运行时内存读取能力的恶意程序。
 - 语义意图只覆盖有限候选句式，保守回退是有意安全选择；不能把它宣传为完整自然语言操作理解。
 - 阶段 3 只支持逐 Turn 明确选择、完整可见确认和单次普通聊天发送；没有自动注入、RAG、向量库、后台检索或跨 Session 自动个性化。Conversation 历史和 `ai_invocations` 仍不是长期记忆。
-- schema v10 对 v9/V0.4.0 schema v8 向前不兼容；回滚必须保留 v10 主库并管理 pre-v10/pre-v9 备份，Stage 1 回滚仍需对应 pre-v8 备份。
+- schema v11 对 V0.5.0 schema v10 向前不兼容；回滚必须保留 v11 主库并使用匹配的 pre-v11 备份，更早回滚继续管理 pre-v10/pre-v8 备份。
 - 安装包未签名，语音模型未纳入可分发方案。

@@ -99,6 +99,13 @@
 - 预览不保存查询或搜索索引，不修改记忆，也不调用 Prompt、Provider、Session、Conversation 或 AI Invocation；界面明确显示“只在本机匹配；不会发送给模型”。
 - 本地预览不代表同意。只有本 Turn 明确选择、查看完整出站快照并确认后，临时 `USER_SELECTED_MEMORY_CONTEXT_V1` 才会作为 User 参考数据最多发送一次；取消、变化、过期或重启都会使确认失效，且无 retry、fallback 或 resend。
 
+## 阶段 4 R1 当前能力
+
+- 单窗口授权在 Host 内绑定 `{HWND, PID, ProcessStartTimeUtc, ProcessName, Title}`，身份只来自可信 Windows/Host 读取，不接受 Client、屏幕内容或模型提供的身份。
+- 身份在确认前、UI Automation 前、每个单窗口捕获后端入口、回退入口、捕获完成后和本机分析前重新核验；任何缺失、读取失败或变化都会清理已捕获画面并要求重新选择/确认，不会弱化为只比较 HWND、进程名或标题。
+- SQLite 候选合同为 schema v11，在 `session_turns` 保存 PID 和进程启动时间；v10→v11 先创建唯一 `pre-v11-from-v10` 备份并以单事务迁移。历史 v10 Turn 缺少新身份时失败关闭，不能复用旧窗口授权。
+- Desktop IPC 继续保持 protocol v10；PID 与进程启动时间不通过 IPC 暴露，也不新增权限、网络、Provider 或凭据路径。
+
 ## 尚未完成
 
 - 阶段 3 不包含自动记忆提取、后台/语义检索、RAG、向量数据库、用户画像或跨 Session 自动个性化；`intent.semantic` 永不接收记忆。
@@ -129,4 +136,5 @@
 - V0.2.1 标签 `v0.2.1-baseline` 保留为上一版回滚点；回滚数据必须使用 pre-v7 备份或隔离数据目录。
 - 阶段 2 候选代码把 SQLite 升到 schema v8 并在升级前建立 `pre-v8` 备份。V0.3.0 不能直接打开 schema v8；回滚到阶段 1 时必须使用 pre-v8 备份或隔离数据目录，不能覆盖正式数据库。
 - V0.5.0 使用 schema v10。直接从 V0.4.0 schema v8 升级只建立 `pre-v10-from-v8`，不会自动建立中间 pre-v9；从 v9 升级建立 `pre-v10-from-v9`。V0.4.0 不能直接打开 v9/v10；回滚时必须保留新主库，并使用匹配来源的 pre-v10、既有 v8 备份或隔离数据目录。
+- 阶段 4 S4-R1 候选使用 schema v11、protocol v10。v10→v11 建立 `pre-v11-from-v10`；从更早版本直接升级时只按打开时的原始版本建立一个 `pre-v11-from-vN`。回滚到 V0.5.0 必须保留 v11 主库，并在隔离目录使用匹配的 pre-v11 备份。
 - 为保护本机同 AppId 的现有 V0.2.0 安装、卸载登记和用户数据，本阶段没有在该机器重复完整安装—卸载—重装；该发布生命周期仍应在干净机执行。

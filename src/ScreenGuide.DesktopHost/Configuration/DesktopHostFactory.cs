@@ -150,6 +150,7 @@ public static class DesktopHostFactory
         builder.Services.AddSingleton<IForegroundWindowContextProvider>(services =>
             services.GetRequiredService<ForegroundWindowTracker>());
         builder.Services.AddSingleton<ISensitiveWindowPolicy, WindowsSensitiveWindowPolicy>();
+        builder.Services.AddSingleton<IWindowCaptureTargetVerifier, WindowsWindowCaptureTargetVerifier>();
         builder.Services.AddSingleton<WindowsGraphicsCaptureBackend>();
         builder.Services.AddSingleton<PrintWindowCaptureBackend>();
         builder.Services.AddSingleton<IExactWindowCaptureBackend, ResilientExactWindowCaptureBackend>();

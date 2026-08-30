@@ -578,4 +578,9 @@ internal static class SqliteSchema
         CREATE INDEX ix_ai_invocations_memory_consent
             ON ai_invocations(memory_consent_id);
         """;
+
+    public const string CreateVersion11 = """
+        ALTER TABLE session_turns ADD COLUMN window_process_id INTEGER NULL;
+        ALTER TABLE session_turns ADD COLUMN window_process_started_at_utc TEXT NULL;
+        """;
 }

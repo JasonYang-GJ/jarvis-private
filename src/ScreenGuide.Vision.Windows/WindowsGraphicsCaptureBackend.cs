@@ -12,7 +12,8 @@ namespace ScreenGuide.Vision.Windows;
 /// Preferred exact-HWND capture based on Windows Graphics Capture. It obtains one frame and
 /// closes the session immediately; no monitor or desktop capture item is ever created.
 /// </summary>
-public sealed class WindowsGraphicsCaptureBackend : IExactWindowCaptureBackend
+public sealed class WindowsGraphicsCaptureBackend(
+    IWindowCaptureTargetVerifier identityVerifier) : IExactWindowCaptureBackend
 {
     private const uint D3d11CreateDeviceBgraSupport = 0x20;
     private const int D3dDriverTypeHardware = 1;
@@ -25,6 +26,7 @@ public sealed class WindowsGraphicsCaptureBackend : IExactWindowCaptureBackend
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        identityVerifier.Verify(target);
         if (!GraphicsCaptureSession.IsSupported())
         {
             throw new PlatformNotSupportedException("当前 Windows 版本不支持单窗口 Graphics Capture。 ");
@@ -231,23 +233,45 @@ public sealed class WindowsGraphicsCaptureBackend : IExactWindowCaptureBackend
         out IntPtr graphicsDevice);
 }
 
-public sealed class ResilientExactWindowCaptureBackend(
-    WindowsGraphicsCaptureBackend preferred,
-    PrintWindowCaptureBackend fallback) : IExactWindowCaptureBackend
+public sealed class ResilientExactWindowCaptureBackend : IExactWindowCaptureBackend
 {
+    private readonly IExactWindowCaptureBackend _preferred;
+    private readonly IExactWindowCaptureBackend _fallback;
+    private readonly IWindowCaptureTargetVerifier _identityVerifier;
+
+    public ResilientExactWindowCaptureBackend(
+        WindowsGraphicsCaptureBackend preferred,
+        PrintWindowCaptureBackend fallback,
+        IWindowCaptureTargetVerifier identityVerifier)
+        : this((IExactWindowCaptureBackend)preferred, fallback, identityVerifier)
+    {
+    }
+
+    internal ResilientExactWindowCaptureBackend(
+        IExactWindowCaptureBackend preferred,
+        IExactWindowCaptureBackend fallback,
+        IWindowCaptureTargetVerifier identityVerifier)
+    {
+        _preferred = preferred;
+        _fallback = fallback;
+        _identityVerifier = identityVerifier;
+    }
+
     public async Task<RawWindowFrame> CaptureAsync(
         WindowCaptureTarget target,
         CancellationToken cancellationToken)
     {
+        _identityVerifier.Verify(target);
         try
         {
-            return await preferred.CaptureAsync(target, cancellationToken).ConfigureAwait(false);
+            return await _preferred.CaptureAsync(target, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception exception) when (
             exception is not OperationCanceledException
             && exception is not UnauthorizedAccessException)
         {
-            return await fallback.CaptureAsync(target, cancellationToken).ConfigureAwait(false);
+            _identityVerifier.Verify(target);
+            return await _fallback.CaptureAsync(target, cancellationToken).ConfigureAwait(false);
         }
     }
 }
