@@ -2,18 +2,20 @@
 
 ## 1. 状态与结论
 
-- Packet：`s5-r1-offline-license-inventory`
+- Packet：`s5-r1-frozen-attribution`
+- Evidence lineage：`s5-r1-offline-license-inventory` → `s5-r1-official-license-evidence` → `s5-r1-frozen-attribution`
 - 审计基线：`02b910862d1daba68629b8631d49e149983f74f5`
 - Stage 4 tag：`v0.6.0-stage4`
 - Tag object：`20045c7960c182a052a5e0b2552ce0ed14a3863f`
 - Tag target：`3a591a7b6af7da7d97e07093d4c33a3f44553b82`
 - S5-R1 Offline Inventory：**PASS**
 - S5-R1 Official Evidence Verification：**PASS**
-- S5-R1 overall：**BLOCKED_PENDING_OFFICIAL_LICENSE_EVIDENCE**
-- External Distribution：**BLOCKED_FOR_EXTERNAL_DISTRIBUTION**
+- S5-R1 Attribution / NOTICE Contract：**S5-R1_CONTRACT_PASS**
+- S5-R1 NOTICE Implementation：**NOTICE_IMPLEMENTATION_PENDING**
+- External Distribution：**EXTERNAL_DISTRIBUTION_BLOCKED**
 - Stage 5 产品/安装器实施：**NOT_STARTED / NOT_AUTHORIZED**
 
-本清单是本机、离线、只读证据整理，不是法律意见，不建立 `PROHIBITED` 或 `INCOMPATIBLE` 结论。Official Evidence Verification PASS 只表示已批准的官方来源证据已完成采集与独立复核，不表示许可链或冻结产物 attribution 已完整。`UNKNOWN_BLOCKED_FOR_DISTRIBUTION` 表示当前证据不足，必须在分发前补齐官方材料并重新获得 exact-SHA Owner 授权；它不等于认定权利人禁止分发。
+本清单是本机、离线、只读证据整理，不是法律意见，不建立 `PROHIBITED` 或 `INCOMPATIBLE` 结论。`S5-R1_CONTRACT_PASS` 只表示四轴归属、manifest schema、NOTICE layout 与授权门禁已经形成合同；它不表示 NOTICE 已实现、冻结产物 attribution 已闭合或产品可对外分发。`UNKNOWN_BLOCKED_FOR_DISTRIBUTION` 表示当前证据不足，必须在分发前补齐材料并重新获得相应 Owner 授权；它不等于认定权利人禁止分发。
 
 ## 2. 证据边界与方法
 
@@ -136,9 +138,12 @@
 ## 9. 冻结产物证据边界
 
 - V0.6.0 基线文档是当前唯一权威的冻结 installer evidence，只证明 installer size/hash/`NotSigned`、ProductVersion/FileVersion 与 539 个发布文件，不证明每个文件的许可 attribution。
+- C0 installer 的**产品 payload**收纳合同只包含 win-x64 publish 树与删除脚本；Inno engine/translation 属于 installer 基础设施而不是额外产品 payload。该边界不等于已有逐文件名称/hash manifest。
+- 中文语音模型在当前 installer 中为 `VERIFIED-EXCLUDED`，不再作为当前安装包的硬阻断；未来若改为捆绑或下载，必须重新进入独立许可 Gate。
+- Microsoft.Windows.SDK.NET.Ref 与七个非 win-x64 Sherpa runtime package 为 `EXCLUDED-CONDITIONAL`；只有未来 frozen manifest 证明它们不存在，才能最终关闭该轴。
 - 当前仓库根的 ignored `artifacts` 是非权威、可变的构建输出，不是只读 `v0.6.0-stage4` tag artifact manifest。当前 `artifacts/publish` 有 539 个文件，Client/Host informational version 绑定 `693719d09cead42304d7c3334b98e9161128c623`，不是正式 C0 `3a591a7b6af7da7d97e07093d4c33a3f44553b82`，因此不能用于 attribution。
 - 当前 `artifacts/release` 含一个 V0.6.0 命名的 installer，QA 观察大小为 64,216,176 bytes；它不是正式冻结的 tag-source installer identity，同样不得用于 attribution。
-- 未来只能对只读 V0.6.0 tag artifact 生成逐文件 manifest；不得移动 tag、重建 C0 identity 或把其他版本目录冒充冻结产物。
+- Stage 4 没有留下原 C0 逐文件名称/hash manifest。若原始 C0 artifact 仍存在，未来可在单独授权下只读生成 manifest；若不存在，clean rebuild 只能作为“可重建参考”，不能冒充原始 C0 事实。不得移动 tag、重建 C0 identity 或把其他版本目录冒充冻结产物。
 
 ## 10. 相互独立的发布门禁
 
@@ -149,7 +154,7 @@
 3. 隔离干净 Windows 的 same-AppId install/upgrade/rollback/uninstall 生命周期；
 4. tag、version、hash、signature 与 per-file release identity。
 
-任一项缺失都保持 External Distribution=`BLOCKED_FOR_EXTERNAL_DISTRIBUTION`。
+任一项缺失都保持 External Distribution=`EXTERNAL_DISTRIBUTION_BLOCKED`。
 
 ## 11. 官方来源证据层（访问日期 2026-08-30）
 
@@ -197,23 +202,113 @@
 - Architect/Security 与 QA：均为白名单 GET-only；nonGET=0、downloads=0、ProviderRequests=0、CredentialReads=0。客户端总 GET 数不作为权威字段。
 - 网络证据阶段现已关闭；任何后续在线补证都需要新的 exact-SHA Owner 授权。
 
-## 12. 最小未来证据
+## 12. 冻结归属与 NOTICE 合同
 
-Official Evidence Verification PASS 后仍缺少以下相互独立的证据；未来在线核验必须使用新的 exact-SHA Owner 授权，本轮不浏览：
+### 12.1 四轴与状态词
+
+每个组件必须分别判定四个轴，不能用一个“有许可证”结论替代：
+
+1. **Source**：来源、权利人、版本与适用 LICENSE/NOTICE 是否可绑定；
+2. **Bundling**：该组件或文件是否实际进入 C0 installer；
+3. **Attribution**：冻结相对路径能否精确映射到组件、版本、package/contentHash 或 C0 blob；
+4. **Notice**：适用 LICENSE/NOTICE 是否按合同进入安装包并能从安装文件反查。
+
+状态词固定为：`VERIFIED`（该轴有精确证据）、`PARTIAL`（有证据但绑定未闭合）、`UNKNOWN`（尚未建立）、`VERIFIED-EXCLUDED`（已确认不在当前分发范围，未来纳入需重开 Gate）、`EXCLUDED-CONDITIONAL`（预计排除，但仍需 frozen manifest 的不存在性最终确认）。
+
+| Component boundary | Source | Bundling | Attribution | Notice | 当前结论 |
+|---|---|---|---|---|---|
+| 仓库源码、文档与非 runtime 品牌材料 | `UNKNOWN` | `VERIFIED-EXCLUDED` | `VERIFIED-EXCLUDED` | `VERIFIED-EXCLUDED` | 不属于当前 installer 产品 payload；Owner 权利人/来源/允许分发形态仍须声明。 |
+| runtime Prompt、`.ico` 与删除脚本 | `UNKNOWN` | `PARTIAL` | `UNKNOWN` | `UNKNOWN` | publish/installer 规则显示会进入产品 payload，但没有原 C0 manifest；Owner 权利人/来源未声明。 |
+| NAudio 2.2.1 / System.Speech 10.0.10 | `VERIFIED` | `PARTIAL` | `PARTIAL` | `UNKNOWN` | exact 官方许可证据已核；原 C0 文件映射与 NOTICE 布置仍缺。 |
+| Microsoft.Data.Sqlite / Microsoft.Extensions application packages | `PARTIAL` | `PARTIAL` | `PARTIAL` | `UNKNOWN` | package/family 证据不等于冻结文件映射。 |
+| .NET / WindowsDesktop runtime 10.0.11 | `PARTIAL` | `PARTIAL` | `PARTIAL` | `UNKNOWN` | 本地 LICENSE/NOTICE 哈希与官方材料存在，runtime-pack→C0 文件与 NOTICE placement 未闭合。 |
+| Sherpa / ONNX Runtime win-x64 | `PARTIAL` | `PARTIAL` | `PARTIAL` | `UNKNOWN` | exact source license 与缓存静态哈希存在，但不是 frozen artifact manifest。 |
+| SQLite managed / native e_sqlite3 | `PARTIAL` | `PARTIAL` | `PARTIAL` | `UNKNOWN` | native 上游许可、C0 DLL 映射与 NOTICE placement 未闭合。 |
+| Inno installer engine / ChineseSimplified.isl | `PARTIAL` | `VERIFIED` | `PARTIAL` | `UNKNOWN` | engine/translation 会进入 installer；compiler exact version 与 translation upstream exact provenance 未闭合。 |
+| 中文语音模型 | `UNKNOWN` | `VERIFIED-EXCLUDED` | `VERIFIED-EXCLUDED` | `VERIFIED-EXCLUDED` | 当前 installer 不含模型；未来捆绑/下载必须重新做许可 Gate。 |
+| Microsoft.Windows.SDK.NET.Ref 10.0.19041.57 | `PARTIAL` | `EXCLUDED-CONDITIONAL` | `EXCLUDED-CONDITIONAL` | `EXCLUDED-CONDITIONAL` | 预计仅为构建引用；需 frozen manifest 不存在性关闭。 |
+| 七个非 win-x64 Sherpa runtime package | `PARTIAL` | `EXCLUDED-CONDITIONAL` | `EXCLUDED-CONDITIONAL` | `EXCLUDED-CONDITIONAL` | 只是 lock-graph entries；需 frozen manifest 不存在性关闭。 |
+
+### 12.2 已确认的静态绑定锚点
+
+以下哈希只绑定已说明的本地证据，不能替代原 C0 manifest：
+
+| Evidence | Binding | SHA-256 | 边界 |
+|---|---|---|---|
+| C0 `ChineseSimplified.isl` | Git blob `30d997321197c7c96d8e111e9ddd6c0ca8da5f09` | `BF0751FA176569C6FAA2F6E17ED2734617BEF325D5CC06EAE030FDD0258EE778` | 仅本地 C0 文件绑定，不证明 upstream exact provenance。 |
+| Sherpa managed asset | 本机 package cache 静态文件 | `487B231CCA5B12CC7576E33486B18465DE8C2B2DF3BD04480E9AB0C938DE1FAE` | cache evidence，不证明 C0 bundling。 |
+| Sherpa C API asset | 本机 package cache 静态文件 | `614878147C05121AEB1514EC4FB3E48B89751591532ECA9208235B9AB868306A` | cache evidence，不证明 C0 bundling。 |
+| ONNX Runtime asset | 本机 package cache 静态文件 | `DAA77083A45BF525DA0DDE9E87F85D8EB146F58F9C9AA7124CA84545E1C0F148` | cache evidence，不证明 C0 bundling。 |
+| e_sqlite3 win-x64 asset | 本机 package cache 静态文件 | `B7385D722C83FB52142A00477A726723745916D22A555711EE89834C1111FB2E` | cache evidence，不证明 C0 bundling 或 native license。 |
+
+### 12.3 Frozen manifest 最小 schema
+
+未来 manifest 每个安装文件至少包含以下字段；不得记录用户绝对路径：
+
+| Field | Contract |
+|---|---|
+| `relativePath` | 相对安装根的规范化路径；唯一键。 |
+| `size` | 文件字节数。 |
+| `sha256` | 文件内容 SHA-256。 |
+| `component` / `version` | 归属组件与精确版本。 |
+| `packageContentHashOrC0Blob` | 可用时记录 package `contentHash` 或 C0 Git blob；不能伪造。 |
+| `sourceClassification` | `VERIFIED` / `PARTIAL` / `UNKNOWN` 等本节状态。 |
+| `licenseNoticePath` | 安装包内适用 LICENSE/NOTICE 的相对路径；未实现时必须为空并保持阻断。 |
+| `bundlingState` | bundled、`VERIFIED-EXCLUDED` 或 `EXCLUDED-CONDITIONAL`。 |
+| `confidence` | 证据置信级别及其依据类别，不记录法律结论。 |
+
+### 12.4 推荐 NOTICE layout
+
+- 安装根设置一个固定第三方通知索引，例如 `THIRD-PARTY-NOTICES.txt`；
+- 经确认的许可材料放入 `licenses/<component>/`，保留适用的 `LICENSE`、`NOTICE` 或 `THIRD-PARTY-NOTICES`；
+- 索引必须把每个安装文件相对路径映射到 component/version 与对应 license/notice 相对路径；
+- 同一许可证不能仅凭家族相似性覆盖不同 package/version；缺失映射必须失败关闭；
+- 这是推荐合同，不是已实现的 installer layout、分发许可或法律结论。
+
+把 NOTICE 文件加入 publish/installer、安装后验证其存在、并形成新的 release identity，属于单独授权的 **S5-R1 packaging implementation**。它不能塞入 S5-R2，也不能等到 S5-R4 才首次实现；当前提交不修改 installer 或冻结产物。
+
+### 12.5 Owner Decision Gate
+
+Owner 必须可见决定并声明：
+
+- 项目源码、文档、runtime Prompt、品牌、图标与删除脚本的权利人和来源；
+- 允许的分发形态与限制；
+- 品牌授权和代码授权的边界；
+- 不明资产选择补证、替换或排除。
+
+本文不得推荐或替 Owner 选择根许可证。
+
+### 12.6 新授权门禁
+
+以下动作各自需要新的、可见的 Owner 授权，不能相互替代：
+
+1. Owner 权属/分发形态确认；
+2. 原始 C0 artifact 的只读静态 manifest 生成；
+3. clean rebuild 及其可重建参考 manifest；
+4. NOTICE publish/installer 修改、安装后验证与新 release identity；
+5. 任何未来在线许可补证；
+6. S5-R2 隔离安装生命周期。
+
+## 13. Remaining blocks
+
+`S5-R1_CONTRACT_PASS` 后仍缺少以下相互独立的证据或实施；本轮不执行：
 
 - Owner 对项目源码、文档、Prompt、品牌与 `.ico` 的 ownership/source/distribution declaration；
 - 只读 `v0.6.0-stage4` artifact 的完整 per-file manifest、逐文件 hash、来源映射、LICENSE/NOTICE placement 与 attribution；
-- 中文语音模型的权重、tokens、训练数据许可，以及 exact model card/source/version/hash 绑定；
+- NOTICE 文件与索引的实际 publish/installer 布置、安装后验证及新 release identity；
 - SQLite native `e_sqlite3` 的上游许可与冻结 DLL attribution；
 - Windows SDK exact package/version 与适用 redistribution/license 的精确绑定；
 - Inno compiler exact 小版本及 `ChineseSimplified.isl` 的本地 exact source commit/hash/provenance；
-- .NET 与 WindowsDesktop runtime-pack 到冻结产物逐文件 LICENSE/NOTICE 的映射。
+- .NET、WindowsDesktop、Sherpa 与 ONNX Runtime 到冻结产物逐文件 LICENSE/NOTICE 的映射；
+- WinSDK Ref 与七个非 win-x64 Sherpa runtime 在 frozen manifest 中的不存在性。
 
-在上述证据补齐并通过独立 Gate 前，不得把 `BLOCKED_PENDING_OFFICIAL_LICENSE_EVIDENCE` 改为可分发。
+中文语音模型是当前 installer 的 `VERIFIED-EXCLUDED`，不是当前分发包的硬阻断；未来若捆绑或下载，必须重新核对权重、tokens、训练数据许可及 exact model card/source/version/hash。数字签名与 clean-machine same-AppId lifecycle 仍是彼此独立的后续 Gate。
 
-## 13. 安全与治理
+在上述证据和实施补齐并通过独立 Gate 前，不得把 `EXTERNAL_DISTRIBUTION_BLOCKED` 改为可分发。
+
+## 14. 安全与治理
 
 - 本文不包含用户绝对路径、秘密、Prompt 正文、模型内容、原始二进制内容或法律结论。
-- 本文是唯一详细 S5-R1 inventory 与 official evidence record；`ROADMAP.md`、`PRODUCT.md`、`MEMORY.md` 与 Charter 只保留摘要和链接。
+- 本文是唯一详细 S5-R1 inventory、official evidence 与 attribution/NOTICE contract record；`ROADMAP.md`、`PRODUCT.md`、`MEMORY.md` 与 Charter 只保留摘要和链接。
 - 不建立第二套 license registry、数据库或 schema；Module Registry 保持 Shadow，不写 Registry/Lease。
-- 本轮文档提交计数：NetworkRequests=0、ProviderRequests=0、CredentialReads=0、InstallerRuns=0、GUI=0、Microphone=0、Tests=0、Builds=0。第 11 节历史请求审计仅记录已经关闭并通过独立复核的官方来源采集阶段。
+- 本轮文档提交计数：NetworkRequests=0、ProviderRequests=0、CredentialReads=0、InstallerRuns=0、BinaryExecution=0、GUI=0、Microphone=0、Tests=0、Builds=0。第 11 节历史请求审计仅记录已经关闭并通过独立复核的官方来源采集阶段。
