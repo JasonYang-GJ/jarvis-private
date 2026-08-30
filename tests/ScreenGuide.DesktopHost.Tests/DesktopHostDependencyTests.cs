@@ -102,6 +102,37 @@ public sealed class DesktopHostDependencyTests
     }
 
     [Fact]
+    public async Task SessionCoordinatorUsesOneBoundedOperationGateRegistry()
+    {
+        await using var environment = DesktopHostTestEnvironment.Create();
+        using var host = environment.BuildHost();
+
+        var registry = host.Services.GetRequiredService<SessionOperationGateRegistry>();
+        Assert.Same(registry, host.Services.GetRequiredService<SessionOperationGateRegistry>());
+
+        var repositoryRoot = FindRepositoryRoot();
+        var runtimeDirectory = Path.Combine(
+            repositoryRoot,
+            "src",
+            "ScreenGuide.DesktopHost",
+            "Runtime");
+        var coordinator = File.ReadAllText(Path.Combine(runtimeDirectory, "SessionCoordinator.cs"));
+        var runtimeSources = Directory.EnumerateFiles(runtimeDirectory, "*.cs")
+            .Select(File.ReadAllText)
+            .ToArray();
+        Assert.Contains("SessionOperationGateRegistry operationGates", coordinator, StringComparison.Ordinal);
+        Assert.DoesNotContain("ConcurrentDictionary<Guid, SemaphoreSlim>", coordinator, StringComparison.Ordinal);
+        Assert.DoesNotContain("_sessionGates", coordinator, StringComparison.Ordinal);
+        Assert.DoesNotContain("_turnGates", coordinator, StringComparison.Ordinal);
+        Assert.Single(runtimeSources, source => source.Contains(
+            "public ValueTask<IAsyncDisposable> AcquireSessionAsync(",
+            StringComparison.Ordinal));
+        Assert.Single(runtimeSources, source => source.Contains(
+            "public ValueTask<IAsyncDisposable> AcquireTurnAsync(",
+            StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task ConnectorConfigurationFailureIsAuditedAfterStoreInitialization()
     {
         await using var environment = DesktopHostTestEnvironment.Create();

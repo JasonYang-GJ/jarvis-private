@@ -166,12 +166,13 @@ V0.4.0 Stage 2 正式源码由下面这些内容共同组成：
 
 ## 8. IPC、AI 设置与状态更新
 
-- DesktopClient 与 DesktopHost 使用当前 Windows 用户专属 Named Pipe，当前候选 protocol v10；v10 增加逐 Turn 记忆选择和出站确认，v9/v10 不混用。
+- DesktopClient 与 DesktopHost 使用当前 Windows 用户专属 Named Pipe，当前 protocol v11；v10 增加逐 Turn 记忆选择和出站确认，v11 增加 Session 有界投影、游标分页与精确 Turn 读取，旧协议不混用。
 - v8 新增 `ai.settings.get`、`ai.chat-route.set`、`ai.credentials.set/delete` 和 `ai.provider.health`。AI 设置 DTO 只返回 Provider/Model、能力、数据目的地、健康和配置状态，绝不返回完整 Key。
 - 普通聊天路由存入本地 `settings/ai-settings.json`；Key 单独存入 DPAPI 密文。设置页明确显示同一 Session 的既有历史会随下一条消息发送给新 Provider；当前运行回答不切换。
 - `sessions.current` 返回最多 32 个最新 Turn、全部非终态 Turn 和 50 条最新消息的有界 bootstrap；`sessions.messages.page` 使用 `(sequence_number < cursor)` keyset 分页，每页最多 50 条；`sessions.turn.get` 读取精确权威 Turn。
 - `sessions.wait` 使用最长 30 秒的本机长轮询，返回 `NoChange`、最多 32 个 Turn/50 条消息 upsert 的 `Delta`，或 `ResetRequired`。Host journal 只是有界唤醒/投影状态；SQLite Store 仍是事实真源，不建立持久 delta 表。
 - Host 重启、Session 切换、旧 Coordinator 世代、journal gap/overflow 或响应倒退均要求 reset。Coordinator 实例 ID、启动时间、Session ID 和 ChangeVersion 共同绑定响应；DesktopClient 只维护有界显示缓存，按消息 ID+序号去重，不能用缓存授予确认或动作权限。
+- Session/Turn 的临时操作串行由 Host 内部单例 `SessionOperationGateRegistry` 负责。引用计数覆盖 holder 与 waiter，取消、异常和释放后归零的 key 会被移除；它不持久化状态、不发布事件，也不参与 `_currentSessionGate`、记忆同意、任务或权限判断。
 - IPC 服务将并发连接限制为 64，另保留 8 个忙碌响应槽；未发送首个请求的连接 1 秒释放，监听临时错误会退避重试。
 - 无效长度、无效 JSON 等坏请求帧只记录并关闭该连接，不会让 Host 接受循环或关停流程失败。
 - 单次投影软上限为 512 KiB，Named Pipe 仍保留 4 MiB 硬帧上限；单条内容导致超限时稳定失败关闭，不截断内容。

@@ -23,31 +23,62 @@ public interface ISessionMemoryConsentPublicationObserver
 /// Desktop Host 中唯一的当前会话与前台 Turn 协调入口。
 /// 它只协调状态和取消，不拥有任何项目、文件、窗口或电脑动作授权。
 /// </summary>
-public sealed class SessionCoordinator(
-    ISessionStore sessionStore,
-    SessionProjectionService projections,
-    ConversationService conversations,
-    AssistantCommandService assistantCommands,
-    LocalTaskEntryService tasks,
-    SessionTaskStateSynchronizer taskStateSynchronizer,
-    DesktopHostState hostState,
-    ModelRouter modelRouter,
-    PromptRegistry prompts,
-    MemoryService memories,
-    IEnumerable<ISessionMemoryConsentPublicationObserver> memoryConsentPublicationObservers,
-    IForegroundWindowContextProvider foregroundWindows,
-    TimeProvider timeProvider)
+public sealed class SessionCoordinator
 {
     private const int MaximumInputLength = 20_000;
+    private readonly ISessionStore sessionStore;
+    private readonly SessionProjectionService projections;
+    private readonly SessionOperationGateRegistry operationGates;
+    private readonly ConversationService conversations;
+    private readonly AssistantCommandService assistantCommands;
+    private readonly LocalTaskEntryService tasks;
+    private readonly SessionTaskStateSynchronizer taskStateSynchronizer;
+    private readonly DesktopHostState hostState;
+    private readonly ModelRouter modelRouter;
+    private readonly PromptRegistry prompts;
+    private readonly MemoryService memories;
+    private readonly IEnumerable<ISessionMemoryConsentPublicationObserver> memoryConsentPublicationObservers;
+    private readonly IForegroundWindowContextProvider foregroundWindows;
+    private readonly TimeProvider timeProvider;
     private readonly SemaphoreSlim _currentSessionGate = new(1, 1);
-    private readonly ConcurrentDictionary<Guid, SemaphoreSlim> _sessionGates = new();
-    private readonly ConcurrentDictionary<Guid, SemaphoreSlim> _turnGates = new();
     private readonly ConcurrentDictionary<Guid, ActiveSessionWork> _activeWork = new();
     private readonly ConcurrentDictionary<Guid, ActiveTaskMonitor> _taskMonitors = new();
     private readonly ConcurrentDictionary<Guid, IReadOnlyList<MemoryOutboundItemReference>>
         _requestedMemorySelections = new();
     private readonly ConcurrentDictionary<Guid, MemoryOutboundPreparedConsent>
         _preparedMemoryConsents = new();
+
+    internal SessionCoordinator(
+        ISessionStore sessionStore,
+        SessionProjectionService projections,
+        SessionOperationGateRegistry operationGates,
+        ConversationService conversations,
+        AssistantCommandService assistantCommands,
+        LocalTaskEntryService tasks,
+        SessionTaskStateSynchronizer taskStateSynchronizer,
+        DesktopHostState hostState,
+        ModelRouter modelRouter,
+        PromptRegistry prompts,
+        MemoryService memories,
+        IEnumerable<ISessionMemoryConsentPublicationObserver> memoryConsentPublicationObservers,
+        IForegroundWindowContextProvider foregroundWindows,
+        TimeProvider timeProvider)
+    {
+        this.sessionStore = sessionStore;
+        this.projections = projections;
+        this.operationGates = operationGates;
+        this.conversations = conversations;
+        this.assistantCommands = assistantCommands;
+        this.tasks = tasks;
+        this.taskStateSynchronizer = taskStateSynchronizer;
+        this.hostState = hostState;
+        this.modelRouter = modelRouter;
+        this.prompts = prompts;
+        this.memories = memories;
+        this.memoryConsentPublicationObservers = memoryConsentPublicationObservers;
+        this.foregroundWindows = foregroundWindows;
+        this.timeProvider = timeProvider;
+    }
 
     public async Task<LocalSessionSnapshot?> GetCurrentAsync(
         CancellationToken cancellationToken = default)
@@ -186,8 +217,8 @@ public sealed class SessionCoordinator(
             // Selecting the current Session and registering its foreground Turn form one
             // linearized operation. Releasing this gate earlier lets New Topic switch away
             // before the Turn becomes visible, which can create two foreground Sessions.
-            var gate = _sessionGates.GetOrAdd(session.Id, static _ => new SemaphoreSlim(1, 1));
-            await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            var gate = await operationGates.AcquireSessionAsync(session.Id, cancellationToken)
+                .ConfigureAwait(false);
             try
             {
                 var normalizedIdempotencyKey = string.IsNullOrWhiteSpace(idempotencyKey)
@@ -286,7 +317,7 @@ public sealed class SessionCoordinator(
             }
             finally
             {
-                gate.Release();
+                await gate.DisposeAsync();
             }
         }
         finally
@@ -320,8 +351,8 @@ public sealed class SessionCoordinator(
         var project = (await tasks.GetAuthorizedProjectsAsync(cancellationToken).ConfigureAwait(false))
             .SingleOrDefault(item => item.Id == projectId)
             ?? throw new UnauthorizedAccessException("所选项目没有授权或已经失效。 ");
-        var gate = _turnGates.GetOrAdd(turnId, static _ => new SemaphoreSlim(1, 1));
-        await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        var gate = await operationGates.AcquireTurnAsync(turnId, cancellationToken)
+            .ConfigureAwait(false);
         try
         {
             var (session, turn) = await RequireWaitingTurnAsync(
@@ -359,7 +390,7 @@ public sealed class SessionCoordinator(
         }
         finally
         {
-            gate.Release();
+            await gate.DisposeAsync();
         }
     }
 
@@ -381,8 +412,8 @@ public sealed class SessionCoordinator(
             throw new FileNotFoundException("刚才选择的文件已经不存在。", fullPath);
         }
 
-        var gate = _turnGates.GetOrAdd(turnId, static _ => new SemaphoreSlim(1, 1));
-        await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        var gate = await operationGates.AcquireTurnAsync(turnId, cancellationToken)
+            .ConfigureAwait(false);
         try
         {
             var (session, turn) = await RequireWaitingTurnAsync(
@@ -414,7 +445,7 @@ public sealed class SessionCoordinator(
         }
         finally
         {
-            gate.Release();
+            await gate.DisposeAsync();
         }
     }
 
@@ -425,8 +456,8 @@ public sealed class SessionCoordinator(
         CancellationToken cancellationToken = default)
     {
         RequireStartedHost();
-        var gate = _turnGates.GetOrAdd(turnId, static _ => new SemaphoreSlim(1, 1));
-        await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        var gate = await operationGates.AcquireTurnAsync(turnId, cancellationToken)
+            .ConfigureAwait(false);
         SessionRecord session;
         ActiveSessionWork? active = null;
         try
@@ -480,7 +511,7 @@ public sealed class SessionCoordinator(
         }
         finally
         {
-            gate.Release();
+            await gate.DisposeAsync();
         }
 
         if (active is not null)
@@ -497,8 +528,8 @@ public sealed class SessionCoordinator(
         CancellationToken cancellationToken = default)
     {
         RequireStartedHost();
-        var gate = _turnGates.GetOrAdd(turnId, static _ => new SemaphoreSlim(1, 1));
-        await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        var gate = await operationGates.AcquireTurnAsync(turnId, cancellationToken)
+            .ConfigureAwait(false);
         try
         {
             var (session, turn) = await RequireWaitingTurnAsync(
@@ -529,7 +560,7 @@ public sealed class SessionCoordinator(
         }
         finally
         {
-            gate.Release();
+            await gate.DisposeAsync();
         }
     }
 
@@ -540,8 +571,8 @@ public sealed class SessionCoordinator(
         CancellationToken cancellationToken = default)
     {
         RequireStartedHost();
-        var gate = _turnGates.GetOrAdd(turnId, static _ => new SemaphoreSlim(1, 1));
-        await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        var gate = await operationGates.AcquireTurnAsync(turnId, cancellationToken)
+            .ConfigureAwait(false);
         SessionRecord session;
         ActiveSessionWork? active = null;
         try
@@ -595,7 +626,7 @@ public sealed class SessionCoordinator(
         }
         finally
         {
-            gate.Release();
+            await gate.DisposeAsync();
         }
 
         if (active is not null)
@@ -612,8 +643,8 @@ public sealed class SessionCoordinator(
         CancellationToken cancellationToken = default)
     {
         RequireStartedHost();
-        var gate = _turnGates.GetOrAdd(turnId, static _ => new SemaphoreSlim(1, 1));
-        await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        var gate = await operationGates.AcquireTurnAsync(turnId, cancellationToken)
+            .ConfigureAwait(false);
         SessionRecord session;
         SessionTurnRecord turn;
         ActiveSessionWork? active = null;
@@ -668,7 +699,7 @@ public sealed class SessionCoordinator(
         }
         finally
         {
-            gate.Release();
+            await gate.DisposeAsync();
         }
 
         if (active is not null)
@@ -1415,8 +1446,8 @@ public sealed class SessionCoordinator(
                     .ConfigureAwait(false);
             }
 
-            var gate = _turnGates.GetOrAdd(turn.Id, static _ => new SemaphoreSlim(1, 1));
-            await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            var gate = await operationGates.AcquireTurnAsync(turn.Id, cancellationToken)
+                .ConfigureAwait(false);
             try
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -1462,7 +1493,7 @@ public sealed class SessionCoordinator(
             }
             finally
             {
-                gate.Release();
+                await gate.DisposeAsync();
             }
 
             foreach (var observer in memoryConsentPublicationObservers)
@@ -1741,8 +1772,8 @@ public sealed class SessionCoordinator(
         foreach (var turn in turns.Where(item =>
                      item.Id != excludedTurnId && SessionTurnPhases.IsForegroundWork(item.Phase)))
         {
-            var gate = _turnGates.GetOrAdd(turn.Id, static _ => new SemaphoreSlim(1, 1));
-            await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            var gate = await operationGates.AcquireTurnAsync(turn.Id, cancellationToken)
+                .ConfigureAwait(false);
             ActiveSessionWork? active = null;
             SessionTurnRecord? latest = null;
             SessionTurnPhase phaseAtCancellation = default;
@@ -1789,7 +1820,7 @@ public sealed class SessionCoordinator(
             }
             finally
             {
-                gate.Release();
+                await gate.DisposeAsync();
             }
 
             if (active is not null)
@@ -1996,8 +2027,8 @@ public sealed class SessionCoordinator(
         CancellationToken cancellationToken = default)
     {
         RequireStartedHost();
-        var gate = _turnGates.GetOrAdd(turnId, static _ => new SemaphoreSlim(1, 1));
-        await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        var gate = await operationGates.AcquireTurnAsync(turnId, cancellationToken)
+            .ConfigureAwait(false);
         SessionRecord session;
         try
         {
@@ -2094,7 +2125,7 @@ public sealed class SessionCoordinator(
         }
         finally
         {
-            gate.Release();
+            await gate.DisposeAsync();
         }
 
         return await BuildSnapshotAsync(session, cancellationToken).ConfigureAwait(false);

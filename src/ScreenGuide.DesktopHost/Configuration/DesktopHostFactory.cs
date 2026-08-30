@@ -176,7 +176,22 @@ public static class DesktopHostFactory
             services.GetRequiredService<RoutedConversationProvider>());
         builder.Services.AddSingleton<ConversationService>();
         builder.Services.AddSingleton<SessionProjectionService>();
-        builder.Services.AddSingleton<SessionCoordinator>();
+        builder.Services.AddSingleton<SessionOperationGateRegistry>();
+        builder.Services.AddSingleton(services => new SessionCoordinator(
+            services.GetRequiredService<ISessionStore>(),
+            services.GetRequiredService<SessionProjectionService>(),
+            services.GetRequiredService<SessionOperationGateRegistry>(),
+            services.GetRequiredService<ConversationService>(),
+            services.GetRequiredService<AssistantCommandService>(),
+            services.GetRequiredService<LocalTaskEntryService>(),
+            services.GetRequiredService<SessionTaskStateSynchronizer>(),
+            services.GetRequiredService<DesktopHostState>(),
+            services.GetRequiredService<ModelRouter>(),
+            services.GetRequiredService<PromptRegistry>(),
+            services.GetRequiredService<MemoryService>(),
+            services.GetServices<ISessionMemoryConsentPublicationObserver>(),
+            services.GetRequiredService<IForegroundWindowContextProvider>(),
+            services.GetRequiredService<TimeProvider>()));
         builder.Services.AddSingleton<DesktopActionEntryService>();
         builder.Services.AddSingleton<AssistantCommandService>();
         builder.Services.AddSingleton<ProjectInspector>();
