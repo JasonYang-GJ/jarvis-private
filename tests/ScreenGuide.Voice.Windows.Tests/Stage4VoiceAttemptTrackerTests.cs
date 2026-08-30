@@ -19,6 +19,31 @@ public sealed class Stage4VoiceAttemptTrackerTests
         Assert.Equal(EvaluationTerminalState.Success, attempt.State);
         Assert.Equal(TimeSpan.FromSeconds(1), attempt.EndToEndElapsed);
         Assert.Null(attempt.ErrorCode);
+        Assert.Equal(new VoiceTextMatchDiagnostic(6, 6, 0), attempt.VoiceTextMatch);
+    }
+
+    [Theory]
+    [InlineData("元叔今天练习中文语音", 10, 10, 1)]
+    [InlineData("今天练习中文语音", 10, 8, 2)]
+    [InlineData("完全不同", 10, 4, 10)]
+    public void MismatchKeepsOnlySafeLengthAndEditDistanceEvidence(
+        string recognized,
+        int expectedLength,
+        int actualLength,
+        int editDistance)
+    {
+        const long started = 15_000;
+        var tracker = new VoiceAttemptTracker("元枢今天练习中文语音", isWarmup: true, started);
+
+        tracker.OnFinal(recognized, started + Stopwatch.Frequency);
+        var attempt = tracker.Complete(started + (2 * Stopwatch.Frequency));
+
+        Assert.Equal(EvaluationTerminalState.Failure, attempt.State);
+        Assert.Equal("voice.text_mismatch", attempt.ErrorCode);
+        Assert.Equal(
+            new VoiceTextMatchDiagnostic(expectedLength, actualLength, editDistance),
+            attempt.VoiceTextMatch);
+        Assert.DoesNotContain(recognized, attempt.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]

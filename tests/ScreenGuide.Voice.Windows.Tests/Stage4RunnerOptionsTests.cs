@@ -17,6 +17,18 @@ public sealed class Stage4RunnerOptionsTests
         Assert.Equal("941c2d8635939bd1329daa81f34b6829bd447750", options.ExpectedSha);
     }
 
+    [Fact]
+    public void AcceptsOneShotVoiceDiagnosticMode()
+    {
+        var options = RunnerOptions.Parse(
+        [
+            "--mode", "voice-diagnostic",
+            "--expected-sha", "941c2d8635939bd1329daa81f34b6829bd447750"
+        ]);
+
+        Assert.Equal("voice-diagnostic", options.Mode);
+    }
+
     [Theory]
     [InlineData("--mode", "voice", "--expected-sha", "bad")]
     [InlineData("--mode", "unsupported", "--expected-sha", "941c2d8635939bd1329daa81f34b6829bd447750")]

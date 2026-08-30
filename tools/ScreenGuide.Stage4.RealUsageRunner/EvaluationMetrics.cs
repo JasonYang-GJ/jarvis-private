@@ -14,7 +14,23 @@ public sealed record EvaluationAttempt(
     TimeSpan EndToEndElapsed,
     string? ErrorCode = null,
     TimeSpan? CaptureElapsed = null,
-    TimeSpan? AnalysisElapsed = null);
+    TimeSpan? AnalysisElapsed = null,
+    VoiceTextMatchDiagnostic? VoiceTextMatch = null);
+
+public sealed record VoiceTextMatchDiagnostic(
+    int ExpectedLength,
+    int ActualLength,
+    int EditDistance);
+
+public sealed record VoiceTextMatchSummary(
+    int SampleCount,
+    int ExactCount,
+    int OneEditCount,
+    int TwoEditCount,
+    int ThreePlusEditCount,
+    int SameLengthMismatchCount,
+    int ShorterCount,
+    int LongerCount);
 
 public sealed record LatencySummary(
     int Count,
@@ -34,7 +50,8 @@ public sealed record EvaluationAggregate(
     LatencySummary CaptureLatency,
     LatencySummary AnalysisLatency,
     LatencySummary EndToEndLatency,
-    IReadOnlyDictionary<string, int> ErrorCounts);
+    IReadOnlyDictionary<string, int> ErrorCounts,
+    VoiceTextMatchSummary VoiceTextMatch);
 
 public static class EvaluationAggregator
 {
@@ -66,7 +83,27 @@ public static class EvaluationAggregator
             SummarizeElapsed(formal, item => item.CaptureElapsed),
             SummarizeElapsed(formal, item => item.AnalysisElapsed),
             Summarize(measured),
-            errors);
+            errors,
+            SummarizeVoiceTextMatch(attempts));
+    }
+
+    private static VoiceTextMatchSummary SummarizeVoiceTextMatch(
+        IEnumerable<EvaluationAttempt> attempts)
+    {
+        var samples = attempts
+            .Select(item => item.VoiceTextMatch)
+            .Where(item => item is not null)
+            .Select(item => item!)
+            .ToArray();
+        return new VoiceTextMatchSummary(
+            samples.Length,
+            samples.Count(item => item.EditDistance == 0),
+            samples.Count(item => item.EditDistance == 1),
+            samples.Count(item => item.EditDistance == 2),
+            samples.Count(item => item.EditDistance >= 3),
+            samples.Count(item => item.EditDistance > 0 && item.ActualLength == item.ExpectedLength),
+            samples.Count(item => item.ActualLength < item.ExpectedLength),
+            samples.Count(item => item.ActualLength > item.ExpectedLength));
     }
 
     private static LatencySummary SummarizeElapsed(

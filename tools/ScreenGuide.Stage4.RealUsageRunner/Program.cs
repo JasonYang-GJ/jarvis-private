@@ -15,7 +15,7 @@ public static class Program
         catch (ArgumentException)
         {
             Console.Error.WriteLine(
-                "用法：--mode voice|vision|vision-identity-change --expected-sha <40位小写SHA>");
+                "用法：--mode voice|voice-diagnostic|vision|vision-identity-change --expected-sha <40位小写SHA>");
             return 2;
         }
 
@@ -51,7 +51,7 @@ public static class Program
             EvaluationReport report;
             try
             {
-                report = options.Mode == "voice"
+                report = options.Mode is "voice" or "voice-diagnostic"
                     ? await VoiceEvaluationRunner.RunAsync(options, cancellation.Token)
                         .ConfigureAwait(false)
                     : await VisionEvaluationRunner.RunAsync(options, cancellation.Token)

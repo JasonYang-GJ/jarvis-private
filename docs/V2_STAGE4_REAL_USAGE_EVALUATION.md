@@ -9,6 +9,7 @@ S4-R2 只回答两个问题：本机离线中文语音在真实麦克风下的�
 ## 固定样本与终态
 
 - Voice：1 次预热 + 20 次正式尝试；每次由用户按 Enter 主动开始，15 秒内只允许一个非空 final，固定版本规范化后必须精确匹配可见的非个人短句。
+- Voice diagnostic：仅在正式批次出现无法解释的 `voice.text_mismatch` 后使用；重新取得可见批次同意并采集 1 个样本，只输出预期/实际长度关系和编辑距离分桶，不输出或保存转写正文。诊断样本不计入正式成功率，也不能替代正式批次。
 - Vision：1 次预热 + 20 次正式尝试；每次由用户按 Enter 主动开始，只读取 Runner 创建的可见测试 HWND，并在内存中检查固定非个人标记。
 - Vision identity change：单独一次受控场景；捕获前改变目标标题，必须以 `Cancelled / vision.identity_changed` 结束且不得保留帧。
 - 终态只有 `Success`、`Failure`、`Cancelled`、`Blocked`。失败率为 `failure / (success + failure)`；cancelled/blocked 单独报告。预热不进入正式指标，不删除离群值。
@@ -25,7 +26,7 @@ S4-R2 只回答两个问题：本机离线中文语音在真实麦克风下的�
 
 ## 允许与禁止的证据
 
-允许：合同版本、exact SHA、模式、粗粒度 Windows build/架构、能力布尔值、麦克风数量桶、次数、四类终态、聚合耗时、稳定错误码、清理状态、网络/Provider 请求数 0。
+允许：合同版本、exact SHA、模式、粗粒度 Windows build/架构、能力布尔值、麦克风数量桶、次数、四类终态、聚合耗时、稳定错误码、清理状态、网络/Provider 请求数 0，以及仅由计数构成的语音匹配摘要（样本数、编辑距离 0/1/2/3+ 分桶、同长度不匹配、较短、较长）。
 
 禁止：录音、波形、partial/final 转写、固定短句、图像、OCR/UIA 正文、窗口标题、HWND/PID/启动时间、用户名/机器名、路径、异常消息/堆栈、Prompt、Provider、凭据或内容哈希。
 

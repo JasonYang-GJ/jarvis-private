@@ -24,6 +24,7 @@ internal static class VoiceEvaluationRunner
             _ => "multiple"
         };
         var available = capability.RecognitionModelAvailable && capability.MicrophoneCount > 0;
+        var diagnosticOnly = options.Mode == "voice-diagnostic";
         var environment = EvaluationEnvironmentFactory.Create(available, microphoneBucket);
         if (!capability.RecognitionModelAvailable)
         {
@@ -40,7 +41,9 @@ internal static class VoiceEvaluationRunner
         }
 
         Console.WriteLine("S4-R2 本机语音评测：音频只在内存中离线识别，不保存录音或识别文字。 ");
-        Console.WriteLine("将执行 1 次预热和 20 次正式尝试；输入 STOP 或按 Ctrl+C 可随时停止。 ");
+        Console.WriteLine(diagnosticOnly
+            ? "将执行 1 次脱敏诊断样本，只输出长度和编辑距离分桶；输入 STOP 或按 Ctrl+C 可随时停止。 "
+            : "将执行 1 次预热和 20 次正式尝试；输入 STOP 或按 Ctrl+C 可随时停止。 ");
         Console.WriteLine("输入 YES 表示同意本批次使用麦克风：");
         if (!string.Equals(await input.ReadLineAsync(cancellationToken), "YES", StringComparison.Ordinal))
         {
@@ -54,10 +57,13 @@ internal static class VoiceEvaluationRunner
         var stage = "completed";
         try
         {
-            for (var index = 0; index < 21; index++)
+            var attemptCount = diagnosticOnly ? 1 : 21;
+            for (var index = 0; index < attemptCount; index++)
             {
                 var isWarmup = index == 0;
-                Console.WriteLine(isWarmup
+                Console.WriteLine(diagnosticOnly
+                    ? $"诊断样本：按 Enter 后清楚说出“{FixedPhrase}”。"
+                    : isWarmup
                     ? $"预热：按 Enter 后清楚说出“{FixedPhrase}”。"
                     : $"正式 {index}/20：按 Enter 后清楚说出“{FixedPhrase}”。");
                 var command = await input.ReadLineAsync(cancellationToken).ConfigureAwait(false);

@@ -31,6 +31,7 @@ public sealed class VoiceAttemptTracker
     private long? _firstFinalAt;
     private int _finalCount;
     private bool _firstFinalMatches;
+    private VoiceTextMatchDiagnostic? _voiceTextMatch;
     private bool _faulted;
     private bool _closed;
 
@@ -68,10 +69,13 @@ public sealed class VoiceAttemptTracker
         if (_finalCount == 1)
         {
             _firstFinalAt = timestamp;
-            _firstFinalMatches = string.Equals(
-                VoiceTextNormalizer.Normalize(text),
-                _expectedNormalized,
-                StringComparison.Ordinal);
+            var actualNormalized = VoiceTextNormalizer.Normalize(text);
+            var editDistance = CalculateEditDistance(_expectedNormalized, actualNormalized);
+            _voiceTextMatch = new VoiceTextMatchDiagnostic(
+                _expectedNormalized.Length,
+                actualNormalized.Length,
+                editDistance);
+            _firstFinalMatches = editDistance == 0;
         }
     }
 
@@ -108,7 +112,8 @@ public sealed class VoiceAttemptTracker
                 _isWarmup,
                 EvaluationTerminalState.Cancelled,
                 elapsed,
-                "evaluation.cancelled");
+                "evaluation.cancelled",
+                VoiceTextMatch: _voiceTextMatch);
         }
 
         if (_faulted)
@@ -117,7 +122,8 @@ public sealed class VoiceAttemptTracker
                 _isWarmup,
                 EvaluationTerminalState.Failure,
                 elapsed,
-                "voice.listener_faulted");
+                "voice.listener_faulted",
+                VoiceTextMatch: _voiceTextMatch);
         }
 
         if (_finalCount > 1)
@@ -126,7 +132,8 @@ public sealed class VoiceAttemptTracker
                 _isWarmup,
                 EvaluationTerminalState.Failure,
                 elapsed,
-                "voice.multiple_final");
+                "voice.multiple_final",
+                VoiceTextMatch: _voiceTextMatch);
         }
 
         if (_finalCount == 1)
@@ -135,7 +142,8 @@ public sealed class VoiceAttemptTracker
                 _isWarmup,
                 _firstFinalMatches ? EvaluationTerminalState.Success : EvaluationTerminalState.Failure,
                 elapsed,
-                _firstFinalMatches ? null : "voice.text_mismatch");
+                _firstFinalMatches ? null : "voice.text_mismatch",
+                VoiceTextMatch: _voiceTextMatch);
         }
 
         return new EvaluationAttempt(
@@ -143,5 +151,31 @@ public sealed class VoiceAttemptTracker
             EvaluationTerminalState.Failure,
             elapsed,
             timedOut && _speechStarted is not null ? "voice.timeout" : "voice.no_final");
+    }
+
+    private static int CalculateEditDistance(string expected, string actual)
+    {
+        var previous = new int[actual.Length + 1];
+        var current = new int[actual.Length + 1];
+        for (var column = 0; column <= actual.Length; column++)
+        {
+            previous[column] = column;
+        }
+
+        for (var row = 1; row <= expected.Length; row++)
+        {
+            current[0] = row;
+            for (var column = 1; column <= actual.Length; column++)
+            {
+                var substitutionCost = expected[row - 1] == actual[column - 1] ? 0 : 1;
+                current[column] = Math.Min(
+                    Math.Min(current[column - 1] + 1, previous[column] + 1),
+                    previous[column - 1] + substitutionCost);
+            }
+
+            (previous, current) = (current, previous);
+        }
+
+        return previous[actual.Length];
     }
 }

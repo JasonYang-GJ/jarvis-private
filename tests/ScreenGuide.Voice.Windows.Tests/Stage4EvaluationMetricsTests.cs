@@ -76,4 +76,42 @@ public sealed class Stage4EvaluationMetricsTests
             ],
             document.RootElement.EnumerateObject().Select(item => item.Name).Order().ToArray());
     }
+
+    [Fact]
+    public void SafeJsonAggregatesVoiceSimilarityWithoutTranscriptContent()
+    {
+        const string sensitiveTranscript = "元叔今天练习中文语音";
+        var warmup = new VoiceAttemptTracker(
+            "元枢今天练习中文语音",
+            isWarmup: true,
+            attemptStartedTimestamp: 10_000);
+        warmup.OnFinal(sensitiveTranscript, 20_000);
+        var shorter = new VoiceAttemptTracker(
+            "元枢今天练习中文语音",
+            isWarmup: false,
+            attemptStartedTimestamp: 30_000);
+        shorter.OnFinal("今天练习中文语音", 40_000);
+        var aggregate = EvaluationAggregator.Build(
+        [
+            warmup.Complete(25_000),
+            shorter.Complete(45_000)
+        ]);
+        var report = EvaluationReport.Create(
+            "voice-diagnostic",
+            "941c2d8635939bd1329daa81f34b6829bd447750",
+            "completed",
+            aggregate,
+            new EvaluationEnvironment("10.0.26100", "x64", true, "one"),
+            cleanupConfirmed: true);
+
+        var json = SafeEvaluationReportWriter.Serialize(report);
+
+        Assert.DoesNotContain(sensitiveTranscript, json, StringComparison.Ordinal);
+        Assert.DoesNotContain("transcript", json, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("\"voiceTextMatch\":{\"sampleCount\":2", json, StringComparison.Ordinal);
+        Assert.Contains("\"oneEditCount\":1", json, StringComparison.Ordinal);
+        Assert.Contains("\"twoEditCount\":1", json, StringComparison.Ordinal);
+        Assert.Contains("\"sameLengthMismatchCount\":1", json, StringComparison.Ordinal);
+        Assert.Contains("\"shorterCount\":1", json, StringComparison.Ordinal);
+    }
 }
