@@ -1,6 +1,6 @@
 # 元枢产品事实（V0.6.0 / Stage 4 Final Freeze）
 
-> 当前产品事实的唯一入口。更新时间：2026-08-30。V0.6.0 / Stage 4 已完成 Final Freeze，S4-R1 Window Identity v2、S4-R2 本机真实使用评测、S4-R3 有界 Session 投影与 S4-R4 runtime gate 有界化均为 `INTEGRATED_PASS`。正式标签 `v0.6.0-stage4` 指向 C0 源码提交 `3a591a7b6af7da7d97e07093d4c33a3f44553b82`；本 C1 只记录标签源码构建与产物证据，不改变标签或二进制身份。安装包仍未获对外分发放行，也不开始 S4-R5 或 Stage 5。
+> 当前产品事实的唯一入口。更新时间：2026-08-30。V0.6.0 / Stage 4 已完成 Final Freeze，S4-R1 Window Identity v2、S4-R2 本机真实使用评测、S4-R3 有界 Session 投影与 S4-R4 runtime gate 有界化均为 `INTEGRATED_PASS`。正式标签 `v0.6.0-stage4` 指向 C0 源码提交 `3a591a7b6af7da7d97e07093d4c33a3f44553b82`；本 C1 只记录标签源码构建与产物证据，不改变标签或二进制身份。安装包仍未获对外分发放行，不新增 S4-R5；Stage 5 只有 Charter/Preflight，实施仍未授权。
 
 ## 产品定位
 
@@ -13,8 +13,10 @@
 - **发布合同**：普通聊天发布目标是 DeepSeek + 千问；千问仅作手动备用，无自动 fallback、retry 或跨 Provider resend。Codex 普通聊天保持 `ProductionDisabled`/`PolicyDisabled`，独立 Codex 编程 Agent 不随聊天 Provider 改变。
 - **阶段 3 R1 / R2 / R3**：已有本机加密记忆账本和确定性预览；用户可为单个 Turn 选择记忆，并在查看完整 Provider、HTTPS 去向、项目绑定和正文后单次确认发送。默认仍为 0 条，不自动提取或后台发送。
 - **阶段 4 R1 / R2**：单窗口授权已升级为 Host 可信完整身份；独立人工 Runner 已完成真实麦克风、单窗口 OCR、停止和窗口身份变化验收，不加入产品遥测、网络或 Provider 路径。
+- **阶段 5 Charter / Preflight**：推荐方向为“安全分发与升级准备”，仅规划许可清单、隔离安装生命周期、签名/release identity 和最终分发验收。实施仍为 `NOT_STARTED / NOT_AUTHORIZED`，不改变当前产品行为或 Stage 4 冻结身份。
 
 详细代码边界见 [阶段 2 AI 模型路由设计](docs/V2_STAGE2_AI_MODEL_ROUTING_DESIGN.md)。
+Stage 5 的唯一推荐章程见 [Stage 5 Charter](docs/V2_STAGE5_CHARTER.md)。
 
 ## V0.3.0 已冻结能力（阶段 2 保留）
 
@@ -131,6 +133,7 @@
 - 本机单窗口理解主要依赖 OCR 和可访问控件，不能可靠理解纯图片、视频、图标语义和复杂空间关系。
 - 语音模型不在安装包内；商业分发前仍需完成许可证、下载和更新方案。
 - 安装包未做数字签名；Windows 可能显示未知发布者警告。
+- Stage 5 目前只有 Charter/Preflight；许可盘点、隔离安装/升级/回滚/卸载、真实签名和最终分发均未获实施授权。
 - 没有手机端、云同步、远程控制、复杂多 Agent 产品功能或开放式 Tool Calling。
 
 ## 明确禁止或不开放

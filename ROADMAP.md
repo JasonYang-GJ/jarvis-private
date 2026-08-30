@@ -112,14 +112,23 @@ S3-R3 已完成范围：
 
 ## 阶段 4：体验与分发加固
 
-状态：**INTEGRATED_PASS / FINAL FREEZE。** S4-R1、S4-R2、S4-R3 与 S4-R4 均已集成；V0.6.0 的 C0、annotated tag、独立干净标签源码构建与 C1 证据均已完成。Final Freeze 证明源码与产物身份，不代表已获对外分发批准；S4-R5 与 Stage 5 均未开始。
+状态：**INTEGRATED_PASS / FINAL FREEZE。** S4-R1、S4-R2、S4-R3 与 S4-R4 均已集成；V0.6.0 的 C0、annotated tag、独立干净标签源码构建与 C1 证据均已完成。Final Freeze 证明源码与产物身份，不代表已获对外分发批准；Stage 4 到此结束，不新增 S4-R5。
 
 - S4-R1 Window Identity v2：Host 可信 `{HWND, PID, ProcessStartTimeUtc, ProcessName, Title}`、schema v11/pre-v11、确认/UIA/捕获/回退/分析逐层 fail-closed；Desktop IPC 维持 v10。
 - S4-R2（已集成）：独立本机评测 Runner 以 1 次预热 + 20 次正式尝试统计语音/视觉失败率与 Stopwatch 延迟；真实语音 18/20、STOP 取消 PASS，真实视觉 20/20、identity-change fail-closed PASS；只输出脱敏汇总，不保存声音、识别正文或窗口图像；
 - S4-R3（已集成）：protocol v11 有界 bootstrap/delta/reset、消息 keyset 分页、精确 Turn 查询、Client 有界缓存，以及提交后 Task 事件同步；schema 保持 v11，不新增持久 delta 表；
 - S4-R4（已集成）：抽取 Host 内部 Session/Turn 临时门闩注册表，以 holder+waiter 引用计数和同实例归零移除避免 Guid key 永久增长；不改变 SessionCoordinator 状态所有权、权限或事件合同；
 - Stage 4 Final Freeze：`v0.6.0-stage4` 指向 C0 `3a591a7b6af7da7d97e07093d4c33a3f44553b82`，tag object 为 `20045c7960c182a052a5e0b2552ce0ed14a3863f`；标签源码发布目录 539 个文件，安装包 64,203,075 bytes，SHA-256 `5F912F94960E1E90A1EF918139C46751FCA8377A4055B5E68BA060A9BF4E56D7`，未签名。C1 只记录证据；同 AppId 生命周期、数字签名和语音模型许可/分发仍未放行；
-- 后续只在新的批准切片中继续拆分 SessionCoordinator 大文件；
-- 语音模型许可证与下载更新方案；
-- 安装包数字签名、升级/回滚和发布自动化；
-- 在证据充分后再评估新的低风险动作范围。
+
+## 阶段 5：安全分发与升级准备（推荐 Charter）
+
+状态：**CHARTER / PREFLIGHT ONLY；实施 `NOT_STARTED / NOT_AUTHORIZED`。** Stage 5 只推荐解决“元枢是否能安全交付另一台机器、为什么、还缺什么”，不改变 Stage 4 冻结事实。唯一章程见 [Stage 5 Charter](docs/V2_STAGE5_CHARTER.md)。
+
+推荐最小串行切片（仅规划）：
+
+1. S5-R1 Distribution Contract & License Inventory：只读许可、资产与分发边界清单；不下载模型。
+2. S5-R2 Isolated Installer Lifecycle：未来经单独授权后，在干净隔离 Windows 验证 install → launch → upgrade → rollback → uninstall，并保护现有安装和用户数据。
+3. S5-R3 Signing & Release Identity：先定义签名、证书/费用/私钥安全和 signed artifact identity；采购、私钥接触和真实签名另行授权。
+4. S5-R4 Final Distribution Acceptance：前述门禁通过后才执行小型 release gate；Push、上传和发布仍需独立授权。
+
+Stage 5 不增加产品功能，不拆分 `SessionCoordinator`，不修改 schema/protocol/Prompt/Provider/凭据/权限，不自动下载、签名、运行安装器或发布。本 Charter 不决定 V0.7.0 或新 tag。
