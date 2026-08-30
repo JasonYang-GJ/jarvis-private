@@ -4,7 +4,7 @@
 
 截至 2026-08-30，S4-R1、S4-R2、S4-R3 与 S4-R4 均已 `INTEGRATED_PASS`，源码开始进入 V0.6.0 / Stage 4 Final Freeze C0 候选流程。
 
-这不是最终完成报告：`v0.6.0-stage4` 尚未创建，独立标签源码构建及安装包大小、SHA-256、发布文件数、签名状态尚未产生，后续 C1 仅文档证据提交也尚未完成。V0.5.0 / Stage 3 仍是当前正式发布基线。
+这不是最终完成报告：`v0.6.0-stage4` 尚未创建，独立标签源码的离线 locked restore、`build-desktop-release.ps1 -SkipTests` 发布/安装包编译及安装包大小、SHA-256、发布文件数、签名状态尚未产生，后续 C1 仅文档证据提交也尚未完成。V0.5.0 / Stage 3 仍是当前正式发布基线。
 
 ## 已完成范围
 
@@ -42,7 +42,7 @@
 - C0 exact SHA：待提交后由 Git 事实核对，本文不自引用预填
 - 标签源码产物身份：`PENDING_AFTER_TAG_BUILD`
 
-C0 的离线 Host/Client Release build、安装包编译和静态检查属于预标签候选门禁；即使通过，也不能替代标签源码的独立重建和 C1 最终证据。
+C0 的离线 Host/Client Release build、安装包编译和静态检查属于预标签候选门禁；S4-R1～R4 与 C0 QA 的 exact-SHA targeted 测试证据在冻结流程中复用，不在标签源码阶段重跑。标签源码仍须独立完成离线 locked restore、`build-desktop-release.ps1 -SkipTests` 的 Client/Host publish、安装包编译和身份检查，并由 C1 记录最终证据。
 
 ## 数据兼容与回滚
 
@@ -63,7 +63,7 @@ C0 的离线 Host/Client Release build、安装包编译和静态检查属于预
 
 1. 创建并核验 C0 exact SHA。
 2. 创建 annotated tag `v0.6.0-stage4`。
-3. 从独立干净标签源码完成 locked restore、Release build、测试和安装包编译。
+3. 复用 S4-R1～R4 与 C0 QA 已冻结的 exact-SHA targeted 测试证据；从独立干净标签源码仅完成离线 locked restore、`build-desktop-release.ps1 -SkipTests` 的 Client/Host publish 与安装包编译。
 4. 记录与标签绑定的 ProductVersion、发布文件数、安装包大小、SHA-256 和签名状态。
 5. 由仅文档 C1 提交回填最终证据，不改变标签源码或发布二进制。
 6. 对同 AppId 生命周期、数字签名和语音模型许可/分发作出明确发布决定。
