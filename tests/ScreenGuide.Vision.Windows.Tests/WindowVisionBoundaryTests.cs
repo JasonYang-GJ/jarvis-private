@@ -217,6 +217,41 @@ public sealed class WindowVisionBoundaryTests
     }
 
     [Fact]
+    public void PrintWindowBoundsFailClosedOnReversedExtremeCoordinates()
+    {
+        var reversed = new ExactWindowCaptureBounds(
+            int.MaxValue,
+            int.MaxValue,
+            int.MinValue,
+            int.MinValue);
+
+        Assert.Throws<InvalidOperationException>(() =>
+            PrintWindowCaptureBoundsSelector.Select(reversed, null));
+    }
+
+    [Fact]
+    public void PrintWindowBoundsFailClosedWhenCoordinateSpanExceedsBitmapRange()
+    {
+        var extreme = new ExactWindowCaptureBounds(
+            int.MinValue,
+            0,
+            int.MaxValue,
+            100);
+
+        Assert.Throws<InvalidOperationException>(() =>
+            PrintWindowCaptureBoundsValidator.GetBitmapDimensions(extreme));
+    }
+
+    [Fact]
+    public void PrintWindowBoundsFailClosedWhenPixelProductExceedsLimit()
+    {
+        var oversized = new ExactWindowCaptureBounds(0, 0, 8000, 5000);
+
+        Assert.Throws<InvalidOperationException>(() =>
+            PrintWindowCaptureBoundsValidator.GetBitmapDimensions(oversized));
+    }
+
+    [Fact]
     public async Task LocalProviderStatesTextBasedLimitation()
     {
         var provider = new WindowsLocalWindowVisionProvider(new FixedOcr("设置 系统 显示 蓝牙"));

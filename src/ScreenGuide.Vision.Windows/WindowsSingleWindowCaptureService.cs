@@ -194,11 +194,11 @@ internal readonly record struct ExactWindowCaptureBounds(
     int Right,
     int Bottom)
 {
-    public int Width => Right - Left;
+    public long Width => (long)Right - Left;
 
-    public int Height => Bottom - Top;
+    public long Height => (long)Bottom - Top;
 
-    public bool IsValid => Width >= 2 && Height >= 2;
+    public bool IsValid => Right > Left && Bottom > Top && Width >= 2 && Height >= 2;
 }
 
 internal static class PrintWindowCaptureBoundsSelector
@@ -246,12 +246,29 @@ internal static class PrintWindowCaptureBoundsSelector
     }
 }
 
+internal static class PrintWindowCaptureBoundsValidator
+{
+    private const long MaxPixels = 32_000_000;
+
+    public static (int Width, int Height) GetBitmapDimensions(ExactWindowCaptureBounds bounds)
+    {
+        if (!bounds.IsValid
+            || bounds.Width > int.MaxValue
+            || bounds.Height > int.MaxValue
+            || bounds.Width > MaxPixels / bounds.Height)
+        {
+            throw new InvalidOperationException("目标窗口尺寸无效或过大，因此没有读取画面。 ");
+        }
+
+        return ((int)bounds.Width, (int)bounds.Height);
+    }
+}
+
 public sealed class PrintWindowCaptureBackend(
     IWindowCaptureTargetVerifier identityVerifier) : IExactWindowCaptureBackend
 {
     private const uint DwmwaExtendedFrameBounds = 9;
     private const uint PwRenderFullContent = 2;
-    private const long MaxPixels = 32_000_000;
 
     public Task<RawWindowFrame> CaptureAsync(
         WindowCaptureTarget target,
@@ -261,12 +278,7 @@ public sealed class PrintWindowCaptureBackend(
         var handle = new IntPtr(target.WindowHandle);
         identityVerifier.Verify(target);
         var bounds = GetBounds(handle);
-        var width = bounds.Right - bounds.Left;
-        var height = bounds.Bottom - bounds.Top;
-        if (width < 2 || height < 2 || (long)width * height > MaxPixels)
-        {
-            throw new InvalidOperationException("目标窗口尺寸无效或过大，因此没有读取画面。 ");
-        }
+        var (width, height) = PrintWindowCaptureBoundsValidator.GetBitmapDimensions(bounds);
 
         using var bitmap = new Bitmap(width, height, PixelFormat.Format32bppArgb);
         using var graphics = Graphics.FromImage(bitmap);
@@ -299,7 +311,7 @@ public sealed class PrintWindowCaptureBackend(
             bytes, width, height, "Windows.PrintWindow.SingleHwnd"));
     }
 
-    private static Rect GetBounds(IntPtr handle)
+    private static ExactWindowCaptureBounds GetBounds(IntPtr handle)
     {
         var hasWindowBounds = GetWindowRect(handle, out var windowBounds);
         var hasExtendedFrameBounds = DwmGetWindowAttribute(
@@ -310,13 +322,7 @@ public sealed class PrintWindowCaptureBackend(
         var selected = PrintWindowCaptureBoundsSelector.Select(
             hasWindowBounds ? Convert(windowBounds) : null,
             hasExtendedFrameBounds ? Convert(extendedFrameBounds) : null);
-        return new Rect
-        {
-            Left = selected.Left,
-            Top = selected.Top,
-            Right = selected.Right,
-            Bottom = selected.Bottom
-        };
+        return selected;
     }
 
     private static ExactWindowCaptureBounds Convert(Rect bounds) => new(
