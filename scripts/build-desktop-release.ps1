@@ -12,6 +12,11 @@ $releaseRoot = Join-Path $artifactsRoot 'release'
 $solution = Join-Path $repoRoot 'ScreenGuide.slnx'
 $clientProject = Join-Path $repoRoot 'src\ScreenGuide.DesktopClient\ScreenGuide.DesktopClient.csproj'
 $hostProject = Join-Path $repoRoot 'src\ScreenGuide.DesktopHost\ScreenGuide.DesktopHost.csproj'
+$distributionBundleRoot = Join-Path $repoRoot 'distribution\licenses'
+$distributionBundleManifest = Join-Path $distributionBundleRoot 'bundle-manifest.json'
+$distributionPayloadManifest = Join-Path $repoRoot 'docs\baselines\V0.6.0_STAGE4_C0_PAYLOAD_ATTRIBUTION.json'
+$distributionInnoInclude = Join-Path $artifactsRoot 'staging\distribution-notice-files.iss'
+$distributionBundleValidator = Join-Path $repoRoot 'scripts\Test-DistributionNoticeBundle.ps1'
 
 function Reset-BuildDirectory([string]$path) {
     $fullPath = [System.IO.Path]::GetFullPath($path)
@@ -25,6 +30,29 @@ function Reset-BuildDirectory([string]$path) {
         Remove-Item -LiteralPath $fullPath -Recurse -Force
     }
     New-Item -ItemType Directory -Path $fullPath -Force | Out-Null
+}
+
+$distributionGateOutput = @(& powershell.exe -NoProfile -ExecutionPolicy Bypass `
+    -File $distributionBundleValidator `
+    -ManifestPath $distributionBundleManifest `
+    -BundleRoot $distributionBundleRoot `
+    -PayloadManifestPath $distributionPayloadManifest `
+    -InnoIncludePath $distributionInnoInclude 2>&1)
+$distributionGateExitCode = $LASTEXITCODE
+$distributionGateOutput | ForEach-Object { Write-Output $_ }
+if ($distributionGateExitCode -ne 0) {
+    $distributionGateCode = 'distribution_notice_bundle_invalid'
+    try {
+        $distributionGateResult = ($distributionGateOutput -join "`n") | ConvertFrom-Json
+        if (-not [string]::IsNullOrWhiteSpace([string]$distributionGateResult.errorCode)) {
+            $distributionGateCode = [string]$distributionGateResult.errorCode
+        }
+    }
+    catch {
+        # Keep the stable generic gate code; never copy parser details or content into the release error.
+    }
+    Write-Output $distributionGateCode
+    exit 1
 }
 
 dotnet restore $solution --locked-mode --disable-parallel --nologo `

@@ -34,6 +34,7 @@ Name: "chinesesimp"; MessagesFile: "ChineseSimplified.isl"
 [Files]
 Source: "..\artifacts\publish\win-x64\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "Remove-ScreenGuideUserData.ps1"; DestDir: "{app}"; Flags: ignoreversion
+#include "..\artifacts\staging\distribution-notice-files.iss"
 
 [Icons]
 Name: "{group}\元枢"; Filename: "{app}\{#MyAppExeName}"; Parameters: "--show"

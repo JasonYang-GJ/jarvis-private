@@ -1,0 +1,170 @@
+{
+  "schemaVersion": 1,
+  "bundleId": "yuanshu-v0.6.0-distribution-notice-bundle",
+  "releaseVersion": "0.6.0",
+  "bundleStatus": "BLOCKED",
+  "payloadManifestHashProfile": "UTF8_NO_BOM_LF_V1",
+  "payloadManifestSha256": "C18B2D2F0356F6C8577FE4FD48F82937568F4D67FABF627D26F278F275742FAC",
+  "noticeIndex": {
+    "path": "notice-index.json",
+    "hashProfile": "UTF8_NO_BOM_LF_V1",
+    "sha256": "4031716A6ADB685508363564DE41121E350061DA62590A2AC03F6FD1DCA054F1"
+  },
+  "components": [
+    {
+      "componentId": "yuanshu-project-output",
+      "version": "0.6.0",
+      "artifactScope": "installedPayload",
+      "payloadComponentId": "yuanshu-project-output",
+      "sourceBinding": {
+        "kind": "git-commit-owner-declaration-pending",
+        "reference": "3a591a7b6af7da7d97e07093d4c33a3f44553b82",
+        "sha256": "PENDING"
+      },
+      "status": {
+        "source": "PARTIAL",
+        "bundling": "PARTIAL",
+        "attribution": "UNKNOWN",
+        "notice": "UNKNOWN"
+      },
+      "licenseNoticeFiles": []
+    },
+    {
+      "componentId": "dotnet-runtime",
+      "version": "10.0.11",
+      "artifactScope": "installedPayload",
+      "payloadComponentId": "dotnet-runtime",
+      "sourceBinding": {
+        "kind": "official-tag-evidence",
+        "reference": "dotnet/runtime@v10.0.11",
+        "sha256": "PENDING"
+      },
+      "status": {
+        "source": "VERIFIED",
+        "bundling": "VERIFIED",
+        "attribution": "PARTIAL",
+        "notice": "UNKNOWN"
+      },
+      "licenseNoticeFiles": []
+    },
+    {
+      "componentId": "sqlitepclraw-native",
+      "version": "2.1.12",
+      "artifactScope": "installedPayload",
+      "payloadComponentId": "SQLitePCLRaw.lib.e_sqlite3",
+      "sourceBinding": {
+        "kind": "official-tag-evidence",
+        "reference": "SQLitePCL.raw@v2.1.12",
+        "sha256": "PENDING"
+      },
+      "status": {
+        "source": "VERIFIED",
+        "bundling": "VERIFIED",
+        "attribution": "PARTIAL",
+        "notice": "UNKNOWN"
+      },
+      "licenseNoticeFiles": []
+    },
+    {
+      "componentId": "sherpa-onnx",
+      "version": "1.13.4",
+      "artifactScope": "installedPayload",
+      "payloadComponentId": "org.k2fsa.sherpa.onnx",
+      "sourceBinding": {
+        "kind": "official-exact-commit-evidence",
+        "reference": "142807252687d81b40d6315f23470a1512a00de3",
+        "sha256": "PENDING"
+      },
+      "status": {
+        "source": "VERIFIED",
+        "bundling": "VERIFIED",
+        "attribution": "PARTIAL",
+        "notice": "UNKNOWN"
+      },
+      "licenseNoticeFiles": []
+    },
+    {
+      "componentId": "onnxruntime",
+      "version": "1.27.0",
+      "artifactScope": "installedPayload",
+      "payloadComponentId": "Microsoft.ML.OnnxRuntime",
+      "sourceBinding": {
+        "kind": "official-tag-evidence",
+        "reference": "microsoft/onnxruntime@v1.27.0",
+        "sha256": "PENDING"
+      },
+      "status": {
+        "source": "VERIFIED",
+        "bundling": "VERIFIED",
+        "attribution": "PARTIAL",
+        "notice": "UNKNOWN"
+      },
+      "licenseNoticeFiles": []
+    },
+    {
+      "componentId": "windows-sdk-net",
+      "version": "10.0.19041.57",
+      "artifactScope": "installedPayload",
+      "payloadComponentId": "Microsoft.Windows.SDK.NET.Ref",
+      "sourceBinding": {
+        "kind": "official-package-and-redist-evidence",
+        "reference": "Microsoft.Windows.SDK.NET.Ref@10.0.19041.57",
+        "sha256": "PENDING"
+      },
+      "status": {
+        "source": "PARTIAL",
+        "bundling": "VERIFIED",
+        "attribution": "VERIFIED",
+        "notice": "UNKNOWN"
+      },
+      "licenseNoticeFiles": []
+    },
+    {
+      "componentId": "inno-installer-engine",
+      "version": "EXACT_VERSION_OPEN",
+      "artifactScope": "installerContainer",
+      "payloadComponentId": "inno-installer-engine",
+      "sourceBinding": {
+        "kind": "official-default-branch-license-evidence",
+        "reference": "jrsoftware/issrc",
+        "sha256": "PENDING"
+      },
+      "status": {
+        "source": "PARTIAL",
+        "bundling": "PARTIAL",
+        "attribution": "UNKNOWN",
+        "notice": "UNKNOWN"
+      },
+      "licenseNoticeFiles": []
+    },
+    {
+      "componentId": "inno-chinese-simplified-translation",
+      "version": "EXACT_PROVENANCE_OPEN",
+      "artifactScope": "installerContainer",
+      "payloadComponentId": "inno-chinese-simplified-translation",
+      "sourceBinding": {
+        "kind": "c0-blob-only-upstream-open",
+        "reference": "30d997321197c7c96d8e111e9ddd6c0ca8da5f09",
+        "sha256": "BF0751FA176569C6FAA2F6E17ED2734617BEF325D5CC06EAE030FDD0258EE778"
+      },
+      "status": {
+        "source": "PARTIAL",
+        "bundling": "VERIFIED",
+        "attribution": "PARTIAL",
+        "notice": "UNKNOWN"
+      },
+      "licenseNoticeFiles": []
+    }
+  ],
+  "remainingBlockers": [
+    "owner_root_license_decision_open",
+    "icon_external_distribution_clearance_open",
+    "exact_license_notice_files_not_bundled",
+    "payload_notice_mapping_not_implemented",
+    "dotnet_runtime_notice_placement_open",
+    "sqlite_native_notice_placement_open",
+    "sherpa_onnx_notice_placement_open",
+    "winsdk_terms_and_notice_implementation_open",
+    "inno_exact_version_and_translation_provenance_open"
+  ]
+}

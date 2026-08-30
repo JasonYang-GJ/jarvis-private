@@ -26,14 +26,14 @@ Stage 5 的用户价值是给出可核验、失败关闭的答案：**是否可�
 ### S5-R1 Distribution Contract & License Inventory
 
 - Offline Inventory 与 Official Evidence Verification：**PASS**；唯一详细证据见 [S5-R1 分发许可与归属清单](V2_STAGE5_DISTRIBUTION_LICENSE_INVENTORY.md)。
-- Attribution / NOTICE Contract：**S5-R1_CONTRACT_PASS**；NOTICE Implementation：**NOTICE_IMPLEMENTATION_PENDING**；External Distribution：**EXTERNAL_DISTRIBUTION_BLOCKED**。
+- Attribution / NOTICE Contract：**S5-R1_CONTRACT_PASS**；Packaging / NOTICE Gate Infrastructure：**FAIL_CLOSED_INFRASTRUCTURE_IMPLEMENTED**；NOTICE Implementation：**NOTICE_IMPLEMENTATION_PENDING**；External Distribution：**EXTERNAL_DISTRIBUTION_BLOCKED**。
 - 只读盘点安装包、语音模型、第三方资产和依赖的许可与分发边界。
 - 为每项给出可分发、不可分发或证据不足的明确判定；证据不足时失败关闭。
 - 不下载模型，不接受许可条款，不采购服务，不修改 V0.6.0 tag 或产物。
 - C0 installer 的产品 payload 收纳边界是 win-x64 publish 树与删除脚本；Inno engine/translation 是 installer 基础设施。中文语音模型为 `VERIFIED-EXCLUDED`，未来捆绑/下载时重新进入许可 Gate。WinSDK Ref 与非 win-x64 Sherpa 为 `EXCLUDED-CONDITIONAL`，需 frozen manifest 不存在性关闭。
 - 四轴合同固定区分 Source、Bundling、Attribution 与 Notice；contract PASS 不等于 NOTICE 已实现或可分发。
 - Owner 权属/分发形态确认、原始 C0 只读 manifest、clean rebuild、NOTICE installer 修改、未来在线补证和 S5-R2 lifecycle 都是独立授权门禁。
-- NOTICE publish/installer 布置、安装后验证与新 release identity 是单独的 S5-R1 packaging implementation；不得塞入 S5-R2 或拖到 S5-R4 首次实现。
+- release/installer 已接入离线 fail-closed bundle gate，但当前真实 skeleton 因 OPEN/PARTIAL、缺 exact 正文和完整映射而在 restore/publish/installer compile 前稳定阻断。补齐材料、实际 NOTICE 布置、安装后验证与新 release identity 仍是单独授权的 S5-R1 packaging implementation；不得塞入 S5-R2 或拖到 S5-R4。
 - Stage 5 implementation 整体仍未完成；Charter 不预定 V0.7.0，不授权下载、安装、签名、发布或开始 S5-R2。
 
 ### S5-R2 Isolated Installer Lifecycle

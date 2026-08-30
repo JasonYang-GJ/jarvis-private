@@ -11,11 +11,12 @@
 - S5-R1 Offline Inventory：**PASS**
 - S5-R1 Official Evidence Verification：**PASS**
 - S5-R1 Attribution / NOTICE Contract：**S5-R1_CONTRACT_PASS**
+- S5-R1 Packaging / NOTICE Gate Infrastructure：**FAIL_CLOSED_INFRASTRUCTURE_IMPLEMENTED**
 - S5-R1 NOTICE Implementation：**NOTICE_IMPLEMENTATION_PENDING**
 - External Distribution：**EXTERNAL_DISTRIBUTION_BLOCKED**
-- Stage 5 产品/安装器实施：**NOT_STARTED / NOT_AUTHORIZED**
+- Stage 5 产品与可分发安装包实施：**NOT_STARTED / NOT_AUTHORIZED**；本轮只实现分发构建前置门禁，不产生可分发安装包。
 
-本清单是本机、离线、只读证据整理，不是法律意见，不建立 `PROHIBITED` 或 `INCOMPATIBLE` 结论。`S5-R1_CONTRACT_PASS` 只表示四轴归属、manifest schema、NOTICE layout 与授权门禁已经形成合同；它不表示 NOTICE 已实现、冻结产物 attribution 已闭合或产品可对外分发。`UNKNOWN_BLOCKED_FOR_DISTRIBUTION` 表示当前证据不足，必须在分发前补齐材料并重新获得相应 Owner 授权；它不等于认定权利人禁止分发。
+本清单不是法律意见，不建立 `PROHIBITED` 或 `INCOMPATIBLE` 结论。`S5-R1_CONTRACT_PASS` 只表示四轴归属、manifest schema、NOTICE layout 与授权门禁已经形成合同；`FAIL_CLOSED_INFRASTRUCTURE_IMPLEMENTED` 只表示 release 脚本和 Inno 已接入确定性离线验证器。当前受版本控制的 bundle skeleton 仍含 OPEN/PARTIAL、没有可冒充正文的 LICENSE/NOTICE 文件和完整 payload 映射，因此稳定返回 `distribution_notice_bundle_incomplete`，在 restore、publish 和 installer compile 前停止。它不表示 NOTICE 已闭合或产品可对外分发。`UNKNOWN_BLOCKED_FOR_DISTRIBUTION` 表示当前证据不足，必须在分发前补齐材料并重新获得相应 Owner 授权；它不等于认定权利人禁止分发。
 
 ## 2. 证据边界与方法
 
@@ -331,9 +332,9 @@
 - 经确认的许可材料放入 `licenses/<component>/`，保留适用的 `LICENSE`、`NOTICE` 或 `THIRD-PARTY-NOTICES`；
 - 索引必须把每个安装文件相对路径映射到 component/version 与对应 license/notice 相对路径；
 - 同一许可证不能仅凭家族相似性覆盖不同 package/version；缺失映射必须失败关闭；
-- 这是推荐合同，不是已实现的 installer layout、分发许可或法律结论。
+- 安装目标 layout 已由 fail-closed 生成器固定：索引进入安装根、bundle manifest 进入 `distribution/`、经验证材料进入 `licenses/<component>/`；当前 skeleton 无合格正文与完整映射，因而不会生成 Inno include，也不会形成实际 installer layout。该技术门禁不是分发许可或法律结论。
 
-把 NOTICE 文件加入 publish/installer、安装后验证其存在、并形成新的 release identity，属于单独授权的 **S5-R1 packaging implementation**。它不能塞入 S5-R2，也不能等到 S5-R4 才首次实现；当前提交不修改 installer 或冻结产物。
+`distribution/licenses/bundle-manifest.json` 与 `notice-index.json` 是唯一受版本控制的 bundle/index skeleton；`scripts/Test-DistributionNoticeBundle.ps1` 只在四轴均为 `VERIFIED`、文件/hash/路径/组件与 539 条 payload 映射全部闭合后，原子生成不含通配符和 optional flag 的 Inno 文件清单。`build-desktop-release.ps1` 在任何 restore 或输出目录改动前调用门禁，`ScreenGuideDesktop.iss` 强制 include 该生成文件。当前真实清单保持失败关闭，未执行 build/installer，也未改变 V0.6.0 frozen identity。补齐真实材料、安装后验证与形成新 release identity 仍需单独 S5-R1 授权；不得塞入 S5-R2 或拖到 S5-R4。
 
 ### 12.5 Owner Decision Gate
 
@@ -367,7 +368,7 @@ Owner 已作出的事实声明与保守边界如下：
 - Owner 对 runtime Prompt、删除脚本及其他尚未由本次事实声明闭合资产的来源/允许分发形态补充；源码公开分发继续 `SOURCE_DISTRIBUTION_NOT_AUTHORIZED`；
 - installer container 的 embedded/derived entry、publish 树之外的安装文件、LICENSE/NOTICE 适用性与 placement；installer 本体及保留的 539 文件 publish 树身份已由静态 manifest 闭合，539 个 payload 文件的 package/runtime/project/build 来源映射已由 attribution evidence 闭合；
 - C0 deps/lock 记录的 43 个普通 package contentHash 与当前本机 cache `.nupkg.sha512` 全部不一致；这不推翻逐文件 SHA-256 归属，但当前 cache 不得作为原 C0 package container identity evidence，后续 package/NOTICE provenance 必须保持失败关闭；
-- NOTICE 文件与索引的实际 publish/installer 布置、安装后验证及新 release identity；
+- exact LICENSE/NOTICE 正文、完整 payload/container 映射与全 `VERIFIED` index 尚未补齐；因此实际 publish/installer 布置、安装后验证及新 release identity 均未发生；
 - Microsoft.Data.Sqlite/Core exact commit THIRD-PARTY-NOTICES 尚未取得；Microsoft.Extensions 的 Configuration.FileExtensions、FileProviders.Abstractions、FileProviders.Physical 三个 exact package 页面仍为 `PARTIAL`；
 - SQLite native `e_sqlite3` 的 installer NOTICE placement；其上游许可/NOTICE source evidence 与冻结 DLL exact package/version 逐文件归属均已闭合；
 - Inno compiler exact 小版本及 `ChineseSimplified.isl` 的本地 exact source commit/hash/provenance；
