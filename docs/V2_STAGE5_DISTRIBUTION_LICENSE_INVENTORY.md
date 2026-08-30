@@ -8,11 +8,12 @@
 - Tag object：`20045c7960c182a052a5e0b2552ce0ed14a3863f`
 - Tag target：`3a591a7b6af7da7d97e07093d4c33a3f44553b82`
 - S5-R1 Offline Inventory：**PASS**
+- S5-R1 Official Evidence Verification：**PASS**
 - S5-R1 overall：**BLOCKED_PENDING_OFFICIAL_LICENSE_EVIDENCE**
-- External Distribution：**BLOCKED**
+- External Distribution：**BLOCKED_FOR_EXTERNAL_DISTRIBUTION**
 - Stage 5 产品/安装器实施：**NOT_STARTED / NOT_AUTHORIZED**
 
-本清单是本机、离线、只读证据整理，不是法律意见，不建立 `PROHIBITED` 或 `INCOMPATIBLE` 结论。`UNKNOWN_BLOCKED_FOR_DISTRIBUTION` 表示当前证据不足，必须在分发前补齐官方材料并重新获得 exact-SHA Owner 授权；它不等于认定权利人禁止分发。
+本清单是本机、离线、只读证据整理，不是法律意见，不建立 `PROHIBITED` 或 `INCOMPATIBLE` 结论。Official Evidence Verification PASS 只表示已批准的官方来源证据已完成采集与独立复核，不表示许可链或冻结产物 attribution 已完整。`UNKNOWN_BLOCKED_FOR_DISTRIBUTION` 表示当前证据不足，必须在分发前补齐官方材料并重新获得 exact-SHA Owner 授权；它不等于认定权利人禁止分发。
 
 ## 2. 证据边界与方法
 
@@ -23,11 +24,12 @@
 - `contentHash` 原样来自锁文件，可用于绑定包内容，但本身不是许可证明。
 - 本机缓存证据只使用规范化的 `nuget-cache/<package>/<version>/...` 引用；不记录用户绝对路径。
 - nuspec expression 只作为元数据分类，不能代替与该 exact version 绑定的完整 LICENSE/NOTICE/third-party notices。
-- 本轮没有网络、Provider、凭据、安装器、GUI、麦克风、测试或构建活动，也没有修改锁文件。
+- 官方来源证据是新增独立层，访问日期为 2026-08-30；本提交只离线记录已关闭网络阶段的短摘要与 URL，不重新访问来源，也不覆盖本机锁文件/哈希事实。
+- 本轮文档提交没有网络、Provider、凭据、安装器、GUI、麦克风、测试或构建活动，也没有修改锁文件。
 
 ## 3. 精确 runtime package 清单
 
-机械提取结果：50 个唯一 package+version。分组计数：Microsoft.Data.Sqlite=2、Microsoft.Extensions=27、NAudio=7、Sherpa=9、SQLitePCLRaw=4、System.Speech=1。除 NAudio 2.2.1 主包外，49 行均为 `UNKNOWN_BLOCKED_FOR_DISTRIBUTION`；其中 nuspec 元数据为 MIT 36 行、Apache-2.0 13 行。
+机械提取结果：50 个唯一 package+version。分组计数：Microsoft.Data.Sqlite=2、Microsoft.Extensions=27、NAudio=7、Sherpa=9、SQLitePCLRaw=4、System.Speech=1。在原始本机证据层，除 NAudio 2.2.1 主包外，49 行均为 `UNKNOWN_BLOCKED_FOR_DISTRIBUTION`；其中 nuspec 元数据为 MIT 36 行、Apache-2.0 13 行。后续官方来源分类见第 11 节，不改写本表。
 
 | # | Package | Version | Group | contentHash | Local evidence category |
 |---:|---|---|---|---|---|
@@ -91,7 +93,7 @@
 - Size：1,059 bytes
 - SHA-256：`303E01786B271EB464B3F43D18A375F2F17D37BC708A37C2FDF45B289FB5BFAA`
 
-其余六个 NAudio 子包仍为 `UNKNOWN_BLOCKED_FOR_DISTRIBUTION`；不能用主包许可文件自动覆盖不同 package ID。
+其余六个 NAudio 子包在本机缓存证据层仍为 `UNKNOWN_BLOCKED_FOR_DISTRIBUTION`；不能用主包许可文件自动覆盖不同 package ID。第 11 节记录的 exact-tag 官方证据是另一层判断。
 
 ### .NET self-contained 与 Windows SDK
 
@@ -147,25 +149,70 @@
 3. 隔离干净 Windows 的 same-AppId install/upgrade/rollback/uninstall 生命周期；
 4. tag、version、hash、signature 与 per-file release identity。
 
-任一项缺失都保持 External Distribution=`BLOCKED`。
+任一项缺失都保持 External Distribution=`BLOCKED_FOR_EXTERNAL_DISTRIBUTION`。
 
-## 11. 最小未来证据
+## 11. 官方来源证据层（访问日期 2026-08-30）
 
-未来在线核验必须使用新的 exact-SHA Owner 授权；本轮不浏览。需要的官方域名/材料类别至少包括：
+分类含义：`OFFICIAL_PACKAGE_METADATA_VERIFIED` 仅确认 exact package metadata；`FULL_LICENSE_NOTICE_VERIFIED` 表示已核对适用的完整 LICENSE 以及存在时的 NOTICE/third-party notices，但仍不自动证明这些文件已布置到冻结产物；`PARTIAL` 表示只有家族、源码、通用条款或部分组件证据；`UNKNOWN` 表示许可绑定仍不足。
 
-- `nuget.org`：每个 exact package/version 的官方包页、owner 与原始 package metadata，且仍须获取完整 LICENSE/NOTICE；
-- `github.com/naudio`：NAudio exact version 的完整许可与 notices；
-- `learn.microsoft.com`、`dotnet.microsoft.com`：.NET runtime、WindowsDesktop、Windows SDK 的 redistribution、LICENSE 与 third-party notices；
-- `github.com/k2-fsa`、`k2-fsa.github.io`：Sherpa 1.13.4 的 LICENSE/NOTICE、依赖 attribution，以及 exact voice model 的 model card/license/source/version/hash；
-- `jrsoftware.org`：Inno Setup compiler/engine redistribution 条款；另需 `ChineseSimplified.isl` 的翻译者/来源许可材料；
-- Owner 本地声明：项目源码、文档、Prompt、品牌、`.ico` 的 ownership/source/distribution declaration；
-- 只读 `v0.6.0-stage4` artifact：完整 per-file manifest、来源映射、LICENSE/NOTICE placement 与 attribution 检查。
+| Component / exact version | Official classification | 已核事实与边界 |
+|---|---|---|
+| Microsoft.Data.Sqlite / Core 10.0.11（2/2） | `OFFICIAL_PACKAGE_METADATA_VERIFIED` | exact NuGet package metadata 已核；未绑定 exact source commit/NOTICE，不能升级为 full。 |
+| Microsoft.Extensions.Hosting 10.0.11 | `OFFICIAL_PACKAGE_METADATA_VERIFIED` | Hosting exact package page 已核。 |
+| 其余 Microsoft.Extensions.* 10.0.11（26） | `PARTIAL` | 只有家族证据，未逐包完成 exact official binding；不得把 Hosting 的结论扩展到另外 26 包。 |
+| System.Speech 10.0.10 | `FULL_LICENSE_NOTICE_VERIFIED` | exact NuGet metadata，以及 dotnet/runtime `v10.0.10` LICENSE.TXT 与 THIRD-PARTY-NOTICES.TXT 已核；不等于冻结产物已布置 NOTICE。 |
+| NAudio 2.2.1（7 包） | `FULL_LICENSE_NOTICE_VERIFIED` | exact release `v2.2.1` 与 exact-tag `license.txt` 已核；未发现独立 NOTICE。本结论不改写七个 package/contentHash 行。 |
+| SQLitePCLRaw 2.1.12（4 包） | `PARTIAL` | exact package/release/license metadata 可核；managed 部分有依据，但 `e_sqlite3` 上游许可与冻结 DLL attribution 仍未绑定，四包不能整体标为 full。 |
+| Sherpa ONNX 1.13.4（9 包） | `PARTIAL` | exact release/tag 与 Apache-2.0 LICENSE 已核；release 映射 ONNX Runtime 1.27.0，其 exact LICENSE 与 ThirdPartyNotices 已核。实际 DLL 到冻结产物及 NOTICE 布置仍未核，非 win-x64 lock entries 仍不代表已分发。 |
+| .NET / WindowsDesktop runtime 10.0.11 | `PARTIAL` | 官方 .NET library license/release 与第 4 节本地哈希相互支持；runtime-pack 到冻结产物的逐文件 NOTICE 映射缺失。 |
+| Microsoft.Windows.SDK.NET.Ref 10.0.19041.57 | `PARTIAL` | exact NuGet metadata 已核；通用 SDK license 不能精确绑定该包。 |
+| Inno Setup 6 / ChineseSimplified.isl | `PARTIAL` | JR Software 官方许可已核，但实际 compiler 小版本未固定；`ChineseSimplified.isl` 只确认默认分支材料，缺本地文件 exact source commit/hash，不把未经本地 provenance 证明的第三方仓库当作来源。 |
+| sherpa-onnx-streaming-zipformer-zh-int8-2025-06-30 | `UNKNOWN` | 官方模型说明可核；权重、tokens 与训练数据的明确许可绑定不足，且模型当前不在安装包内。 |
+
+### 官方 URL（只记录，不在本提交访问）
+
+- <https://www.nuget.org/packages/Microsoft.Data.Sqlite/10.0.11>
+- <https://www.nuget.org/packages/Microsoft.Extensions.Hosting/10.0.11>
+- <https://www.nuget.org/packages/System.Speech/10.0.10>
+- <https://github.com/dotnet/runtime/blob/v10.0.10/LICENSE.TXT>
+- <https://github.com/dotnet/runtime/blob/v10.0.10/THIRD-PARTY-NOTICES.TXT>
+- <https://github.com/naudio/NAudio/releases/tag/v2.2.1>
+- <https://raw.githubusercontent.com/naudio/NAudio/v2.2.1/license.txt>
+- <https://github.com/ericsink/SQLitePCL.raw/releases/tag/v2.1.12>
+- <https://github.com/k2-fsa/sherpa-onnx/releases/tag/v1.13.4>
+- <https://github.com/k2-fsa/sherpa-onnx/blob/v1.13.4/LICENSE>
+- <https://github.com/microsoft/onnxruntime/blob/v1.27.0/LICENSE>
+- <https://github.com/microsoft/onnxruntime/blob/v1.27.0/ThirdPartyNotices.txt>
+- <https://dotnet.microsoft.com/en-us/dotnet_library_license.htm>
+- <https://github.com/dotnet/core/blob/main/release-notes/10.0/10.0.11/10.0.11.md>
+- <https://www.nuget.org/packages/Microsoft.Windows.SDK.NET.Ref/10.0.19041.57>
+- <https://jrsoftware.org/files/is/license.txt>
+- <https://github.com/jrsoftware/issrc/blob/main/Files/Languages/ChineseSimplified.isl>
+- <https://k2-fsa.github.io/sherpa/onnx/pretrained_models/online-transducer/zipformer-transducer-models.html>
+
+### 已关闭的请求审计
+
+- Architect/Security：仅白名单 GET；客户端无法准确给出 GET 总数；nonGET=0、downloads=0、ProviderRequests=0、CredentialReads=0。
+- QA：31 URL attempts，26 成功、5 安全失败；nonGET=0、downloads=0、ProviderRequests=0、CredentialReads=0。
+- 网络证据阶段现已关闭；任何后续在线补证都需要新的 exact-SHA Owner 授权。
+
+## 12. 最小未来证据
+
+Official Evidence Verification PASS 后仍缺少以下相互独立的证据；未来在线核验必须使用新的 exact-SHA Owner 授权，本轮不浏览：
+
+- Owner 对项目源码、文档、Prompt、品牌与 `.ico` 的 ownership/source/distribution declaration；
+- 只读 `v0.6.0-stage4` artifact 的完整 per-file manifest、逐文件 hash、来源映射、LICENSE/NOTICE placement 与 attribution；
+- 中文语音模型的权重、tokens、训练数据许可，以及 exact model card/source/version/hash 绑定；
+- SQLite native `e_sqlite3` 的上游许可与冻结 DLL attribution；
+- Windows SDK exact package/version 与适用 redistribution/license 的精确绑定；
+- Inno compiler exact 小版本及 `ChineseSimplified.isl` 的本地 exact source commit/hash/provenance；
+- .NET 与 WindowsDesktop runtime-pack 到冻结产物逐文件 LICENSE/NOTICE 的映射。
 
 在上述证据补齐并通过独立 Gate 前，不得把 `BLOCKED_PENDING_OFFICIAL_LICENSE_EVIDENCE` 改为可分发。
 
-## 12. 安全与治理
+## 13. 安全与治理
 
 - 本文不包含用户绝对路径、秘密、Prompt 正文、模型内容、原始二进制内容或法律结论。
-- 本文是唯一详细 S5-R1 offline inventory；`ROADMAP.md`、`PRODUCT.md`、`MEMORY.md` 与 Charter 只保留摘要和链接。
+- 本文是唯一详细 S5-R1 inventory 与 official evidence record；`ROADMAP.md`、`PRODUCT.md`、`MEMORY.md` 与 Charter 只保留摘要和链接。
 - 不建立第二套 license registry、数据库或 schema；Module Registry 保持 Shadow，不写 Registry/Lease。
-- 本轮计数：NetworkRequests=0、ProviderRequests=0、CredentialReads=0、InstallerRuns=0、GUI=0、Microphone=0、Tests=0、Builds=0。
+- 本轮文档提交计数：NetworkRequests=0、ProviderRequests=0、CredentialReads=0、InstallerRuns=0、GUI=0、Microphone=0、Tests=0、Builds=0。第 11 节历史请求审计仅记录已经关闭并通过独立复核的官方来源采集阶段。
