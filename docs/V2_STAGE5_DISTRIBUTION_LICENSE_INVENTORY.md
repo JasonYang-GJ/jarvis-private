@@ -159,7 +159,7 @@
 - V0.6.0 基线文档证明冻结 installer 的 size/hash/`NotSigned`、ProductVersion/FileVersion 与 539 个发布文件；本轮经 Owner 明确授权，对保留的原始 tag-source C0 只读生成 `docs/baselines/V0.6.0_STAGE4_C0_STATIC_MANIFEST.json`，以 1 条 `installerContainer` 与 539 条 `installedPayload` 记录补充相对路径、size 和 SHA-256 静态身份。它仍不自动证明每个文件的许可 attribution。
 - C0 installer 的**产品 payload**收纳合同只包含 win-x64 publish 树与删除脚本；Inno engine/translation 属于 installer 基础设施而不是额外产品 payload。本轮没有执行或解包 installer，因此 manifest 的 `installedPayload` 仅覆盖保留的 539 文件 publish 树，`installerContainer` 仅绑定 installer 本体，未枚举 Inno engine、translation 或其他 container entry，也不声称得到安装后文件系统。
 - 中文语音模型在当前 installer 中为 `VERIFIED-EXCLUDED`，不再作为当前安装包的硬阻断；未来若改为捆绑或下载，必须重新进入独立许可 Gate。
-- 静态 manifest 在保留的 publish 树中确认存在 `Microsoft.Windows.SDK.NET.dll`；因此 WinSDK 不再属于当前分发的 `EXCLUDED-CONDITIONAL`，必须重新完成该文件与锁定 package/version 的精确许可、再分发与 NOTICE 归属。七个非 win-x64 Sherpa runtime package 在该 publish 树中未出现，但 installer container 未解包，仍保持 `EXCLUDED-CONDITIONAL`。
+- 静态 manifest 在保留的 publish 树中确认存在 `Microsoft.Windows.SDK.NET.dll`；其 SHA-256 与本地锁定包 `Microsoft.Windows.SDK.NET.Ref` 10.0.19041.57 中同名 DLL 完全一致，文件到 package 的精确绑定已闭合。Microsoft 官方 exact package page 与 REDIST 清单明确列出该 package 及 `./lib/net8.0/Microsoft.Windows.SDK.NET.dll`，并在适用许可条款条件下支持以未修改 package 或作为启用 WinRT API 调用的程序组成部分分发；但本产品是否满足该 WinRT 用途、有效许可/接受证据以及 NOTICE/终端用户条款实施仍保持 OPEN。七个非 win-x64 Sherpa runtime package 在该 publish 树中未出现，但 installer container 未解包，仍保持 `EXCLUDED-CONDITIONAL`。
 - 当前仓库根的 ignored `artifacts` 是非权威、可变的构建输出，不是只读 `v0.6.0-stage4` tag artifact manifest。当前 `artifacts/publish` 有 539 个文件，Client/Host informational version 绑定 `693719d09cead42304d7c3334b98e9161128c623`，不是正式 C0 `3a591a7b6af7da7d97e07093d4c33a3f44553b82`，因此不能用于 attribution。
 - 当前 `artifacts/release` 含一个 V0.6.0 命名的 installer，QA 观察大小为 64,216,176 bytes；它不是正式冻结的 tag-source installer identity，同样不得用于 attribution。
 - Stage 4 构建当时没有产出逐文件 manifest；本轮仅从仍保留、且 installer size/SHA-256、tag target 与 publish file count 全部精确匹配的原始 C0 tag-source artifact 生成静态证据。该动作没有重建、修改或执行 artifact，也没有移动 tag。若未来使用 clean rebuild，只能作为“可重建参考”，不能替代本清单绑定的原始 C0 身份。
@@ -189,9 +189,22 @@
 | SQLitePCLRaw 2.1.12（4 包） | `PARTIAL` | exact package/release/license metadata 可核；managed 部分有依据，但 `e_sqlite3` 上游许可与冻结 DLL attribution 仍未绑定，四包不能整体标为 full。 |
 | Sherpa ONNX 1.13.4（9 包） | `PARTIAL` | exact release/tag 与 Apache-2.0 LICENSE 已核；release 映射 ONNX Runtime 1.27.0，其 exact LICENSE 与 ThirdPartyNotices 已核。实际 DLL 到冻结产物及 NOTICE 布置仍未核，非 win-x64 lock entries 仍不代表已分发。 |
 | .NET / WindowsDesktop runtime 10.0.11 | `PARTIAL` | 官方 .NET library license/release 与第 4 节本地哈希相互支持；runtime-pack 到冻结产物的逐文件 NOTICE 映射缺失。 |
-| Microsoft.Windows.SDK.NET.Ref 10.0.19041.57 | `PARTIAL` | exact NuGet metadata 已核；通用 SDK license 不能精确绑定该包。 |
+| Microsoft.Windows.SDK.NET.Ref 10.0.19041.57 | `CONDITIONAL_SUPPORTED` | frozen C0 DLL 与本地锁定 exact package 的 SHA-256 完全相同；官方 exact NuGet page 确认 version `10.0.19041.57`、Microsoft/WindowsSDK owner 与 WinSDK license link，官方 REDIST 页面明确列出 package/DLL 并给出有条件再分发许可。有效许可或接受证据、WinRT 用途适用性与 NOTICE/终端用户条款实施仍为 OPEN，因此不是无条件 clearance。 |
 | Inno Setup 6 / ChineseSimplified.isl | `PARTIAL` | JR Software `issrc` 默认分支官方许可已核，但实际 compiler 小版本未固定。第三方 `kira-96` 仓库默认分支 MIT 材料与 JR 官方默认分支 `ChineseSimplified.isl` 文件存在性参考均已核；两者都没有证明本地 `ChineseSimplified.isl` 的 exact source commit/hash/provenance，也不能单独建立本地文件的 license binding。 |
 | sherpa-onnx-streaming-zipformer-zh-int8-2025-06-30 | `UNKNOWN` | 官方模型说明可核；权重、tokens 与训练数据的明确许可绑定不足，且模型当前不在安装包内。 |
+
+### WinSDK exact file / package / redistribution 状态
+
+| State | Result | Evidence boundary |
+|---|---|---|
+| `WINSDK_FILE_TO_PACKAGE_BINDING` | `VERIFIED` | Frozen C0 `Microsoft.Windows.SDK.NET.dll`：24,877,600 bytes，file version `10.0.19041.55`，SHA-256 `0EC371D93798852E36461C8ADDDBEADCE0F963A04752F0B64E54FE19C1C834A7`；本地锁定 `Microsoft.Windows.SDK.NET.Ref` 10.0.19041.57 package 中同名 DLL 的 SHA-256 完全一致。文件内部版本与 package 版本不同不再被误写成未绑定。 |
+| `WINSDK_OFFICIAL_REDIST_LISTING` | `VERIFIED` | Microsoft 官方 REDIST 页面（updated 2024-10-21）明确列出 `Microsoft.Windows.SDK.NET.Ref` 与 `./lib/net8.0/Microsoft.Windows.SDK.NET.dll`。 |
+| `WINSDK_REDISTRIBUTION` | `CONDITIONAL_SUPPORTED` | 官方 REDIST 页面允许按适用许可条款，以未修改 NuGet package 或作为启用 WinRT API 调用的程序组成部分分发；这不是无条件分发许可。 |
+| `WINSDK_VALID_LICENSE_OR_ACCEPTANCE_EVIDENCE` | `OPEN` | 通用 Windows SDK license 说明分发取决于有效许可软件及分发要求/限制；本轮没有下载、保存或读取 RTF 附件，也没有建立本项目的有效许可/接受证据。 |
+| `WINSDK_NOTICE/END_USER_TERMS_IMPLEMENTATION` | `OPEN` | 当前 publish/installer 尚未完成适用 NOTICE、终端用户条款或相关 placement/验证。 |
+| `WINSDK_WINRT_USE_PURPOSE_APPLICABILITY` | `OPEN` | 当前 bounded C0 evidence 未直接证明本产品对该 DLL 的使用符合 REDIST 页面所述“启用 WinRT API 调用”用途；不得推断。 |
+
+匿名 Microsoft Q&A 中“may not redistribute”的回答不是权威许可材料，且与官方 REDIST 明确清单冲突；本清单不把它作为 clearance 或 prohibition evidence。
 
 ### 官方 URL（只记录，不在本提交访问）
 
@@ -211,6 +224,8 @@
 - <https://dotnet.microsoft.com/en-us/dotnet_library_license.htm>
 - <https://github.com/dotnet/core/blob/main/release-notes/10.0/10.0.11/10.0.11.md>
 - <https://www.nuget.org/packages/Microsoft.Windows.SDK.NET.Ref/10.0.19041.57>
+- <https://learn.microsoft.com/en-us/legal/windows-sdk/redist>
+- <https://learn.microsoft.com/en-us/legal/windows-sdk/license-terms-ewdk>
 - <https://github.com/jrsoftware/issrc/blob/main/license.txt>
 - <https://github.com/kira-96/Inno-Setup-Chinese-Simplified-Translation/blob/main/LICENSE>
 - <https://github.com/jrsoftware/issrc/blob/main/Files/Languages/ChineseSimplified.isl>
@@ -258,7 +273,7 @@
 | SQLite managed / native e_sqlite3 | `PARTIAL` | `PARTIAL` | `PARTIAL` | `UNKNOWN` | native 上游许可、C0 DLL 映射与 NOTICE placement 未闭合。 |
 | Inno installer engine / ChineseSimplified.isl | `PARTIAL` | `VERIFIED` | `PARTIAL` | `UNKNOWN` | engine/translation 会进入 installer；compiler exact version 与 translation upstream exact provenance 未闭合。 |
 | 中文语音模型 | `UNKNOWN` | `VERIFIED-EXCLUDED` | `VERIFIED-EXCLUDED` | `VERIFIED-EXCLUDED` | 当前 installer 不含模型；未来捆绑/下载必须重新做许可 Gate。 |
-| Microsoft.Windows.SDK.NET.Ref 10.0.19041.57 / `Microsoft.Windows.SDK.NET.dll` | `PARTIAL` | `VERIFIED` | `PARTIAL` | `UNKNOWN` | frozen publish manifest 确认该 DLL 存在；文件 metadata 显示 `10.0.19041.55+...`，必须先闭合其与锁定 `10.0.19041.57` package 的精确映射、许可、再分发和 NOTICE，不能继续按排除处理。 |
+| Microsoft.Windows.SDK.NET.Ref 10.0.19041.57 / `Microsoft.Windows.SDK.NET.dll` | `VERIFIED` | `VERIFIED` | `VERIFIED` | `UNKNOWN` | frozen file 与锁定 exact package 的 SHA-256 绑定、官方 exact package page 和 REDIST listing 均已闭合；再分发仅为 `CONDITIONAL_SUPPORTED`，有效许可/接受、WinRT 用途适用性与 NOTICE/终端用户条款实施仍 OPEN。 |
 | 七个非 win-x64 Sherpa runtime package | `PARTIAL` | `EXCLUDED-CONDITIONAL` | `EXCLUDED-CONDITIONAL` | `EXCLUDED-CONDITIONAL` | 只是 lock-graph entries，且未出现在保留的 539 文件 publish 树；因 installer container 未解包，仍需其不存在性门禁最终关闭。 |
 
 ### 12.2 已确认的静态绑定锚点
@@ -339,9 +354,9 @@ Owner 已作出的事实声明与保守边界如下：
 - SQLite native `e_sqlite3` 的上游许可与冻结 DLL attribution；
 - Inno compiler exact 小版本及 `ChineseSimplified.isl` 的本地 exact source commit/hash/provenance；
 - .NET、WindowsDesktop、Sherpa 与 ONNX Runtime 到冻结产物逐文件 LICENSE/NOTICE 的映射；
-- frozen publish 中已发现 `Microsoft.Windows.SDK.NET.dll`：其与锁定 WinSDK package/version 的精确映射、许可、再分发与 NOTICE 已成为当前硬阻断；七个非 win-x64 Sherpa runtime 的 container 不存在性仍待关闭。
+- WinSDK 的 file-to-package binding 与官方 REDIST listing 已关闭，但 `WINSDK_VALID_LICENSE_OR_ACCEPTANCE_EVIDENCE=OPEN`、`WINSDK_NOTICE/END_USER_TERMS_IMPLEMENTATION=OPEN`、`WINSDK_WINRT_USE_PURPOSE_APPLICABILITY=OPEN`；七个非 win-x64 Sherpa runtime 的 container 不存在性仍待关闭。
 
-WinSDK 已由静态 manifest 证明被捆绑，必须重新执行适用于 exact file/package/version 的 license/redistribution Gate；不得再套用排除状态。七个非 win-x64 Sherpa runtime 仍保持 `EXCLUDED-CONDITIONAL`：若未来 container evidence 发现其被捆绑，或计划捆绑，同样必须重新执行对应的 license/redistribution Gate。
+WinSDK 已由静态 manifest 证明被捆绑，且 exact file/package binding 与官方 REDIST listing 已验证；当前结论固定为 `WINSDK_REDISTRIBUTION=CONDITIONAL_SUPPORTED`，不能写成 unknown、excluded、无条件许可或 release approval。只有有效许可/接受、用途适用性及 NOTICE/终端用户条款实施分别闭合后，WinSDK Gate 才可能放行。七个非 win-x64 Sherpa runtime 仍保持 `EXCLUDED-CONDITIONAL`：若未来 container evidence 发现其被捆绑，或计划捆绑，同样必须重新执行对应的 license/redistribution Gate。
 
 中文语音模型是当前 installer 的 `VERIFIED-EXCLUDED`，不是当前分发包的硬阻断；未来若捆绑或下载，必须重新核对权重、tokens、训练数据许可及 exact model card/source/version/hash。数字签名与 clean-machine same-AppId lifecycle 仍是彼此独立的后续 Gate。
 
