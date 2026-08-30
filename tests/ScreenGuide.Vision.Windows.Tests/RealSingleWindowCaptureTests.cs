@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using ScreenGuide.Stage4.RealUsageRunner;
 using ScreenGuide.Vision.Abstractions;
 using ScreenGuide.Vision.Windows;
@@ -8,6 +9,8 @@ namespace ScreenGuide.Vision.Windows.Tests;
 
 public sealed class RealSingleWindowCaptureTests
 {
+    private const int SwMinimize = 6;
+
     [Fact]
     public async Task CapturesAndRecognizesExactStage4RunnerWindowWithoutWritingImageToDisk()
     {
@@ -148,6 +151,47 @@ public sealed class RealSingleWindowCaptureTests
         }
     }
 
+    [Fact]
+    public async Task Stage4RunnerRestoresMinimizedSyntheticWindowBeforePrintWindowCapture()
+    {
+        await using var window = await VisionEvaluationRunner.SyntheticEvaluationWindow.StartAsync(
+            VisionEvaluationContract.FormTitle,
+            VisionEvaluationContract.DiagnosticWindowText,
+            VisionEvaluationContract.DiagnosticWindowWidth,
+            VisionEvaluationContract.DiagnosticWindowHeight,
+            highContrast: true,
+            CancellationToken.None);
+        var handle = new IntPtr(window.Handle);
+        _ = ShowWindow(handle, SwMinimize);
+        Assert.True(SpinWait.SpinUntil(() => IsIconic(handle), TimeSpan.FromSeconds(2)));
+
+        await window.PrepareForCaptureAsync(
+            VisionEvaluationContract.DiagnosticWindowWidth,
+            VisionEvaluationContract.DiagnosticWindowHeight,
+            CancellationToken.None);
+
+        using var process = Process.GetCurrentProcess();
+        var target = new WindowCaptureTarget(
+            window.Handle,
+            VisionEvaluationContract.FormTitle,
+            process.ProcessName,
+            process.Id,
+            new DateTimeOffset(process.StartTime.ToUniversalTime()),
+            DateTimeOffset.UtcNow);
+        var verifier = new WindowsWindowCaptureTargetVerifier();
+        var raw = await new PrintWindowCaptureBackend(verifier)
+            .CaptureAsync(target, CancellationToken.None);
+        await using var frame = new CapturedWindowFrame(
+            raw.PngBytes,
+            raw.PixelWidth,
+            raw.PixelHeight,
+            raw.Technology);
+
+        Assert.True(frame.PixelWidth >= VisionEvaluationContract.DiagnosticWindowWidth * 0.8);
+        Assert.True(frame.PixelHeight >= VisionEvaluationContract.DiagnosticWindowHeight * 0.8);
+        Assert.Equal(window.Handle, handle.ToInt64());
+    }
+
     private sealed class ForcedInternalTimeoutBackend : IExactWindowCaptureBackend
     {
         public Task<RawWindowFrame> CaptureAsync(
@@ -155,4 +199,12 @@ public sealed class RealSingleWindowCaptureTests
             CancellationToken cancellationToken) =>
             throw new OperationCanceledException("simulated WGC first-frame timeout");
     }
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool IsIconic(IntPtr hWnd);
 }

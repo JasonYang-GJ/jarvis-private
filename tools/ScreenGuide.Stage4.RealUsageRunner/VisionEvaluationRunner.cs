@@ -109,10 +109,19 @@ internal static class VisionEvaluationRunner
                     {
                         var diagnosticControlled = await ManualAttemptControl.RunAsync(
                                 input,
-                                attemptCancellation => diagnosticEvaluator.EvaluateAsync(
-                                    consentedTarget,
-                                    VisionEvaluationContract.DiagnosticCandidates,
-                                    attemptCancellation),
+                                async attemptCancellation =>
+                                {
+                                    await window.PrepareForCaptureAsync(
+                                            VisionEvaluationContract.DiagnosticWindowWidth,
+                                            VisionEvaluationContract.DiagnosticWindowHeight,
+                                            attemptCancellation)
+                                        .ConfigureAwait(false);
+                                    return await diagnosticEvaluator.EvaluateAsync(
+                                            consentedTarget,
+                                            VisionEvaluationContract.DiagnosticCandidates,
+                                            attemptCancellation)
+                                        .ConfigureAwait(false);
+                                },
                                 cancellationToken)
                             .ConfigureAwait(false);
                         var diagnosticResult = diagnosticControlled.Value.AttemptResult;
@@ -151,6 +160,11 @@ internal static class VisionEvaluationRunner
                             input,
                             async attemptCancellation =>
                             {
+                                await window.PrepareForCaptureAsync(
+                                        680,
+                                        280,
+                                        attemptCancellation)
+                                    .ConfigureAwait(false);
                                 if (options.Mode == "vision-identity-change")
                                 {
                                     await window.ChangeTitleAsync(
@@ -238,7 +252,7 @@ internal static class VisionEvaluationRunner
                 visionDiagnostic);
     }
 
-    private sealed class SyntheticEvaluationWindow : IAsyncDisposable
+    internal sealed class SyntheticEvaluationWindow : IAsyncDisposable
     {
         private readonly Thread _thread;
         private readonly WinForms.Form _form;
@@ -303,6 +317,49 @@ internal static class VisionEvaluationRunner
 
         public Task ChangeTitleAsync(string title, CancellationToken cancellationToken) =>
             InvokeAsync(() => _form.Text = title, cancellationToken);
+
+        internal async Task PrepareForCaptureAsync(
+            int expectedWidth,
+            int expectedHeight,
+            CancellationToken cancellationToken)
+        {
+            if (expectedWidth < 2 || expectedHeight < 2)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(expectedWidth),
+                    "测试窗口尺寸必须有效。 ");
+            }
+
+            await InvokeAsync(
+                    () =>
+                    {
+                        if (_form.IsDisposed || _form.Handle.ToInt64() != Handle)
+                        {
+                            throw new InvalidOperationException(
+                                "测试窗口身份已经变化，因此没有读取画面。 ");
+                        }
+
+                        _form.WindowState = WinForms.FormWindowState.Normal;
+                        _form.Size = new Size(expectedWidth, expectedHeight);
+                        _form.Show();
+                        // Keep the console focused so the user's next Enter/STOP remains
+                        // available; TopMost keeps this synthetic window visible.
+                        _form.Refresh();
+                        _form.Update();
+
+                        if (_form.Handle.ToInt64() != Handle
+                            || !_form.Visible
+                            || _form.WindowState != WinForms.FormWindowState.Normal
+                            || _form.Width != expectedWidth
+                            || _form.Height != expectedHeight)
+                        {
+                            throw new InvalidOperationException(
+                                "测试窗口没有恢复到已批准的可见尺寸，因此没有读取画面。 ");
+                        }
+                    },
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
 
         public async ValueTask DisposeAsync()
         {
