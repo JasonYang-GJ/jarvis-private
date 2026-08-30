@@ -26,6 +26,8 @@ public sealed class DesktopApiDispatcher(
     MemoryService memories,
     IHostApplicationLifetime applicationLifetime)
 {
+    private const int MaximumProjectionBytes = 512 * 1024;
+
     public async Task<DesktopApiResponse> DispatchAsync(
         DesktopApiRequest request,
         CancellationToken cancellationToken = default)
@@ -663,14 +665,41 @@ public sealed class DesktopApiDispatcher(
             page.Page.Items.Select(MapConversationMessage).ToArray(),
             page.Page.NextBeforeSequenceNumber,
             page.Page.HasMore);
-        if (JsonSerializer.SerializeToUtf8Bytes(response, DesktopProtocolJson.Options).Length > 512 * 1024)
+        if (response.Messages.Any(message => !FitsProjectionBudget(response with
+            {
+                Messages = [message],
+                NextBeforeSequenceNumber = message.SequenceNumber,
+                HasMore = true
+            })))
         {
             throw new SessionProjectionException(
                 "session_projection_item_too_large",
                 "单条会话内容过大，无法安全显示。");
         }
 
-        return response;
+        if (FitsProjectionBudget(response))
+        {
+            return response;
+        }
+
+        for (var skip = 1; skip < response.Messages.Count; skip++)
+        {
+            var retained = response.Messages.Skip(skip).ToArray();
+            var reduced = response with
+            {
+                Messages = retained,
+                NextBeforeSequenceNumber = retained[0].SequenceNumber,
+                HasMore = true
+            };
+            if (FitsProjectionBudget(reduced))
+            {
+                return reduced;
+            }
+        }
+
+        throw new SessionProjectionException(
+            "session_projection_item_too_large",
+            "单条会话内容过大，无法安全显示。");
     }
 
     private async Task<SessionTurnDetailsDto> GetSessionTurnAsync(
@@ -691,14 +720,85 @@ public sealed class DesktopApiDispatcher(
 
     private static SessionProjectionUpdateDto EnsureProjectionBudget(SessionProjectionUpdateDto response)
     {
-        if (JsonSerializer.SerializeToUtf8Bytes(response, DesktopProtocolJson.Options).Length > 512 * 1024)
+        if (FitsProjectionBudget(response))
+        {
+            return response;
+        }
+
+        if (response.MessageUpserts.Any(message => !FitsProjectionBudget(response with
+            {
+                TurnUpserts = [],
+                MessageUpserts = [message],
+                LastMessageSequenceNumber = message.SequenceNumber
+            })))
         {
             throw new SessionProjectionException(
                 "session_projection_item_too_large",
                 "单条会话内容过大，无法安全显示。");
         }
 
-        return response;
+        for (var take = response.MessageUpserts.Count - 1; take > 0; take--)
+        {
+            var retained = response.MessageUpserts.Take(take).ToArray();
+            var reduced = response with
+            {
+                MessageUpserts = retained,
+                LastMessageSequenceNumber = retained[^1].SequenceNumber
+            };
+            if (FitsProjectionBudget(reduced))
+            {
+                return reduced;
+            }
+        }
+
+        if (response.MessageUpserts.Count == 0 && response.TurnUpserts.Count > 1)
+        {
+            var reset = response with
+            {
+                Kind = "ResetRequired",
+                TurnUpserts = [],
+                MessageUpserts = [],
+                LastMessageSequenceNumber = 0,
+                ResetReason = "projection_budget"
+            };
+            if (FitsProjectionBudget(reset))
+            {
+                return reset;
+            }
+        }
+
+        throw new SessionProjectionException(
+            "session_projection_item_too_large",
+            "单条会话内容过大，无法安全显示。");
+    }
+
+    private static bool FitsProjectionBudget<T>(T value) =>
+        JsonSerializer.SerializeToUtf8Bytes(value, DesktopProtocolJson.Options).Length
+        <= MaximumProjectionBytes;
+
+    private static SessionSnapshotDto FitSnapshotBudget(SessionSnapshotDto response)
+    {
+        if (FitsProjectionBudget(response))
+        {
+            return response;
+        }
+
+        for (var skip = 1; skip < response.Messages.Count; skip++)
+        {
+            var reduced = response with
+            {
+                Messages = response.Messages.Skip(skip).ToArray(),
+                HasEarlierMessages = true
+            };
+            if (FitsProjectionBudget(reduced))
+            {
+                return reduced;
+            }
+        }
+
+        throw new SessionProjectionException(
+            "session_projection_item_too_large",
+            "单条会话内容过大，无法安全显示。");
     }
 
     private static SessionSnapshotDto? MapSession(LocalSessionSnapshot? snapshot)
@@ -762,15 +862,9 @@ public sealed class DesktopApiDispatcher(
                 consent.TotalCharacters,
                 consent.PreparedAtUtc,
                 consent.ExpiresAtUtc,
-                consent.ManifestHash)).ToArray());
-        if (JsonSerializer.SerializeToUtf8Bytes(response, DesktopProtocolJson.Options).Length > 512 * 1024)
-        {
-            throw new SessionProjectionException(
-                "session_projection_item_too_large",
-                "单条会话内容过大，无法安全显示。");
-        }
-
-        return response;
+                consent.ManifestHash)).ToArray(),
+            snapshot.HasEarlierMessages);
+        return FitSnapshotBudget(response);
     }
 
     private static UnifiedSessionTurnDto MapSessionTurn(SessionTurnRecord turn) => new(

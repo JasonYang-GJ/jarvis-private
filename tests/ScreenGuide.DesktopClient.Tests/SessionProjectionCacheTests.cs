@@ -102,6 +102,56 @@ public sealed class SessionProjectionCacheTests
         AssertBounded(cache.Snapshot!, expectedSequences: [1, .. Enumerable.Range(11, 31)]);
     }
 
+    [Fact]
+    public void ExplicitEarlierMessagePagesMergeByStableIdentityAndRejectOtherGenerations()
+    {
+        var sessionId = Guid.NewGuid();
+        var bootstrap = Snapshot(
+            sessionId,
+            10,
+            [Turn(1, "Completed")],
+            Enumerable.Range(101, 100).Select(index => Message(index, $"new-{index}")).ToArray());
+        var cache = new SessionProjectionCache();
+        Assert.True(cache.Reset(bootstrap));
+        var page = new SessionMessagesPageDto(
+            bootstrap.CoordinatorInstanceId,
+            bootstrap.CoordinatorStartedAtUtc,
+            sessionId,
+            Enumerable.Range(51, 50).Select(index => Message(index, $"old-{index}")).ToArray(),
+            NextBeforeSequenceNumber: 51,
+            HasMore: true);
+
+        Assert.True(cache.ApplyEarlierMessages(page));
+        Assert.Equal(Enumerable.Range(51, 150).Select(value => (long)value),
+            cache.Snapshot!.Messages.Select(item => item.SequenceNumber));
+        Assert.Equal(51, cache.NextBeforeMessageSequenceNumber);
+        Assert.True(cache.HasEarlierMessages);
+        Assert.False(cache.ApplyEarlierMessages(page with { CoordinatorInstanceId = "stale-host" }));
+        Assert.False(cache.ApplyEarlierMessages(page with { SessionId = Guid.NewGuid() }));
+    }
+
+    [Fact]
+    public void SameVersionContinuationAcceptsOnlyPreviouslyUnseenMessages()
+    {
+        var sessionId = Guid.NewGuid();
+        var bootstrap = Snapshot(sessionId, 10, [Turn(1, "Completed")], [Message(1, "one")]);
+        var cache = new SessionProjectionCache();
+        Assert.True(cache.Reset(bootstrap));
+        var continuation = new SessionProjectionUpdateDto(
+            "Delta",
+            bootstrap.ChangeVersion,
+            bootstrap.CoordinatorInstanceId,
+            bootstrap.CoordinatorStartedAtUtc,
+            sessionId,
+            [],
+            [Message(2, "two")],
+            2);
+
+        Assert.True(cache.Apply(continuation));
+        Assert.Equal([1L, 2L], cache.Snapshot!.Messages.Select(item => item.SequenceNumber));
+        Assert.False(cache.Apply(continuation));
+    }
+
     private static void AssertBounded(
         SessionSnapshotDto snapshot,
         IReadOnlyList<int> expectedSequences)

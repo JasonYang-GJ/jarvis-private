@@ -75,6 +75,33 @@ public sealed class DesktopHostDependencyTests
     }
 
     [Fact]
+    public async Task SessionProjectionReadsHaveOneDedicatedReadOnlyOwner()
+    {
+        await using var environment = DesktopHostTestEnvironment.Create();
+        using var host = environment.BuildHost();
+        Assert.NotNull(host.Services.GetRequiredService<SessionProjectionService>());
+
+        var repositoryRoot = FindRepositoryRoot();
+        var coordinator = File.ReadAllText(Path.Combine(
+            repositoryRoot,
+            "src",
+            "ScreenGuide.DesktopHost",
+            "Runtime",
+            "SessionCoordinator.cs"));
+        var projection = File.ReadAllText(Path.Combine(
+            repositoryRoot,
+            "src",
+            "ScreenGuide.DesktopHost",
+            "Runtime",
+            "SessionProjectionService.cs"));
+
+        Assert.DoesNotContain("conversationStore.GetMessagesPageAsync", coordinator, StringComparison.Ordinal);
+        Assert.DoesNotContain("SessionChangeJournal _changeJournal", coordinator, StringComparison.Ordinal);
+        Assert.Contains("GetActiveTurnsAsync(\n                session.Id,\n                SessionTurnProjection.MaximumTurnViews", projection.ReplaceLineEndings("\n"), StringComparison.Ordinal);
+        Assert.Contains("SessionChangeJournal _changeJournal", projection, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task ConnectorConfigurationFailureIsAuditedAfterStoreInitialization()
     {
         await using var environment = DesktopHostTestEnvironment.Create();

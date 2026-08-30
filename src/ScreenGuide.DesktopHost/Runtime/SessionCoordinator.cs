@@ -10,17 +10,6 @@ using AgentTaskStatus = ScreenGuide.Core.Tasking.TaskStatus;
 
 namespace ScreenGuide.DesktopHost.Runtime;
 
-public sealed record LocalSessionSnapshot(
-    long ChangeVersion,
-    string CoordinatorInstanceId,
-    DateTimeOffset CoordinatorStartedAtUtc,
-    SessionRecord Session,
-    string? SelectedProjectName,
-    IReadOnlyList<SessionTurnRecord> Turns,
-    IReadOnlyList<SessionTurnRecord> ActiveTurns,
-    IReadOnlyList<ConversationMessageRecord> Messages,
-    IReadOnlyList<MemoryOutboundPreparedConsent> MemoryOutboundConsents);
-
 public sealed record SessionSubmitResult(Guid SessionId, Guid TurnId, bool WasDuplicate);
 
 public interface ISessionMemoryConsentPublicationObserver
@@ -36,7 +25,7 @@ public interface ISessionMemoryConsentPublicationObserver
 /// </summary>
 public sealed class SessionCoordinator(
     ISessionStore sessionStore,
-    IConversationStore conversationStore,
+    SessionProjectionService projections,
     ConversationService conversations,
     AssistantCommandService assistantCommands,
     LocalTaskEntryService tasks,
@@ -50,8 +39,6 @@ public sealed class SessionCoordinator(
     TimeProvider timeProvider)
 {
     private const int MaximumInputLength = 20_000;
-    private readonly string _coordinatorInstanceId = Guid.NewGuid().ToString("N");
-    private readonly DateTimeOffset _coordinatorStartedAtUtc = DateTimeOffset.UtcNow;
     private readonly SemaphoreSlim _currentSessionGate = new(1, 1);
     private readonly ConcurrentDictionary<Guid, SemaphoreSlim> _sessionGates = new();
     private readonly ConcurrentDictionary<Guid, SemaphoreSlim> _turnGates = new();
@@ -61,10 +48,6 @@ public sealed class SessionCoordinator(
         _requestedMemorySelections = new();
     private readonly ConcurrentDictionary<Guid, MemoryOutboundPreparedConsent>
         _preparedMemoryConsents = new();
-    private readonly object _changeGate = new();
-    private readonly SessionChangeJournal _changeJournal = new();
-    private TaskCompletionSource<long> _nextChange = NewChangeSource();
-    private long _changeVersion = 1;
 
     public async Task<LocalSessionSnapshot?> GetCurrentAsync(
         CancellationToken cancellationToken = default)
@@ -740,53 +723,13 @@ public sealed class SessionCoordinator(
     public async Task<LocalSessionSnapshot?> WaitForChangeAsync(
         long knownChangeVersion,
         TimeSpan maximumWait,
-        CancellationToken cancellationToken = default)
-    {
-        if (maximumWait < TimeSpan.Zero || maximumWait > TimeSpan.FromSeconds(30))
-        {
-            throw new ArgumentOutOfRangeException(nameof(maximumWait));
-        }
-
-        Task<long>? wait = null;
-        if (knownChangeVersion < 0)
-        {
-            var versionBeforeLookup = ChangeVersion;
-            var current = await GetCurrentAsync(cancellationToken).ConfigureAwait(false);
-            if (current is not null)
-            {
-                return current;
-            }
-
-            lock (_changeGate)
-            {
-                if (versionBeforeLookup == _changeVersion)
-                {
-                    wait = _nextChange.Task;
-                }
-            }
-        }
-
-        lock (_changeGate)
-        {
-            if (wait is null && knownChangeVersion == _changeVersion)
-            {
-                wait = _nextChange.Task;
-            }
-        }
-
-        if (wait is not null)
-        {
-            try
-            {
-                await wait.WaitAsync(maximumWait, cancellationToken).ConfigureAwait(false);
-            }
-            catch (TimeoutException)
-            {
-            }
-        }
-
-        return await GetCurrentAsync(cancellationToken).ConfigureAwait(false);
-    }
+        CancellationToken cancellationToken = default) =>
+        await projections.WaitForChangeAsync(
+                knownChangeVersion,
+                maximumWait,
+                _preparedMemoryConsents.Values.ToArray(),
+                cancellationToken)
+            .ConfigureAwait(false);
 
     public async Task<LocalSessionProjectionUpdate> WaitForProjectionAsync(
         string coordinatorInstanceId,
@@ -795,133 +738,35 @@ public sealed class SessionCoordinator(
         long knownChangeVersion,
         long knownMessageSequenceNumber,
         TimeSpan maximumWait,
-        CancellationToken cancellationToken = default)
-    {
-        if (maximumWait < TimeSpan.Zero || maximumWait > TimeSpan.FromSeconds(30))
-        {
-            throw new ArgumentOutOfRangeException(nameof(maximumWait));
-        }
-
-        if (!string.Equals(coordinatorInstanceId, _coordinatorInstanceId, StringComparison.Ordinal)
-            || coordinatorStartedAtUtc != _coordinatorStartedAtUtc)
-        {
-            return ResetProjection(sessionId, "coordinator_changed");
-        }
-
-        var currentSession = await sessionStore.GetCurrentSessionAsync(cancellationToken)
-            .ConfigureAwait(false);
-        if (currentSession is null || currentSession.Id != sessionId)
-        {
-            return ResetProjection(currentSession?.Id, "session_changed");
-        }
-
-        Task<long>? wait = null;
-        lock (_changeGate)
-        {
-            if (knownChangeVersion == _changeVersion)
-            {
-                wait = _nextChange.Task;
-            }
-        }
-
-        if (wait is not null)
-        {
-            try
-            {
-                await wait.WaitAsync(maximumWait, cancellationToken).ConfigureAwait(false);
-            }
-            catch (TimeoutException)
-            {
-            }
-        }
-
-        var currentVersion = ChangeVersion;
-        if (knownChangeVersion == currentVersion)
-        {
-            return new LocalSessionProjectionUpdate(
-                LocalSessionProjectionKind.NoChange,
-                currentVersion,
-                _coordinatorInstanceId,
-                _coordinatorStartedAtUtc,
+        CancellationToken cancellationToken = default) =>
+        await projections.WaitForProjectionAsync(
+                coordinatorInstanceId,
+                coordinatorStartedAtUtc,
                 sessionId,
-                [],
-                [],
-                knownMessageSequenceNumber);
-        }
-
-        if (knownChangeVersion < 0 || knownChangeVersion > currentVersion)
-        {
-            return ResetProjection(sessionId, "change_version_invalid");
-        }
-
-        var journal = _changeJournal.Read(knownChangeVersion, currentVersion, sessionId);
-        if (journal.ResetRequired)
-        {
-            return ResetProjection(sessionId, journal.ResetReason ?? "journal_gap");
-        }
-
-        var messageChanges = await conversationStore.GetMessageChangesAsync(
-                currentSession.ConversationId,
+                knownChangeVersion,
                 knownMessageSequenceNumber,
-                50,
+                maximumWait,
                 cancellationToken)
             .ConfigureAwait(false);
-        if (messageChanges.HasMore)
-        {
-            return ResetProjection(sessionId, "message_upsert_overflow");
-        }
-
-        return new LocalSessionProjectionUpdate(
-            LocalSessionProjectionKind.Delta,
-            currentVersion,
-            _coordinatorInstanceId,
-            _coordinatorStartedAtUtc,
-            sessionId,
-            journal.TurnUpserts,
-            messageChanges.Items,
-            messageChanges.LastSequenceNumber);
-    }
 
     public async Task<LocalSessionMessagesPage> GetMessagesPageAsync(
         Guid sessionId,
         long? beforeSequenceNumber,
         int pageSize,
-        CancellationToken cancellationToken = default)
-    {
-        var session = await RequireSessionAsync(sessionId, cancellationToken).ConfigureAwait(false);
-        var page = await conversationStore.GetMessagesPageAsync(
-                session.ConversationId,
+        CancellationToken cancellationToken = default) =>
+        await projections.GetMessagesPageAsync(
+                sessionId,
                 beforeSequenceNumber,
                 pageSize,
                 cancellationToken)
             .ConfigureAwait(false);
-        return new LocalSessionMessagesPage(
-            _coordinatorInstanceId,
-            _coordinatorStartedAtUtc,
-            sessionId,
-            page);
-    }
 
     public async Task<LocalSessionTurnDetails> GetTurnDetailsAsync(
         Guid sessionId,
         Guid turnId,
-        CancellationToken cancellationToken = default)
-    {
-        _ = await RequireSessionAsync(sessionId, cancellationToken).ConfigureAwait(false);
-        var turn = await sessionStore.GetTurnAsync(turnId, cancellationToken).ConfigureAwait(false);
-        if (turn is null || turn.SessionId != sessionId)
-        {
-            throw new SessionProjectionException(
-                "session_turn_not_found",
-                "没有找到这条会话请求。");
-        }
-
-        return new LocalSessionTurnDetails(
-            _coordinatorInstanceId,
-            _coordinatorStartedAtUtc,
-            sessionId,
-            turn);
-    }
+        CancellationToken cancellationToken = default) =>
+        await projections.GetTurnDetailsAsync(sessionId, turnId, cancellationToken)
+            .ConfigureAwait(false);
 
     public async Task<SessionRecoveryResult> RecoverAsync(
         CancellationToken cancellationToken = default)
@@ -1550,7 +1395,7 @@ public sealed class SessionCoordinator(
 
             var prompt = prompts.GetRequired("chat.general", "2", providerId);
             var request = new MemoryOutboundPreparationRequest(
-                Guid.Parse(_coordinatorInstanceId),
+                projections.CoordinatorInstanceGuid,
                 session.Id,
                 turn.Id,
                 turn.Version,
@@ -1659,7 +1504,7 @@ public sealed class SessionCoordinator(
         IReadOnlyList<MemoryOutboundItemReference> selection)
     {
         if (!session.IsCurrent
-            || prepared.CoordinatorInstanceId != Guid.Parse(_coordinatorInstanceId)
+            || prepared.CoordinatorInstanceId != projections.CoordinatorInstanceGuid
             || prepared.SessionId != session.Id
             || prepared.TurnId != turn.Id
             || prepared.TurnVersion != turn.Version
@@ -2324,8 +2169,20 @@ public sealed class SessionCoordinator(
                 cancellationToken)
             .ConfigureAwait(false);
         PublishChange(updated.SessionId, updated);
+        if (RequiresMemoryConsentProjectionReset(current, updated))
+        {
+            PublishChange(updated.SessionId);
+        }
+
         return updated;
     }
+
+    private static bool RequiresMemoryConsentProjectionReset(
+        SessionTurnRecord before,
+        SessionTurnRecord after) =>
+        before.MemoryOutboundState != after.MemoryOutboundState
+        || before.Phase == SessionTurnPhase.WaitingForMemoryOutboundConsent
+        || after.Phase == SessionTurnPhase.WaitingForMemoryOutboundConsent;
 
     private async Task TryEndTurnAsync(
         Guid turnId,
@@ -2360,65 +2217,12 @@ public sealed class SessionCoordinator(
 
     private async Task<LocalSessionSnapshot> BuildSnapshotAsync(
         SessionRecord session,
-        CancellationToken cancellationToken)
-    {
-        for (var attempt = 0; attempt < 4; attempt++)
-        {
-            var before = ChangeVersion;
-            var latestSessionTask = sessionStore.GetSessionAsync(session.Id, cancellationToken);
-            var turnsTask = sessionStore.GetTurnsPageAsync(
-                session.Id,
-                beforeSequenceNumber: null,
-                pageSize: 32,
-                cancellationToken);
-            var activeTask = sessionStore.GetActiveTurnsAsync(session.Id, cancellationToken);
-            var messagesTask = conversationStore.GetMessagesPageAsync(
-                session.ConversationId,
-                beforeSequenceNumber: null,
-                pageSize: 50,
-                cancellationToken);
-            var projectsTask = tasks.GetAuthorizedProjectsAsync(cancellationToken);
-            await Task.WhenAll(
-                    latestSessionTask,
-                    turnsTask,
-                    activeTask,
-                    messagesTask,
-                    projectsTask)
-                .ConfigureAwait(false);
-            var after = ChangeVersion;
-            if (before != after && attempt < 3)
-            {
-                continue;
-            }
-
-            var latestSession = await latestSessionTask.ConfigureAwait(false) ?? session;
-            var turns = await turnsTask.ConfigureAwait(false);
-            var messages = await messagesTask.ConfigureAwait(false);
-            var activeTurns = await activeTask.ConfigureAwait(false);
-            var projectedTurns = SessionTurnProjection.Select(turns.Items, activeTurns);
-            var selectedName = latestSession.SelectedProjectId is { } selectedProjectId
-                ? (await projectsTask.ConfigureAwait(false))
-                    .SingleOrDefault(project => project.Id == selectedProjectId)?.Name
-                : null;
-            return new LocalSessionSnapshot(
-                after,
-                _coordinatorInstanceId,
-                _coordinatorStartedAtUtc,
-                latestSession,
-                selectedName,
-                projectedTurns.Turns,
-                projectedTurns.AdditionalActiveTurns,
-                messages.Items,
-                _preparedMemoryConsents.Values
-                    .Where(item => item.SessionId == session.Id
-                                   && projectedTurns.SelectedActiveTurns.Any(turn => turn.Id == item.TurnId
-                                       && SessionTurnPhases.IsForegroundWork(turn.Phase)))
-                    .OrderBy(item => item.PreparedAtUtc)
-                    .ToArray());
-        }
-
-        throw new InvalidOperationException("会话状态更新过于频繁，请稍后重试。 ");
-    }
+        CancellationToken cancellationToken) =>
+        await projections.BuildSnapshotAsync(
+                session,
+                _preparedMemoryConsents.Values.ToArray(),
+                cancellationToken)
+            .ConfigureAwait(false);
 
     private DesktopHostSnapshot RequireStartedHost()
     {
@@ -2428,53 +2232,8 @@ public sealed class SessionCoordinator(
             : throw new InvalidOperationException("Desktop Host 尚未完成启动。");
     }
 
-    private long ChangeVersion
-    {
-        get
-        {
-            lock (_changeGate)
-            {
-                return _changeVersion;
-            }
-        }
-    }
-
-    private LocalSessionProjectionUpdate ResetProjection(Guid? sessionId, string reason) => new(
-        LocalSessionProjectionKind.ResetRequired,
-        ChangeVersion,
-        _coordinatorInstanceId,
-        _coordinatorStartedAtUtc,
-        sessionId,
-        [],
-        [],
-        0,
-        reason);
-
-    private void PublishChange(Guid? sessionId = null, SessionTurnRecord? turnUpsert = null)
-    {
-        TaskCompletionSource<long> completed;
-        long version;
-        lock (_changeGate)
-        {
-            version = ++_changeVersion;
-            completed = _nextChange;
-            _nextChange = NewChangeSource();
-        }
-
-        if (turnUpsert is null)
-        {
-            _changeJournal.AppendReset(version, sessionId);
-        }
-        else
-        {
-            _changeJournal.AppendTurn(version, turnUpsert);
-        }
-
-        completed.TrySetResult(version);
-    }
-
-    private static TaskCompletionSource<long> NewChangeSource() =>
-        new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private void PublishChange(Guid? sessionId = null, SessionTurnRecord? turnUpsert = null) =>
+        projections.RecordChange(sessionId, turnUpsert);
 
     private static string NormalizeInput(string text)
     {
@@ -2531,7 +2290,7 @@ public sealed class SessionCoordinator(
     {
         if (!string.Equals(
                 prepared.CoordinatorInstanceId.ToString("N"),
-                _coordinatorInstanceId,
+                projections.CoordinatorInstanceId,
                 StringComparison.OrdinalIgnoreCase)
             || prepared.SessionId != session.Id
             || prepared.TurnId != turn.Id

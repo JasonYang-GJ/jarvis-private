@@ -417,6 +417,38 @@ public sealed class SqliteSessionStore : ISessionStore
         return await ReadTurnsAsync(command, cancellationToken).ConfigureAwait(false);
     }
 
+    public async Task<IReadOnlyList<SessionTurnRecord>> GetActiveTurnsAsync(
+        Guid sessionId,
+        int limit,
+        CancellationToken cancellationToken = default)
+    {
+        if (limit is < 1 or > 32)
+        {
+            throw new ArgumentOutOfRangeException(nameof(limit));
+        }
+
+        await using var connection = await OpenAsync(cancellationToken).ConfigureAwait(false);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT * FROM session_turns
+            WHERE session_id = $id
+              AND phase NOT IN ('Completed', 'Failed', 'Cancelled', 'Interrupted')
+            ORDER BY
+              CASE WHEN phase IN (
+                'Understanding', 'Responding', 'WaitingForProject', 'WaitingForFile',
+                'WaitingForWindow', 'WaitingForWindowConsent', 'WaitingForConfirmation',
+                'WaitingForMemoryOutboundConsent', 'Executing', 'ObservingWindow'
+              ) THEN 0 ELSE 1 END,
+              sequence_number DESC,
+              updated_at_utc DESC,
+              id
+            LIMIT $limit;
+            """;
+        Add(command, "$id", sessionId);
+        command.Parameters.AddWithValue("$limit", limit);
+        return await ReadTurnsAsync(command, cancellationToken).ConfigureAwait(false);
+    }
+
     public async Task<SessionRecoveryResult> RecoverInterruptedAsync(
         DateTimeOffset recoveredAtUtc,
         CancellationToken cancellationToken = default)

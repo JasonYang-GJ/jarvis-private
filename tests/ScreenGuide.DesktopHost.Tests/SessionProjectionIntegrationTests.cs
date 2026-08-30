@@ -1,7 +1,9 @@
 using ScreenGuide.DesktopProtocol;
+using ScreenGuide.Core.Conversations;
 using ScreenGuide.Core.Sessions;
 using ScreenGuide.DesktopHost.Runtime;
 using Microsoft.Extensions.DependencyInjection;
+using System.Text.Json;
 
 namespace ScreenGuide.DesktopHost.Tests;
 
@@ -94,7 +96,7 @@ public sealed class SessionProjectionIntegrationTests
     }
 
     [Fact]
-    public async Task BootstrapUsesOneDeterministicThirtyTwoTurnViewAndExactTurnRemainsAuthoritative()
+    public async Task BootstrapUsesBoundedActiveQueryAcrossOneThousandTurnsAndExactTurnRemainsAuthoritative()
     {
         await using var environment = DesktopHostTestEnvironment.Create();
         using var host = environment.BuildHost();
@@ -104,7 +106,7 @@ public sealed class SessionProjectionIntegrationTests
         var store = host.Services.GetRequiredService<ISessionStore>();
         var now = environment.TimeProvider.GetUtcNow();
         var created = new List<SessionTurnRecord>();
-        for (var sequence = 1; sequence <= 40; sequence++)
+        for (var sequence = 1; sequence <= 1_000; sequence++)
         {
             var registration = await store.StartTurnAsync(
                 session.SessionId,
@@ -140,10 +142,126 @@ public sealed class SessionProjectionIntegrationTests
             bootstrap.ActiveTurns.Select(item => item.Id)));
         Assert.Equal(created[0].Id, bootstrap.ForegroundTurn?.Id);
         Assert.Equal(
-            new[] { 1 }.Concat(Enumerable.Range(10, 31)),
+            new[] { 1 }.Concat(Enumerable.Range(970, 31)),
             allProjected.Select(item => item.SequenceNumber).Order());
         Assert.Equal(created[1].Id, exactOmitted.Turn.Id);
         Assert.Equal(2, exactOmitted.Turn.SequenceNumber);
+    }
+
+    [Fact]
+    public async Task MessagePageShrinksSerializedMultiItemPayloadWithoutTruncatingContent()
+    {
+        await using var environment = DesktopHostTestEnvironment.Create();
+        using var host = environment.BuildHost();
+        await host.StartAsync();
+        IDesktopApiClient client = new DesktopApiClient(environment.Options.PipeName);
+        var session = await client.StartNewSessionAsync("自适应历史页");
+        var conversationStore = host.Services.GetRequiredService<IConversationStore>();
+        var content = new string('界', 12_000);
+        for (var index = 0; index < 25; index++)
+        {
+            var turnId = Guid.NewGuid();
+            _ = await conversationStore.StartTurnAsync(
+                session.ConversationId,
+                turnId,
+                $"{index:D2}-{content}",
+                $"projection-budget-{index}",
+                environment.TimeProvider.GetUtcNow());
+            await conversationStore.CompleteTurnAsync(
+                session.ConversationId,
+                turnId,
+                $"{index:D2}-{content}",
+                null,
+                environment.TimeProvider.GetUtcNow());
+        }
+
+        var boundedBootstrap = await client.GetCurrentSessionAsync();
+        var page = await client.GetSessionMessagesPageAsync(
+            session.SessionId,
+            beforeSequenceNumber: null,
+            pageSize: 50);
+        await host.StopAsync();
+
+        Assert.NotNull(boundedBootstrap);
+        Assert.InRange(boundedBootstrap.Messages.Count, 1, 49);
+        Assert.True(boundedBootstrap.HasEarlierMessages);
+        Assert.InRange(
+            JsonSerializer.SerializeToUtf8Bytes(boundedBootstrap, DesktopProtocolJson.Options).Length,
+            1,
+            512 * 1024);
+        Assert.InRange(page.Messages.Count, 1, 49);
+        Assert.True(page.HasMore);
+        Assert.Equal(page.Messages[0].SequenceNumber, page.NextBeforeSequenceNumber);
+        Assert.All(page.Messages, message => Assert.EndsWith(content, message.Content, StringComparison.Ordinal));
+        Assert.InRange(
+            JsonSerializer.SerializeToUtf8Bytes(page, DesktopProtocolJson.Options).Length,
+            1,
+            512 * 1024);
+    }
+
+    [Fact]
+    public async Task ProjectionDeltaContinuesSameVersionUntilEveryBudgetedMessageArrives()
+    {
+        await using var environment = DesktopHostTestEnvironment.Create();
+        using var host = environment.BuildHost();
+        await host.StartAsync();
+        IDesktopApiClient client = new DesktopApiClient(environment.Options.PipeName);
+        var bootstrap = await client.StartNewSessionAsync("投影分批续传");
+        var conversationStore = host.Services.GetRequiredService<IConversationStore>();
+        var sessionStore = host.Services.GetRequiredService<ISessionStore>();
+        var projections = host.Services.GetRequiredService<SessionProjectionService>();
+        var content = new string('续', 12_000);
+        for (var index = 0; index < 25; index++)
+        {
+            var conversationTurnId = Guid.NewGuid();
+            _ = await conversationStore.StartTurnAsync(
+                bootstrap.ConversationId,
+                conversationTurnId,
+                $"{index:D2}-{content}",
+                $"projection-continuation-{index}",
+                environment.TimeProvider.GetUtcNow());
+            await conversationStore.CompleteTurnAsync(
+                bootstrap.ConversationId,
+                conversationTurnId,
+                $"{index:D2}-{content}",
+                null,
+                environment.TimeProvider.GetUtcNow());
+        }
+
+        var turn = (await sessionStore.StartTurnAsync(
+            bootstrap.SessionId,
+            "投影唤醒",
+            "Text",
+            "projection-continuation-wakeup",
+            ReadyRoute(environment.TimeProvider.GetUtcNow()),
+            environment.TimeProvider.GetUtcNow())).Turn;
+        projections.RecordChange(bootstrap.SessionId, turn);
+
+        var seen = new HashSet<long>();
+        var version = bootstrap.ChangeVersion;
+        var messageSequence = 0L;
+        for (var batchIndex = 0; batchIndex < 10 && seen.Count < 50; batchIndex++)
+        {
+            var update = await client.WaitForSessionProjectionAsync(new SessionProjectionCursorDto(
+                bootstrap.CoordinatorInstanceId,
+                bootstrap.CoordinatorStartedAtUtc,
+                bootstrap.SessionId,
+                version,
+                messageSequence,
+                WaitMilliseconds: 0));
+            Assert.Equal("Delta", update.Kind);
+            Assert.InRange(
+                JsonSerializer.SerializeToUtf8Bytes(update, DesktopProtocolJson.Options).Length,
+                1,
+                512 * 1024);
+            Assert.All(update.MessageUpserts, message => Assert.True(seen.Add(message.SequenceNumber)));
+            version = update.ChangeVersion;
+            messageSequence = update.LastMessageSequenceNumber;
+        }
+
+        await host.StopAsync();
+        Assert.Equal(50, seen.Count);
+        Assert.Equal(Enumerable.Range(1, 50).Select(value => (long)value), seen.Order());
     }
 
     [Fact]

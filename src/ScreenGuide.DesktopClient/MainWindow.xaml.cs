@@ -312,7 +312,9 @@ public partial class MainWindow : Window
 
     private void RenderSession(SessionSnapshotDto? snapshot)
     {
-        if (snapshot is not null && !_sessionProjectionCache.Reset(snapshot))
+        if (snapshot is not null
+            && !ReferenceEquals(snapshot, _sessionProjectionCache.Snapshot)
+            && !_sessionProjectionCache.Reset(snapshot))
         {
             return;
         }
@@ -389,6 +391,10 @@ public partial class MainWindow : Window
         SessionMessagesBorder.Visibility = messages.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
         ConversationMessagesList.ItemsSource = messages;
         ConversationMessagesList.Visibility = messages.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
+        ConversationMessagesPanel.Visibility = messages.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
+        LoadEarlierMessagesButton.Visibility = messages.Length > 0 && _sessionProjectionCache.HasEarlierMessages
+            ? Visibility.Visible
+            : Visibility.Collapsed;
         ConversationEmptyPanel.Visibility = messages.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
         ConversationTitleText.Text = presentation.Title;
         ConversationStateText.Text = presentation.StatusText;
@@ -510,6 +516,38 @@ public partial class MainWindow : Window
         finally
         {
             _isLoadingAiSettings = false;
+        }
+    }
+
+    private async void LoadEarlierMessagesButton_Click(object sender, RoutedEventArgs e)
+    {
+        var current = _currentSession;
+        var before = _sessionProjectionCache.NextBeforeMessageSequenceNumber;
+        if (current is null || before is null || !_sessionProjectionCache.HasEarlierMessages)
+        {
+            return;
+        }
+
+        LoadEarlierMessagesButton.IsEnabled = false;
+        try
+        {
+            var page = await _api.GetSessionMessagesPageAsync(
+                current.SessionId,
+                before,
+                pageSize: 50,
+                _lifetime.Token);
+            if (_sessionProjectionCache.ApplyEarlierMessages(page))
+            {
+                RenderSession(_sessionProjectionCache.Snapshot);
+            }
+        }
+        catch (DesktopApiException exception)
+        {
+            ConversationStateText.Text = exception.Error.UserMessage;
+        }
+        finally
+        {
+            LoadEarlierMessagesButton.IsEnabled = true;
         }
     }
 

@@ -322,7 +322,8 @@ public sealed record SessionSnapshotDto(
     IReadOnlyList<UnifiedSessionTurnDto> ActiveTurns,
     IReadOnlyList<UnifiedSessionTurnDto> Turns,
     IReadOnlyList<ConversationMessageDto> Messages,
-    IReadOnlyList<MemoryOutboundConsentDto>? MemoryOutboundConsents = null);
+    IReadOnlyList<MemoryOutboundConsentDto>? MemoryOutboundConsents = null,
+    bool HasEarlierMessages = false);
 
 public sealed record CommandResultDto(Guid TaskId, bool WasDuplicate);
 

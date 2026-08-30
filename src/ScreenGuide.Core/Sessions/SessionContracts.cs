@@ -38,5 +38,23 @@ public interface ISessionStore : IAsyncDisposable
             hasMore);
     }
     Task<IReadOnlyList<SessionTurnRecord>> GetActiveTurnsAsync(Guid sessionId, CancellationToken cancellationToken = default);
+    async Task<IReadOnlyList<SessionTurnRecord>> GetActiveTurnsAsync(
+        Guid sessionId,
+        int limit,
+        CancellationToken cancellationToken = default)
+    {
+        if (limit is < 1 or > 32)
+        {
+            throw new ArgumentOutOfRangeException(nameof(limit));
+        }
+
+        return (await GetActiveTurnsAsync(sessionId, cancellationToken).ConfigureAwait(false))
+            .OrderByDescending(item => SessionTurnPhases.IsForegroundWork(item.Phase))
+            .ThenByDescending(item => item.SequenceNumber)
+            .ThenByDescending(item => item.UpdatedAtUtc)
+            .ThenBy(item => item.Id)
+            .Take(limit)
+            .ToArray();
+    }
     Task<SessionRecoveryResult> RecoverInterruptedAsync(DateTimeOffset recoveredAtUtc, CancellationToken cancellationToken = default);
 }

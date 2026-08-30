@@ -28,11 +28,27 @@ public sealed class TaskStateChangeHub
     private readonly object _gate = new();
     private readonly Dictionary<Guid, TaskStateSlot> _slots = [];
 
-    public long Subscribe(Guid taskId)
+    internal int ActiveSlotCount
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _slots.Count;
+            }
+        }
+    }
+
+    public TaskStateSubscription Subscribe(Guid taskId)
     {
         lock (_gate)
         {
-            return GetOrAdd(taskId).Notice?.HubSequence ?? 0;
+            var slot = GetOrAdd(taskId);
+            slot.SubscriberCount++;
+            return new TaskStateSubscription(
+                this,
+                taskId,
+                slot.Notice?.HubSequence ?? 0);
         }
     }
 
@@ -40,7 +56,13 @@ public sealed class TaskStateChangeHub
     {
         lock (_gate)
         {
-            var slot = GetOrAdd(state.TaskId);
+            if (!_slots.TryGetValue(state.TaskId, out var slot)
+                || slot.SubscriberCount == 0
+                || slot.Completed)
+            {
+                return false;
+            }
+
             var current = slot.Notice?.State;
             if (current is not null)
             {
@@ -69,24 +91,70 @@ public sealed class TaskStateChangeHub
         }
     }
 
+    public void Complete(Guid taskId, Exception? failure = null)
+    {
+        lock (_gate)
+        {
+            if (!_slots.TryGetValue(taskId, out var slot))
+            {
+                return;
+            }
+
+            slot.Completed = true;
+            slot.Next.TrySetException(new TaskStateFeedEndedException(failure is not null));
+            if (slot.SubscriberCount == 0)
+            {
+                _slots.Remove(taskId);
+            }
+        }
+    }
+
     public async Task<TaskStateChangeNotice> WaitForChangeAsync(
-        Guid taskId,
+        TaskStateSubscription subscription,
         long afterHubSequence,
         CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(subscription);
         Task<TaskStateChangeNotice> wait;
         lock (_gate)
         {
-            var slot = GetOrAdd(taskId);
+            if (subscription.IsDisposed
+                || !_slots.TryGetValue(subscription.TaskId, out var slot))
+            {
+                throw new ObjectDisposedException(nameof(TaskStateSubscription));
+            }
+
             if (slot.Notice is { } current && current.HubSequence > afterHubSequence)
             {
                 return current;
+            }
+
+            if (slot.Completed)
+            {
+                throw new TaskStateFeedEndedException(feedFaulted: false);
             }
 
             wait = slot.Next.Task;
         }
 
         return await wait.WaitAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    private void Unsubscribe(TaskStateSubscription subscription)
+    {
+        lock (_gate)
+        {
+            if (!_slots.TryGetValue(subscription.TaskId, out var slot))
+            {
+                return;
+            }
+
+            slot.SubscriberCount = Math.Max(0, slot.SubscriberCount - 1);
+            if (slot.SubscriberCount == 0)
+            {
+                _slots.Remove(subscription.TaskId);
+            }
+        }
     }
 
     private TaskStateSlot GetOrAdd(Guid taskId)
@@ -109,9 +177,47 @@ public sealed class TaskStateChangeHub
 
     private sealed class TaskStateSlot
     {
+        public int SubscriberCount { get; set; }
+
+        public bool Completed { get; set; }
+
         public TaskStateChangeNotice? Notice { get; set; }
 
         public TaskCompletionSource<TaskStateChangeNotice> Next { get; set; } = NewSource();
+    }
+
+    public sealed class TaskStateSubscription : IDisposable
+    {
+        private readonly TaskStateChangeHub _owner;
+        private int _disposed;
+
+        internal TaskStateSubscription(TaskStateChangeHub owner, Guid taskId, long cursor)
+        {
+            _owner = owner;
+            TaskId = taskId;
+            Cursor = cursor;
+        }
+
+        public Guid TaskId { get; }
+
+        public long Cursor { get; }
+
+        internal bool IsDisposed => Volatile.Read(ref _disposed) != 0;
+
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref _disposed, 1) == 0)
+            {
+                _owner.Unsubscribe(this);
+            }
+        }
+    }
+
+    private sealed class TaskStateFeedEndedException(bool feedFaulted) : Exception(
+        feedFaulted
+            ? "任务状态事件源异常结束。"
+            : "任务状态事件源提前结束。")
+    {
     }
 }
 
@@ -137,7 +243,8 @@ public sealed class SessionTaskStateSynchronizer(
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(applyAsync);
-        var cursor = changes.Subscribe(taskId);
+        using var subscription = changes.Subscribe(taskId);
+        var cursor = subscription.Cursor;
         long lastVersion = -1;
         long lastEventSequence = -1;
         try
@@ -170,7 +277,7 @@ public sealed class SessionTaskStateSynchronizer(
                     }
                 }
 
-                var notice = await changes.WaitForChangeAsync(taskId, cursor, cancellationToken)
+                var notice = await changes.WaitForChangeAsync(subscription, cursor, cancellationToken)
                     .ConfigureAwait(false);
                 cursor = notice.HubSequence;
             }

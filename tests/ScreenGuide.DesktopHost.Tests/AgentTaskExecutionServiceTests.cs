@@ -1,7 +1,10 @@
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using ScreenGuide.Core.Tasking;
 using ScreenGuide.DesktopHost.Configuration;
 using ScreenGuide.DesktopHost.Runtime;
+using ScreenGuide.Skills.Abstractions;
+using System.Runtime.CompilerServices;
 using AgentTaskStatus = ScreenGuide.Core.Tasking.TaskStatus;
 
 namespace ScreenGuide.DesktopHost.Tests;
@@ -117,6 +120,70 @@ public sealed class AgentTaskExecutionServiceTests
 
         Assert.Equal(AgentTaskStatus.Interrupted, persistedTask?.Status);
         Assert.Equal(AgentRunStatus.Interrupted, run?.Status);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task PrematureOrExceptionalEventFeedPersistsInterruptedEvidenceBeforeFinalWake(
+        bool throwFromFeed)
+    {
+        await using var environment = DesktopHostTestEnvironment.Create();
+        var (_, _, task) = await environment.SeedTaskAsync("TEST_SUCCESS");
+        var adapter = new EndingSkillAdapter(throwFromFeed);
+        using var host = environment.BuildHost(services =>
+        {
+            services.RemoveAll<ISkillAdapter>();
+            services.AddSingleton<ISkillAdapter>(adapter);
+        });
+        await host.StartAsync();
+        var service = host.Services.GetRequiredService<AgentTaskExecutionService>();
+        var store = host.Services.GetRequiredService<ILocalTaskStore>();
+
+        _ = await service.StartTaskAsync(task.Id);
+        await adapter.FeedStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        adapter.EndFeed();
+        await service.WaitForTaskAsync(task.Id);
+
+        var persistedTask = await store.GetTaskAsync(task.Id);
+        var run = await store.GetAgentRunByTaskAsync(task.Id);
+        var invocation = Assert.Single(await store.GetSkillInvocationsAsync(task.Id));
+        var evidence = await store.GetTaskEvidenceAsync(task.Id);
+        await host.StopAsync();
+
+        Assert.Equal(AgentTaskStatus.Interrupted, persistedTask?.Status);
+        Assert.Equal(AgentRunStatus.Interrupted, run?.Status);
+        Assert.Equal("task_state_sync_failed", run?.FailureCode);
+        Assert.Equal(SkillInvocationStatus.Interrupted, invocation.Status);
+        Assert.NotNull(evidence);
+        Assert.Equal(AgentTaskStatus.Interrupted, evidence!.TaskStatus);
+    }
+
+    [Fact]
+    public async Task CancellationWinsRaceWithPrematureEventFeed()
+    {
+        await using var environment = DesktopHostTestEnvironment.Create();
+        var (device, _, task) = await environment.SeedTaskAsync("TEST_SUCCESS");
+        var adapter = new EndingSkillAdapter(throwFromFeed: false, endWhenCancelled: true);
+        using var host = environment.BuildHost(services =>
+        {
+            services.RemoveAll<ISkillAdapter>();
+            services.AddSingleton<ISkillAdapter>(adapter);
+        });
+        await host.StartAsync();
+        var service = host.Services.GetRequiredService<AgentTaskExecutionService>();
+        var store = host.Services.GetRequiredService<ILocalTaskStore>();
+
+        _ = await service.StartTaskAsync(task.Id);
+        await adapter.FeedStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        Assert.True(await service.CancelTaskAsync(task.Id, device.Id));
+        var persistedTask = await store.GetTaskAsync(task.Id);
+        var evidence = await store.GetTaskEvidenceAsync(task.Id);
+        await host.StopAsync();
+
+        Assert.Equal(AgentTaskStatus.Cancelled, persistedTask?.Status);
+        Assert.NotNull(evidence);
+        Assert.Equal(AgentTaskStatus.Cancelled, evidence!.TaskStatus);
     }
 
     [Fact]
@@ -315,5 +382,76 @@ public sealed class AgentTaskExecutionServiceTests
         Assert.Empty(await store.GetSkillInvocationsAsync(task.Id));
         Assert.Equal(TaskPhase.Planning, (await store.GetTaskAsync(task.Id))?.Phase);
         await host.StopAsync();
+    }
+
+    private sealed class EndingSkillAdapter(
+        bool throwFromFeed,
+        bool endWhenCancelled = false) : ISkillAdapter
+    {
+        private readonly TaskCompletionSource _release =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource FeedStarted { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public SkillDescriptor Descriptor { get; } = new(
+            "codex.project-task",
+            "test",
+            "Bounded test adapter",
+            IsBuiltIn: true,
+            new HashSet<string>(StringComparer.Ordinal) { "coding.execute" });
+
+        public Task<SkillStartResult> StartAsync(
+            SkillInvocationRequest request,
+            CancellationToken cancellationToken = default) => Task.FromResult(new SkillStartResult(
+                new SkillRunReference(request.TaskId, request.InvocationId, "test-run", request.AttemptId),
+                SkillExecutionStatus.Running,
+                DateTimeOffset.UtcNow,
+                "test",
+                4242));
+
+        public Task<SkillStatusSnapshot> GetStatusAsync(
+            SkillRunReference run,
+            CancellationToken cancellationToken = default) => Task.FromResult(new SkillStatusSnapshot(
+                run,
+                SkillExecutionStatus.Running,
+                DateTimeOffset.UtcNow));
+
+        public async IAsyncEnumerable<SkillEvent> GetEventsAsync(
+            SkillRunReference run,
+            long afterSequence,
+            [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            FeedStarted.TrySetResult();
+            await _release.Task.WaitAsync(cancellationToken);
+            if (throwFromFeed)
+            {
+                throw new IOException("synthetic event feed failure");
+            }
+
+            yield break;
+        }
+
+        public Task CancelAsync(
+            SkillRunReference run,
+            CancellationToken cancellationToken = default)
+        {
+            if (endWhenCancelled)
+            {
+                _release.TrySetResult();
+            }
+
+            return Task.CompletedTask;
+        }
+
+        public Task<SkillStartResult> RespondAsync(
+            SkillDecisionResponse response,
+            CancellationToken cancellationToken = default) => throw new NotSupportedException();
+
+        public Task<SkillFinalResult?> GetFinalResultAsync(
+            SkillRunReference run,
+            CancellationToken cancellationToken = default) => Task.FromResult<SkillFinalResult?>(null);
+
+        public void EndFeed() => _release.TrySetResult();
     }
 }

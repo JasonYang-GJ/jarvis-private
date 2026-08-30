@@ -328,6 +328,79 @@ public sealed class SessionFrozenRouteTests
         }
     }
 
+    [Fact]
+    public async Task ProjectionWaitResetsWhenForegroundMemoryConsentAppearsAndClears()
+    {
+        await using var environment = DesktopHostTestEnvironment.Create();
+        var provider = new SwitchingRecordingProvider(
+            "provider-a",
+            "model-a",
+            _ => Task.FromResult("不应调用"),
+            "https://provider-a.example/v1/chat");
+        using var host = environment.BuildHost(services =>
+        {
+            services.AddSingleton<IAiSettingsStore>(
+                new MutableSettingsStore(Route("provider-a", "model-a")));
+            services.AddSingleton(new ChatProviderRegistry([provider]));
+        });
+        await host.StartAsync();
+        IDesktopApiClient client = new DesktopApiClient(environment.Options.PipeName);
+        var memoryService = host.Services.GetRequiredService<MemoryService>();
+        var sessionStore = host.Services.GetRequiredService<ISessionStore>();
+        var memory = await memoryService.CreateAsync(MemoryDraft.Create(
+            MemoryCategory.UserPreference,
+            MemoryScope.Global,
+            "投影刷新标题",
+            "投影刷新正文",
+            null,
+            environment.TimeProvider.GetUtcNow()));
+        var bootstrap = await client.StartNewSessionAsync("投影确认刷新");
+
+        var submitted = await client.SubmitSessionInputAsync(new SessionInputRequestDto(
+            "需要确认的记忆输入",
+            "Text",
+            "memory-projection-reset",
+            bootstrap.SessionId,
+            MemoryItems:
+            [
+                new MemoryOutboundItemReferenceDto(memory.Metadata.Id, memory.Metadata.Version)
+            ]));
+        _ = await WaitForPhaseAsync(
+            sessionStore,
+            submitted.TurnId,
+            SessionTurnPhase.WaitingForMemoryOutboundConsent);
+
+        var preparedUpdate = await client.WaitForSessionProjectionAsync(new SessionProjectionCursorDto(
+            bootstrap.CoordinatorInstanceId,
+            bootstrap.CoordinatorStartedAtUtc,
+            bootstrap.SessionId,
+            bootstrap.ChangeVersion,
+            bootstrap.Messages.LastOrDefault()?.SequenceNumber ?? 0,
+            WaitMilliseconds: 2_000));
+        Assert.Equal("ResetRequired", preparedUpdate.Kind);
+        var preparedSnapshot = await client.GetCurrentSessionAsync();
+        var prepared = Assert.Single(preparedSnapshot!.MemoryOutboundConsents!);
+        Assert.Equal("投影刷新正文", Assert.Single(prepared.Items).Body);
+
+        _ = await client.ConfirmMemoryOutboundAsync(
+            bootstrap.SessionId,
+            submitted.TurnId,
+            prepared.ConsentId,
+            confirmed: false);
+        var clearedUpdate = await client.WaitForSessionProjectionAsync(new SessionProjectionCursorDto(
+            preparedSnapshot.CoordinatorInstanceId,
+            preparedSnapshot.CoordinatorStartedAtUtc,
+            preparedSnapshot.SessionId,
+            preparedSnapshot.ChangeVersion,
+            preparedSnapshot.Messages.LastOrDefault()?.SequenceNumber ?? 0,
+            WaitMilliseconds: 2_000));
+        Assert.Equal("ResetRequired", clearedUpdate.Kind);
+        var clearedSnapshot = await client.GetCurrentSessionAsync();
+        Assert.Empty(clearedSnapshot!.MemoryOutboundConsents ?? []);
+        Assert.Empty(provider.Requests);
+        await host.StopAsync();
+    }
+
     [Theory]
     [InlineData("replacement-input")]
     [InlineData("new-topic")]

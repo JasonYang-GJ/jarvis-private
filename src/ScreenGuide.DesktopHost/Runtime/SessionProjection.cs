@@ -1,4 +1,5 @@
 using ScreenGuide.Core.Conversations;
+using ScreenGuide.Core.Memories;
 using ScreenGuide.Core.Sessions;
 
 namespace ScreenGuide.DesktopHost.Runtime;
@@ -9,6 +10,18 @@ public enum LocalSessionProjectionKind
     Delta,
     ResetRequired
 }
+
+public sealed record LocalSessionSnapshot(
+    long ChangeVersion,
+    string CoordinatorInstanceId,
+    DateTimeOffset CoordinatorStartedAtUtc,
+    SessionRecord Session,
+    string? SelectedProjectName,
+    IReadOnlyList<SessionTurnRecord> Turns,
+    IReadOnlyList<SessionTurnRecord> ActiveTurns,
+    IReadOnlyList<ConversationMessageRecord> Messages,
+    IReadOnlyList<MemoryOutboundPreparedConsent> MemoryOutboundConsents,
+    bool HasEarlierMessages);
 
 public sealed record LocalSessionProjectionUpdate(
     LocalSessionProjectionKind Kind,

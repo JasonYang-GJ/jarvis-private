@@ -77,6 +77,62 @@ public sealed class TaskStateChangeHubTests
         Assert.Equal(1, reader.ReadCount);
     }
 
+    [Fact]
+    public async Task UnexpectedFeedCompletionInterruptsProjectionAndSubscriptionDisposalRemovesSlot()
+    {
+        var hub = new TaskStateChangeHub();
+        var taskId = Guid.NewGuid();
+        var reader = new MutableTaskStateReader(State(taskId, 1, 1, AgentTaskStatus.Running));
+        var synchronizer = new SessionTaskStateSynchronizer(hub, reader);
+        var updates = new List<SessionTaskStateUpdate>();
+        var running = synchronizer.RunAsync(
+            Guid.NewGuid(),
+            taskId,
+            (update, _) =>
+            {
+                updates.Add(update);
+                return Task.CompletedTask;
+            },
+            CancellationToken.None);
+
+        await reader.FirstRead.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        Assert.Equal(1, hub.ActiveSlotCount);
+        hub.Complete(taskId, new IOException("synthetic feed failure"));
+        await running.WaitAsync(TimeSpan.FromSeconds(2));
+
+        Assert.Equal(["ProgrammingTask", "Interrupted"], updates.Select(item => item.Phase));
+        Assert.Equal("task_state_sync_failed", updates[^1].FailureCode);
+        Assert.Equal(0, hub.ActiveSlotCount);
+    }
+
+    [Fact]
+    public async Task SynchronizerCancellationWinsOverFeedCompletion()
+    {
+        var hub = new TaskStateChangeHub();
+        var taskId = Guid.NewGuid();
+        var reader = new MutableTaskStateReader(State(taskId, 1, 1, AgentTaskStatus.Running));
+        var synchronizer = new SessionTaskStateSynchronizer(hub, reader);
+        var updates = new List<SessionTaskStateUpdate>();
+        using var cancellation = new CancellationTokenSource();
+        var running = synchronizer.RunAsync(
+            Guid.NewGuid(),
+            taskId,
+            (update, _) =>
+            {
+                updates.Add(update);
+                return Task.CompletedTask;
+            },
+            cancellation.Token);
+
+        await reader.FirstRead.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        cancellation.Cancel();
+        hub.Complete(taskId, new IOException("must lose to cancellation"));
+        await running.WaitAsync(TimeSpan.FromSeconds(2));
+
+        Assert.Equal(["ProgrammingTask"], updates.Select(item => item.Phase));
+        Assert.Equal(0, hub.ActiveSlotCount);
+    }
+
     private static LocalTaskStateSnapshot State(
         Guid taskId,
         long version,

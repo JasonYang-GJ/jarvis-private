@@ -442,48 +442,63 @@ public sealed class AgentTaskExecutionService(
         Guid invocationId,
         long afterSequence)
     {
+        Exception? eventFeedFailure = null;
+        Exception? completionFailure = null;
+        var taskReachedTerminal = false;
         try
         {
-            await foreach (var skillEvent in adapter.GetEventsAsync(
-                               reference,
-                               afterSequence,
-                               CancellationToken.None).ConfigureAwait(false))
+            try
             {
-                await TransitionPhaseForEventAsync(
-                        reference.TaskId,
-                        skillEvent,
-                        CancellationToken.None)
-                    .ConfigureAwait(false);
-                var request = await MapEventAsync(
-                        adapter,
-                        reference,
-                        agentRunId,
-                        attemptId,
-                        skillEvent)
-                    .ConfigureAwait(false);
-                var applied = await store.ApplyAgentEventAsync(request, CancellationToken.None)
-                    .ConfigureAwait(false);
-                if (applied.Applied)
+                await foreach (var skillEvent in adapter.GetEventsAsync(
+                                   reference,
+                                   afterSequence,
+                                   CancellationToken.None).ConfigureAwait(false))
                 {
-                    await UpdateInvocationForEventAsync(
+                    await TransitionPhaseForEventAsync(
                             reference.TaskId,
-                            invocationId,
                             skillEvent,
                             CancellationToken.None)
                         .ConfigureAwait(false);
-                    if (!IsTerminal(applied.Task.Status))
+                    var request = await MapEventAsync(
+                            adapter,
+                            reference,
+                            agentRunId,
+                            attemptId,
+                            skillEvent)
+                        .ConfigureAwait(false);
+                    var applied = await store.ApplyAgentEventAsync(request, CancellationToken.None)
+                        .ConfigureAwait(false);
+                    if (applied.Applied)
                     {
-                        await PublishPersistedTaskStateAsync(
+                        await UpdateInvocationForEventAsync(
                                 reference.TaskId,
-                                finalized: false,
+                                invocationId,
+                                skillEvent,
                                 CancellationToken.None)
                             .ConfigureAwait(false);
+                        if (!IsTerminal(applied.Task.Status))
+                        {
+                            await PublishPersistedTaskStateAsync(
+                                    reference.TaskId,
+                                    finalized: false,
+                                    CancellationToken.None)
+                                .ConfigureAwait(false);
+                        }
                     }
                 }
             }
-        }
-        finally
-        {
+            catch (Exception exception)
+            {
+                eventFeedFailure = exception;
+            }
+
+            await PersistUnexpectedEventFeedEndAsync(
+                    reference.TaskId,
+                    agentRunId,
+                    attemptId,
+                    invocationId,
+                    CancellationToken.None)
+                .ConfigureAwait(false);
             cancellationRegistry.Complete(reference.TaskId);
             var evidence = await evidenceService.FinalizeIfTerminalAsync(
                     reference.TaskId,
@@ -497,6 +512,129 @@ public sealed class AgentTaskExecutionService(
                         CancellationToken.None)
                     .ConfigureAwait(false);
             }
+
+            taskReachedTerminal = (await store.GetTaskAsync(reference.TaskId, CancellationToken.None)
+                    .ConfigureAwait(false)) is { Status: var status }
+                && IsTerminal(status);
+        }
+        catch (Exception exception)
+        {
+            completionFailure = exception;
+            throw;
+        }
+        finally
+        {
+            if (taskReachedTerminal || completionFailure is not null)
+            {
+                taskStateChanges.Complete(
+                    reference.TaskId,
+                    completionFailure ?? eventFeedFailure);
+            }
+        }
+    }
+
+    private async Task PersistUnexpectedEventFeedEndAsync(
+        Guid taskId,
+        Guid agentRunId,
+        Guid attemptId,
+        Guid invocationId,
+        CancellationToken cancellationToken)
+    {
+        var task = await store.GetTaskAsync(taskId, cancellationToken).ConfigureAwait(false)
+                   ?? throw new InvalidOperationException("任务状态已经不存在。");
+        if (IsTerminal(task.Status) || task.Status == AgentTaskStatus.WaitingForUser)
+        {
+            return;
+        }
+
+        var cancellationWon = task.Status == AgentTaskStatus.CancellationRequested;
+        var targetTaskStatus = cancellationWon
+            ? AgentTaskStatus.Cancelled
+            : AgentTaskStatus.Interrupted;
+        var eventKind = cancellationWon ? "Cancelled" : "Interrupted";
+        var safeCode = cancellationWon ? "user_cancelled" : "task_state_sync_failed";
+        var safeMessage = cancellationWon
+            ? "用户取消了编程任务。"
+            : "编程任务状态事件源提前结束，已安全中断。";
+        if (task.Phase != TaskPhase.Verifying
+            && TaskPhaseStateMachine.CanTransition(task.Phase, TaskPhase.Verifying))
+        {
+            await store.TransitionTaskPhaseAsync(
+                    taskId,
+                    TaskPhase.Verifying,
+                    TaskEventSource.System,
+                    cancellationWon
+                        ? "编程任务取消已进入最终核验。"
+                        : "编程任务状态事件源提前结束，正在核验中断结果。",
+                    cancellationToken: cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        var run = await store.GetAgentRunByTaskAsync(taskId, cancellationToken)
+            .ConfigureAwait(false)
+            ?? throw new InvalidOperationException("任务没有 Agent Run。");
+        var request = new AgentEventApplyRequest
+        {
+            TaskId = taskId,
+            AgentRunId = agentRunId,
+            AttemptId = attemptId,
+            SequenceNumber = run.LastEventSequence + 1,
+            ExternalEventId = $"host:{eventKind.ToLowerInvariant()}:{attemptId:D}",
+            EventKind = eventKind,
+            RunStatus = cancellationWon ? AgentRunStatus.Cancelled : AgentRunStatus.Interrupted,
+            AttemptStatus = cancellationWon
+                ? AgentAttemptStatus.Cancelled
+                : AgentAttemptStatus.Interrupted,
+            TaskStatus = targetTaskStatus,
+            OccurredAtUtc = timeProvider.GetUtcNow(),
+            Message = safeMessage,
+            DataJson = JsonSerializer.Serialize(new { failureCode = safeCode }),
+            FailureCode = safeCode,
+            FailureMessage = safeMessage
+        };
+        AgentEventApplyResult applied;
+        try
+        {
+            applied = await store.ApplyAgentEventAsync(request, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (InvalidOperationException)
+        {
+            var raced = await store.GetTaskAsync(taskId, cancellationToken).ConfigureAwait(false);
+            if (raced is not null && IsTerminal(raced.Status))
+            {
+                return;
+            }
+
+            throw;
+        }
+
+        if (!applied.Applied)
+        {
+            return;
+        }
+
+        var invocation = (await store.GetSkillInvocationsAsync(taskId, cancellationToken)
+                .ConfigureAwait(false))
+            .Single(item => item.Id == invocationId);
+        if (invocation.Status is not (
+                SkillInvocationStatus.Succeeded or
+                SkillInvocationStatus.Failed or
+                SkillInvocationStatus.Cancelled or
+                SkillInvocationStatus.Interrupted))
+        {
+            await store.UpsertSkillInvocationAsync(
+                    invocation with
+                    {
+                        Status = cancellationWon
+                            ? SkillInvocationStatus.Cancelled
+                            : SkillInvocationStatus.Interrupted,
+                        CompletedAtUtc = request.OccurredAtUtc,
+                        FailureCode = safeCode,
+                        FailureMessage = safeMessage
+                    },
+                    cancellationToken)
+                .ConfigureAwait(false);
         }
     }
 

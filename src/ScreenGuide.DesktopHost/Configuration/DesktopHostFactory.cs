@@ -175,6 +175,7 @@ public static class DesktopHostFactory
         builder.Services.AddSingleton<IConversationProvider>(services =>
             services.GetRequiredService<RoutedConversationProvider>());
         builder.Services.AddSingleton<ConversationService>();
+        builder.Services.AddSingleton<SessionProjectionService>();
         builder.Services.AddSingleton<SessionCoordinator>();
         builder.Services.AddSingleton<DesktopActionEntryService>();
         builder.Services.AddSingleton<AssistantCommandService>();

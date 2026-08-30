@@ -60,6 +60,27 @@ public sealed class AiSettingsUiTests
     }
 
     [Fact]
+    public void ConversationExposesOnlyAnExplicitBoundedEarlierHistoryAction()
+    {
+        var repositoryRoot = FindRepositoryRoot();
+        var xaml = File.ReadAllText(Path.Combine(
+            repositoryRoot,
+            "src",
+            "ScreenGuide.DesktopClient",
+            "MainWindow.xaml"));
+        var code = File.ReadAllText(Path.Combine(
+            repositoryRoot,
+            "src",
+            "ScreenGuide.DesktopClient",
+            "MainWindow.xaml.cs"));
+
+        Assert.Contains("AutomationProperties.AutomationId=\"LoadEarlierMessages\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Click=\"LoadEarlierMessagesButton_Click\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("GetSessionMessagesPageAsync", code, StringComparison.Ordinal);
+        Assert.DoesNotContain("LoadAllMessages", code, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void MemoryOutboundProtocolObjectsRedactUserInputAndMemoryContent()
     {
         const string input = "outbound-input-sentinel";

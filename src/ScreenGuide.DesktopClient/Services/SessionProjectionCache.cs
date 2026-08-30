@@ -9,6 +9,10 @@ public sealed class SessionProjectionCache
 
     public SessionSnapshotDto? Snapshot { get; private set; }
 
+    public long? NextBeforeMessageSequenceNumber { get; private set; }
+
+    public bool HasEarlierMessages { get; private set; }
+
     public bool Reset(SessionSnapshotDto snapshot)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
@@ -32,6 +36,8 @@ public sealed class SessionProjectionCache
                 .OrderBy(item => item.SequenceNumber)
                 .ToArray()
         };
+        NextBeforeMessageSequenceNumber = Snapshot.Messages.FirstOrDefault()?.SequenceNumber;
+        HasEarlierMessages = snapshot.HasEarlierMessages;
         return true;
     }
 
@@ -48,7 +54,13 @@ public sealed class SessionProjectionCache
                 current.CoordinatorInstanceId,
                 StringComparison.Ordinal)
             || update.CoordinatorStartedAtUtc != current.CoordinatorStartedAtUtc
-            || update.ChangeVersion <= current.ChangeVersion)
+            || update.ChangeVersion < current.ChangeVersion
+            || (update.ChangeVersion == current.ChangeVersion
+                && (update.TurnUpserts.Count > 0
+                    || update.MessageUpserts.All(message =>
+                        current.Messages.Any(existing =>
+                            existing.Id == message.Id
+                            && existing.SequenceNumber == message.SequenceNumber)))))
         {
             return false;
         }
@@ -84,6 +96,35 @@ public sealed class SessionProjectionCache
             Turns = bounded.Turns,
             Messages = messages
         };
+        return true;
+    }
+
+    public bool ApplyEarlierMessages(SessionMessagesPageDto page)
+    {
+        ArgumentNullException.ThrowIfNull(page);
+        var current = Snapshot;
+        if (current is null
+            || page.SessionId != current.SessionId
+            || !string.Equals(
+                page.CoordinatorInstanceId,
+                current.CoordinatorInstanceId,
+                StringComparison.Ordinal)
+            || page.CoordinatorStartedAtUtc != current.CoordinatorStartedAtUtc)
+        {
+            return false;
+        }
+
+        var messages = DeduplicateMessages(current.Messages.Concat(page.Messages))
+            .OrderBy(item => item.SequenceNumber)
+            .Take(MaximumCachedMessages)
+            .ToArray();
+        Snapshot = current with
+        {
+            Messages = messages,
+            HasEarlierMessages = page.HasMore
+        };
+        NextBeforeMessageSequenceNumber = page.NextBeforeSequenceNumber;
+        HasEarlierMessages = page.HasMore;
         return true;
     }
 

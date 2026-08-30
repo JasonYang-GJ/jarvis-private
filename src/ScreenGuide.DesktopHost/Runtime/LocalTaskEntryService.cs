@@ -196,8 +196,12 @@ public sealed class LocalTaskEntryService(
             terminal && evidence is not null,
             task.Status,
             evidence?.UserSummary,
-            task.FailureCode,
-            task.FailureMessage,
+            task.FailureCode ?? (task.Status == Core.Tasking.TaskStatus.Interrupted
+                ? run?.FailureCode
+                : null),
+            task.FailureMessage ?? (task.Status == Core.Tasking.TaskStatus.Interrupted
+                ? run?.FailureMessage
+                : null),
             task.CompletedAtUtc);
     }
 

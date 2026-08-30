@@ -66,6 +66,7 @@ public sealed class SqliteSessionProjectionQueryTests
         }
 
         var latestTurns = await sessions.GetTurnsPageAsync(session.Id, beforeSequenceNumber: null, pageSize: 32);
+        var boundedActiveTurns = await sessions.GetActiveTurnsAsync(session.Id, limit: 32);
         var firstMessages = await conversations.GetMessagesPageAsync(
             conversation.Id,
             beforeSequenceNumber: null,
@@ -75,6 +76,10 @@ public sealed class SqliteSessionProjectionQueryTests
         Assert.Equal(969, latestTurns.Items[0].SequenceNumber);
         Assert.Equal(1_000, latestTurns.Items[^1].SequenceNumber);
         Assert.True(latestTurns.HasMore);
+        Assert.Equal(32, boundedActiveTurns.Count);
+        Assert.Equal(
+            Enumerable.Range(969, 32),
+            boundedActiveTurns.Select(item => item.SequenceNumber).Order());
         Assert.Equal(50, firstMessages.Items.Count);
         Assert.Equal(1_951, firstMessages.Items[0].SequenceNumber);
         Assert.Equal(2_000, firstMessages.Items[^1].SequenceNumber);
