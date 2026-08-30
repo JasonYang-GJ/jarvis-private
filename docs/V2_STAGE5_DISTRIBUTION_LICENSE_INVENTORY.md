@@ -139,19 +139,19 @@
 
 - 锁定包：`org.k2fsa.sherpa.onnx` 与 `org.k2fsa.sherpa.onnx.runtime.win-x64` 1.13.4。精确 win-x64 RID lock/package asset graph 声明或预期提供 `sherpa-onnx.dll`、`sherpa-onnx-c-api.dll`、`onnxruntime.dll`；这是依赖/包证据，不证明这些文件实际存在于冻结的 V0.6.0 tag artifact。
 - 50 行锁表中的七个非 win-x64 Sherpa runtime package 只是 lock-graph entries；对 Windows x64 分发均为 `NOT_BUNDLED_RUNTIME_DEPENDENCY`。它们的 package license evidence 仍为 `UNKNOWN_BLOCKED_FOR_DISTRIBUTION`，但不得据此暗示其已随 Windows x64 安装包分发。
-- 本地包没有与 exact 1.13.4 绑定的完整 LICENSE/NOTICE：`UNKNOWN_BLOCKED_FOR_DISTRIBUTION`。
+- Sherpa ONNX 1.13.4 exact release/commit 的 Apache-2.0 LICENSE，以及其绑定的 ONNX Runtime 1.27.0 MIT LICENSE/ThirdPartyNotices 已由官方 GET-only 证据核实；C0 frozen files 也已完成逐文件归属。但安装包内 NOTICE placement 尚未实施，当前 cache package container 也不能冒充历史 C0 container，因此 External Distribution 仍失败关闭。
 - 当前安装包不捆绑语音模型或 tokens。运行时只从 `%LOCALAPPDATA%\ScreenGuideTeacher\models\sherpa-onnx-streaming-zipformer-zh-int8-2025-06-30` 读取四个文件；仓库没有该模型、tokens 或许可。
 - 未来模型分发状态：`UNKNOWN_BLOCKED_FOR_DISTRIBUTION`，需要 exact model card、license、source、version 与 hash。
 
 ## 7. SQLite
 
 - `Microsoft.Data.Sqlite` / `.Core` 10.0.11 与 `SQLitePCLRaw*` 2.1.12 见精确表。
-- `e_sqlite3.dll` 的来源包可以定位到 `SQLitePCLRaw.lib.e_sqlite3`，但本地没有与冻结产物绑定的完整许可文本：`UNKNOWN_BLOCKED_FOR_DISTRIBUTION`。
+- `e_sqlite3.dll` 已逐文件绑定到 `SQLitePCLRaw.lib.e_sqlite3` 2.1.12；exact release/tag LICENSE/NOTICE、exact native package metadata 与 sqlite.org public-domain 说明均已核。Source 官方许可证据已闭合，但适用材料尚未布置进 frozen installer，当前 cache container 也不是历史 C0 package container，因此 NOTICE 轴仍为 `UNKNOWN`、External Distribution 仍失败关闭。
 
 ## 8. DirectML、Inno、Provider 与 Codex
 
 - DirectML：`NOT_BUNDLED_RUNTIME_DEPENDENCY`；允许的 manifests/locks 中没有该 runtime dependency。
-- Inno Setup compiler：`BUILD_TOOL_NOT_DISTRIBUTED`。生成的 installer engine 与 `ChineseSimplified.isl` 的许可/翻译条款尚未建立本地绑定证据，因此为 `UNKNOWN_BLOCKED_FOR_DISTRIBUTION`。
+- Inno Setup compiler：`BUILD_TOOL_NOT_DISTRIBUTED`。JR Software 官方许可允许包括商业用途在内的使用与再分发；但实际 compiler exact 小版本和本地 `ChineseSimplified.isl` 的 exact upstream provenance 仍未绑定，因此只升级为 `PARTIAL`，不形成 installer clearance。
 - DeepSeek/Qwen 等 Provider 模型/API 与 Codex CLI：`NOT_BUNDLED_RUNTIME_DEPENDENCY`。云服务/API 使用权不能当作 installer redistribution 权利，也不应混入本地 package 许可清单。
 
 ## 9. 冻结产物证据边界
@@ -177,20 +177,20 @@
 
 任一项缺失都保持 External Distribution=`EXTERNAL_DISTRIBUTION_BLOCKED`。
 
-## 11. 官方来源证据层（访问日期 2026-08-30）
+## 11. 官方来源证据层（既有访问日期 2026-08-30；本批补充记录 2026-08-31）
 
-分类含义：`OFFICIAL_PACKAGE_METADATA_VERIFIED` 仅确认 exact package metadata；`FULL_LICENSE_NOTICE_VERIFIED` 表示已核对适用的完整 LICENSE 以及存在时的 NOTICE/third-party notices，但仍不自动证明这些文件已布置到冻结产物；`PARTIAL` 表示只有家族、源码、通用条款或部分组件证据；`UNKNOWN` 表示许可绑定仍不足。
+分类含义：`OFFICIAL_PACKAGE_METADATA_VERIFIED` 仅确认 exact package metadata；`LICENSE_VERIFIED_NOTICE_OPEN` 表示 exact LICENSE 已核、但 NOTICE/third-party notices 尚未取得或闭合；`FULL_LICENSE_NOTICE_VERIFIED` 表示已核对适用的完整 LICENSE 以及存在时的 NOTICE/third-party notices，但仍不自动证明这些文件已布置到冻结产物；`PARTIAL` 表示只有家族、源码、通用条款或部分组件证据；`UNKNOWN` 表示许可绑定仍不足。
 
 | Component / exact version | Official classification | 已核事实与边界 |
 |---|---|---|
-| Microsoft.Data.Sqlite / Core 10.0.11（2/2） | `OFFICIAL_PACKAGE_METADATA_VERIFIED` | exact NuGet package metadata 已核；未绑定 exact source commit/NOTICE，不能升级为 full。 |
-| Microsoft.Extensions.Hosting 10.0.11 | `OFFICIAL_PACKAGE_METADATA_VERIFIED` | Hosting exact package page 已核。 |
-| 其余 Microsoft.Extensions.* 10.0.11（26） | `PARTIAL` | 只有家族证据，未逐包完成 exact official binding；不得把 Hosting 的结论扩展到另外 26 包。 |
+| Microsoft.Data.Sqlite / Core 10.0.11（2/2） | `LICENSE_VERIFIED_NOTICE_OPEN` | 两个 exact NuGet 页面均确认 MIT；Core 页面明确不含 native binary，当前 exact-version nuspec 指向 dotnet/dotnet commit `e2f47b0110ed922f21a1522da67279133ce28f32`，该 exact commit MIT LICENSE 已核。该 commit 根 THIRD-PARTY-NOTICES 未取得，不能升级为 full，也不代表 NOTICE 已布置。 |
+| Microsoft.Extensions.* 10.0.11（本批 25/28 exact-page 目标成功） | `LICENSE_VERIFIED_NOTICE_OPEN` | Coordinator 提供的 28 项 exact-page 核验记录中 25 项返回并确认 MIT；28 是本批请求/证据目标口径，不改写第 3 节 27 个 unique lock package 的分组计数。当前 exact-version nuspec 均指向 dotnet/dotnet commit `e2f47b0110ed922f21a1522da67279133ce28f32`，其 MIT LICENSE 已核。C0 历史 package container 与当前 cache 不一致，当前 nuspec 只能作为本批 source/license 证据，不能冒充 C0 package-container 证据；NOTICE placement 仍 OPEN。 |
+| Microsoft.Extensions.Configuration.FileExtensions / FileProviders.Abstractions / FileProviders.Physical 10.0.11（3/28） | `PARTIAL` | 三个 exact NuGet 页面本批仅得到 Internal Error，不能把其他 25 项的 exact-page 结果扩展到这三项；家族 exact commit LICENSE 证据存在，但 exact package-page metadata 仍未闭合。 |
 | System.Speech 10.0.10 | `FULL_LICENSE_NOTICE_VERIFIED` | exact NuGet metadata，以及 dotnet/runtime `v10.0.10` LICENSE.TXT 与 THIRD-PARTY-NOTICES.TXT 已核；不等于冻结产物已布置 NOTICE。 |
 | NAudio 2.2.1（7 包） | `FULL_LICENSE_NOTICE_VERIFIED` | exact release `v2.2.1` 与 exact-tag `license.txt` 已核；未发现独立 NOTICE。本结论不改写七个 package/contentHash 行。 |
-| SQLitePCLRaw 2.1.12（4 包） | `PARTIAL` | exact package/release/license metadata 可核；managed 部分有依据，但 `e_sqlite3` 上游许可与冻结 DLL attribution 仍未绑定，四包不能整体标为 full。 |
-| Sherpa ONNX 1.13.4（9 包） | `PARTIAL` | exact release/tag 与 Apache-2.0 LICENSE 已核；release 映射 ONNX Runtime 1.27.0，其 exact LICENSE 与 ThirdPartyNotices 已核。实际 DLL 到冻结产物及 NOTICE 布置仍未核，非 win-x64 lock entries 仍不代表已分发。 |
-| .NET / WindowsDesktop runtime 10.0.11 | `PARTIAL` | 官方 .NET library license/release 与第 4 节本地哈希相互支持；runtime-pack 到冻结产物的逐文件 NOTICE 映射缺失。 |
+| SQLitePCLRaw 2.1.12（4 包） | `FULL_LICENSE_NOTICE_VERIFIED` | exact release `v2.1.12` 绑定 `SQLitePCLRaw.lib.e_sqlite3` 到 SQLite 3.53.3；exact native package page 确认包含 native SQLite build 且为 Apache-2.0，exact tag LICENSE.TXT 与 NOTICE.TXT 已核，sqlite.org 官方页确认 SQLite 核心为 public domain。Frozen file attribution 已闭合；package-container mismatch 与 installer NOTICE placement 仍 OPEN。 |
+| Sherpa ONNX 1.13.4 / ONNX Runtime 1.27.0 | `FULL_LICENSE_NOTICE_VERIFIED` | 两个 exact NuGet 页面均为 Apache-2.0；release `v1.13.4` 精确指向 commit `142807252687d81b40d6315f23470a1512a00de3`，该 commit LICENSE 已核；release notes 绑定 ONNX Runtime 1.27.0，其 exact tag MIT LICENSE 与 ThirdPartyNotices 已核。Frozen win-x64 file attribution 已闭合，installer NOTICE placement 仍 UNKNOWN；七个非 win-x64 lock entries 仍不代表已分发。 |
+| .NET / WindowsDesktop runtime 10.0.11 | `FULL_LICENSE_NOTICE_VERIFIED` | 官方 release notes 绑定 .NET/Windows Desktop/Microsoft.NETCore.App.Runtime.win-x64 10.0.11；dotnet/runtime exact tag `v10.0.11` MIT LICENSE.TXT、THIRD-PARTY-NOTICES.TXT 与 .NET Library Terms 的 object-code redistributable 条件均已核。Frozen runtime files 已逐文件归属；installer LICENSE/NOTICE placement 仍 UNKNOWN。 |
 | Microsoft.Windows.SDK.NET.Ref 10.0.19041.57 | `CONDITIONAL_SUPPORTED` | frozen C0 DLL 与本地锁定 exact package 的 SHA-256 完全相同；官方 exact NuGet page 确认 version `10.0.19041.57`、Microsoft/WindowsSDK owner 与 WinSDK license link，官方 REDIST 页面明确列出 package/DLL 并给出有条件再分发许可。Exact C0 源码已证明 WinRT 用途适用性；有效许可或接受证据与 NOTICE/终端用户条款实施仍为 OPEN，因此不是无条件 clearance。 |
 | Inno Setup 6 / ChineseSimplified.isl | `PARTIAL` | JR Software `issrc` 默认分支官方许可已核，但实际 compiler 小版本未固定。第三方 `kira-96` 仓库默认分支 MIT 材料与 JR 官方默认分支 `ChineseSimplified.isl` 文件存在性参考均已核；两者都没有证明本地 `ChineseSimplified.isl` 的 exact source commit/hash/provenance，也不能单独建立本地文件的 license binding。 |
 | sherpa-onnx-streaming-zipformer-zh-int8-2025-06-30 | `UNKNOWN` | 官方模型说明可核；权重、tokens 与训练数据的明确许可绑定不足，且模型当前不在安装包内。 |
@@ -211,6 +211,9 @@
 ### 官方 URL（只记录，不在本提交访问）
 
 - <https://www.nuget.org/packages/Microsoft.Data.Sqlite/10.0.11>
+- <https://www.nuget.org/packages/Microsoft.Data.Sqlite.Core/10.0.11>
+- <https://raw.githubusercontent.com/dotnet/dotnet/e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT>
+- <https://licenses.nuget.org/MIT>
 - <https://www.nuget.org/packages/Microsoft.Extensions.Hosting/10.0.11>
 - <https://github.com/dotnet/core/blob/main/license-information.md>
 - <https://www.nuget.org/packages/System.Speech/10.0.10>
@@ -219,12 +222,21 @@
 - <https://github.com/naudio/NAudio/releases/tag/v2.2.1>
 - <https://raw.githubusercontent.com/naudio/NAudio/v2.2.1/license.txt>
 - <https://github.com/ericsink/SQLitePCL.raw/releases/tag/v2.1.12>
+- <https://www.nuget.org/packages/SQLitePCLRaw.lib.e_sqlite3/2.1.12>
+- <https://github.com/ericsink/SQLitePCL.raw/blob/v2.1.12/LICENSE.TXT>
+- <https://github.com/ericsink/SQLitePCL.raw/blob/v2.1.12/NOTICE.TXT>
+- <https://www.sqlite.org/copyright.html>
+- <https://www.nuget.org/packages/org.k2fsa.sherpa.onnx/1.13.4>
+- <https://www.nuget.org/packages/org.k2fsa.sherpa.onnx.runtime.win-x64/1.13.4>
 - <https://github.com/k2-fsa/sherpa-onnx/releases/tag/v1.13.4>
 - <https://github.com/k2-fsa/sherpa-onnx/blob/v1.13.4/LICENSE>
+- <https://raw.githubusercontent.com/k2-fsa/sherpa-onnx/142807252687d81b40d6315f23470a1512a00de3/LICENSE>
 - <https://github.com/microsoft/onnxruntime/blob/v1.27.0/LICENSE>
 - <https://github.com/microsoft/onnxruntime/blob/v1.27.0/ThirdPartyNotices.txt>
 - <https://dotnet.microsoft.com/en-us/dotnet_library_license.htm>
 - <https://github.com/dotnet/core/blob/main/release-notes/10.0/10.0.11/10.0.11.md>
+- <https://github.com/dotnet/runtime/blob/v10.0.11/LICENSE.TXT>
+- <https://github.com/dotnet/runtime/blob/v10.0.11/THIRD-PARTY-NOTICES.TXT>
 - <https://www.nuget.org/packages/Microsoft.Windows.SDK.NET.Ref/10.0.19041.57>
 - <https://learn.microsoft.com/en-us/legal/windows-sdk/redist>
 - <https://learn.microsoft.com/en-us/legal/windows-sdk/license-terms-ewdk>
@@ -247,7 +259,7 @@
 
 ### 已关闭的请求审计
 
-- Architect/Security 与 QA 的 package/license 审查，以及本次 OpenAI 条款审查：均为获授权白名单 GET-only；nonGET=0、downloads=0、ProviderRequests=0、CredentialReads=0。客户端总 GET 数不作为权威字段。
+- Architect/Security 与 QA 的 package/license 审查、OpenAI 条款审查，以及本批 remaining official LICENSE/NOTICE 核验：均为获授权且限 approved domains 的 GET-only；nonGET=0、downloads=0、ProviderRequests=0、CredentialReads=0。客户端总 GET 数不作为权威字段，三个 Microsoft.Extensions exact 页面仅记录为 Internal Error，未据此补写成功证据。
 - 网络证据阶段现已关闭；任何后续在线补证都需要新的 exact-SHA Owner 授权。
 
 ## 12. 冻结归属与 NOTICE 合同
@@ -269,10 +281,11 @@
 | 由 C0 项目源码编译的自有 DesktopClient、DesktopHost 与项目 DLL | `PARTIAL` | `VERIFIED` | `PARTIAL` | `UNKNOWN` | 16 个项目 DLL 已由 exact C0 deps project entry 映射，6 个 apphost/deps/runtimeconfig 已标为 build-derived；这不是可复现 source-to-binary hash 证明，Owner 权利边界与 LICENSE/NOTICE 仍未闭合。 |
 | runtime Prompt、`.ico` 与删除脚本 | `UNKNOWN` | `PARTIAL` | `PARTIAL` | `UNKNOWN` | manifest 已绑定 publish 树中的 4 个 runtime Prompt；installer 未解包，因此嵌入图标、删除脚本与 container entry 仍未得到同等级逐项证明，Owner 权利边界也未全部闭合。 |
 | NAudio 2.2.1 / System.Speech 10.0.10 | `VERIFIED` | `VERIFIED` | `VERIFIED` | `UNKNOWN` | frozen file→exact package/version 的逐文件 SHA-256 归属已闭合，官方许可证据已核；NOTICE 布置仍缺。 |
-| Microsoft.Data.Sqlite / Microsoft.Extensions application packages | `PARTIAL` | `VERIFIED` | `VERIFIED` | `UNKNOWN` | frozen file→exact package/version 的逐文件 SHA-256 归属已闭合；package/family 许可证据与 NOTICE placement 仍是独立开放项。 |
-| .NET / WindowsDesktop runtime 10.0.11 | `PARTIAL` | `VERIFIED` | `VERIFIED` | `UNKNOWN` | 470 个 runtime 文件已按 exact runtime pack/version 与逐文件 SHA-256 映射；适用 LICENSE/NOTICE 选择和 placement 未闭合。 |
-| Sherpa / ONNX Runtime win-x64 | `PARTIAL` | `VERIFIED` | `VERIFIED` | `UNKNOWN` | frozen file→Sherpa/ONNX exact package/version 的逐文件 SHA-256 归属已闭合；适用 LICENSE/NOTICE placement 仍未闭合。 |
-| SQLite managed / native e_sqlite3 | `PARTIAL` | `VERIFIED` | `VERIFIED` | `UNKNOWN` | managed/native frozen files 已按 exact package/version 与逐文件 SHA-256 映射；native 上游许可与 NOTICE placement 未闭合。 |
+| Microsoft.Data.Sqlite / Core 10.0.11 | `VERIFIED` | `VERIFIED` | `VERIFIED` | `UNKNOWN` | exact package MIT metadata、exact source commit MIT LICENSE 与 frozen file→package/version 归属已闭合；exact commit THIRD-PARTY-NOTICES 未取得，installer NOTICE placement 仍 OPEN。 |
+| Microsoft.Extensions application packages 10.0.11 | `PARTIAL` | `VERIFIED` | `VERIFIED` | `UNKNOWN` | 本批 25/28 exact-page 目标确认 MIT，3 个 exact 页面仍 PARTIAL；共同 exact source commit MIT LICENSE 已核，但当前 cache 不是 C0 package container，NOTICE placement 仍 OPEN。 |
+| .NET / WindowsDesktop runtime 10.0.11 | `VERIFIED` | `VERIFIED` | `VERIFIED` | `UNKNOWN` | 470 个 runtime 文件已按 exact runtime pack/version 与逐文件 SHA-256 映射；exact release/LICENSE/THIRD-PARTY-NOTICES 与 object-code redistribution 条件已核，installer placement 未闭合。 |
+| Sherpa / ONNX Runtime win-x64 | `VERIFIED` | `VERIFIED` | `VERIFIED` | `UNKNOWN` | frozen file→exact package/version 归属、Sherpa exact commit Apache-2.0 LICENSE、ONNX Runtime 1.27.0 MIT LICENSE/ThirdPartyNotices 已核；installer NOTICE placement 仍未闭合。 |
+| SQLite managed / native e_sqlite3 | `VERIFIED` | `VERIFIED` | `VERIFIED` | `UNKNOWN` | managed/native frozen files 已按 exact package/version 映射；SQLitePCLRaw exact LICENSE/NOTICE 与 SQLite public-domain 官方证据已核，installer NOTICE placement 仍未闭合。 |
 | Inno installer engine / ChineseSimplified.isl | `PARTIAL` | `VERIFIED` | `PARTIAL` | `UNKNOWN` | engine/translation 会进入 installer；compiler exact version 与 translation upstream exact provenance 未闭合。 |
 | 中文语音模型 | `UNKNOWN` | `VERIFIED-EXCLUDED` | `VERIFIED-EXCLUDED` | `VERIFIED-EXCLUDED` | 当前 installer 不含模型；未来捆绑/下载必须重新做许可 Gate。 |
 | Microsoft.Windows.SDK.NET.Ref 10.0.19041.57 / `Microsoft.Windows.SDK.NET.dll` | `VERIFIED` | `VERIFIED` | `VERIFIED` | `UNKNOWN` | frozen file 与锁定 exact package 的 SHA-256 绑定、官方 exact package page、REDIST listing 与 WinRT 用途适用性均已闭合；再分发仅为 `CONDITIONAL_SUPPORTED`，有效许可/接受与 NOTICE/终端用户条款实施仍 OPEN。 |
@@ -355,9 +368,10 @@ Owner 已作出的事实声明与保守边界如下：
 - installer container 的 embedded/derived entry、publish 树之外的安装文件、LICENSE/NOTICE 适用性与 placement；installer 本体及保留的 539 文件 publish 树身份已由静态 manifest 闭合，539 个 payload 文件的 package/runtime/project/build 来源映射已由 attribution evidence 闭合；
 - C0 deps/lock 记录的 43 个普通 package contentHash 与当前本机 cache `.nupkg.sha512` 全部不一致；这不推翻逐文件 SHA-256 归属，但当前 cache 不得作为原 C0 package container identity evidence，后续 package/NOTICE provenance 必须保持失败关闭；
 - NOTICE 文件与索引的实际 publish/installer 布置、安装后验证及新 release identity；
-- SQLite native `e_sqlite3` 的上游许可与 NOTICE placement；冻结 DLL 的 exact package/version 逐文件归属已由 attribution evidence 闭合；
+- Microsoft.Data.Sqlite/Core exact commit THIRD-PARTY-NOTICES 尚未取得；Microsoft.Extensions 的 Configuration.FileExtensions、FileProviders.Abstractions、FileProviders.Physical 三个 exact package 页面仍为 `PARTIAL`；
+- SQLite native `e_sqlite3` 的 installer NOTICE placement；其上游许可/NOTICE source evidence 与冻结 DLL exact package/version 逐文件归属均已闭合；
 - Inno compiler exact 小版本及 `ChineseSimplified.isl` 的本地 exact source commit/hash/provenance；
-- .NET、WindowsDesktop、Sherpa 与 ONNX Runtime 的适用 LICENSE/NOTICE 选择、索引和 publish placement；其 frozen file→component/package 归属已经闭合；
+- .NET、WindowsDesktop、Sherpa 与 ONNX Runtime 已核 LICENSE/NOTICE 的 installer 索引和 publish placement；其 source evidence 与 frozen file→component/package 归属已经闭合；
 - WinSDK 的 file-to-package binding、官方 REDIST listing 与 WinRT 用途适用性已关闭，但 `WINSDK_VALID_LICENSE_OR_ACCEPTANCE_EVIDENCE=OPEN`、`WINSDK_NOTICE/END_USER_TERMS_IMPLEMENTATION=OPEN`；七个非 win-x64 Sherpa runtime 的 container 不存在性仍待关闭。
 
 WinSDK 已由静态 manifest 证明被捆绑，且 exact file/package binding、官方 REDIST listing 与 WinRT 用途适用性已验证；当前结论固定为 `WINSDK_REDISTRIBUTION=CONDITIONAL_SUPPORTED`，不能写成 unknown、excluded、无条件许可或 release approval。只有有效许可/接受及 NOTICE/终端用户条款实施分别闭合后，WinSDK Gate 才可能放行。七个非 win-x64 Sherpa runtime 仍保持 `EXCLUDED-CONDITIONAL`：若未来 container evidence 发现其被捆绑，或计划捆绑，同样必须重新执行对应的 license/redistribution Gate。
