@@ -13,6 +13,13 @@ public sealed class EvaluationReport
 {
     private static readonly Regex ExactShaPattern = new("^[0-9a-f]{40}$", RegexOptions.CultureInvariant);
     private static readonly Regex WindowsBuildPattern = new("^[0-9]{1,6}(\\.[0-9]{1,6}){0,3}$", RegexOptions.CultureInvariant);
+    private static readonly HashSet<string> AllowedDiagnosticCandidateIds = new(StringComparer.Ordinal)
+    {
+        "current-cn",
+        "common-cn",
+        "ascii-token",
+        "mixed-token"
+    };
 
     private EvaluationReport(
         string exactSha,
@@ -20,7 +27,8 @@ public sealed class EvaluationReport
         string stage,
         EvaluationEnvironment environment,
         EvaluationAggregate aggregate,
-        bool cleanupConfirmed)
+        bool cleanupConfirmed,
+        VisionDiagnosticSummary visionDiagnostic)
     {
         ExactSha = exactSha;
         Mode = mode;
@@ -28,9 +36,10 @@ public sealed class EvaluationReport
         Environment = environment;
         Aggregate = aggregate;
         CleanupConfirmed = cleanupConfirmed;
+        VisionDiagnostic = visionDiagnostic;
     }
 
-    public string ContractVersion => "s4-r2.usage-evaluation.v1";
+    public string ContractVersion => "s4-r2.usage-evaluation.v2";
 
     public string ExactSha { get; }
 
@@ -44,6 +53,8 @@ public sealed class EvaluationReport
 
     public bool CleanupConfirmed { get; }
 
+    public VisionDiagnosticSummary VisionDiagnostic { get; }
+
     public int NetworkRequests => 0;
 
     public int ProviderRequests => 0;
@@ -54,7 +65,8 @@ public sealed class EvaluationReport
         string stage,
         EvaluationAggregate aggregate,
         EvaluationEnvironment environment,
-        bool cleanupConfirmed)
+        bool cleanupConfirmed,
+        VisionDiagnosticSummary? visionDiagnostic = null)
     {
         ArgumentNullException.ThrowIfNull(aggregate);
         ArgumentNullException.ThrowIfNull(environment);
@@ -64,7 +76,7 @@ public sealed class EvaluationReport
             throw new ArgumentException("必须提供 40 位小写 exact SHA。", nameof(exactSha));
         }
 
-        if (mode is not ("voice" or "voice-diagnostic" or "vision" or "vision-identity-change"))
+        if (mode is not ("voice" or "voice-diagnostic" or "vision" or "vision-diagnostic" or "vision-identity-change"))
         {
             throw new ArgumentException("评测模式不受支持。", nameof(mode));
         }
@@ -80,7 +92,8 @@ public sealed class EvaluationReport
             stage,
             Sanitize(environment),
             Sanitize(aggregate),
-            cleanupConfirmed);
+            cleanupConfirmed,
+            SanitizeVisionDiagnostic(visionDiagnostic));
     }
 
     private static EvaluationEnvironment Sanitize(EvaluationEnvironment environment)
@@ -109,6 +122,33 @@ public sealed class EvaluationReport
                     group => group.Sum(item => Math.Max(0, item.Value)),
                     StringComparer.Ordinal)
         };
+
+    private static VisionDiagnosticSummary SanitizeVisionDiagnostic(
+        VisionDiagnosticSummary? diagnostic)
+    {
+        if (diagnostic is null)
+        {
+            return VisionDiagnosticSummary.Empty;
+        }
+
+        var candidates = diagnostic.Candidates
+            .Take(4)
+            .Select(item =>
+            {
+                var candidateId = item.CandidateId ?? string.Empty;
+                return new VisionCandidateMatchSummary(
+                    AllowedDiagnosticCandidateIds.Contains(candidateId)
+                        ? candidateId
+                        : "unknown",
+                    Math.Clamp(item.ExpectedLength, 0, 256),
+                    Math.Clamp(item.BestEditDistance, 0, 256));
+            })
+            .ToArray();
+        return new VisionDiagnosticSummary(
+            Math.Clamp(diagnostic.SampleCount, 0, 1),
+            Math.Clamp(diagnostic.CompactTextLength, 0, 4_000),
+            candidates);
+    }
 }
 
 public static class SafeEvaluationReportWriter

@@ -29,6 +29,18 @@ public sealed class Stage4RunnerOptionsTests
         Assert.Equal("voice-diagnostic", options.Mode);
     }
 
+    [Fact]
+    public void AcceptsOneShotVisionDiagnosticMode()
+    {
+        var options = RunnerOptions.Parse(
+        [
+            "--mode", "vision-diagnostic",
+            "--expected-sha", "941c2d8635939bd1329daa81f34b6829bd447750"
+        ]);
+
+        Assert.Equal("vision-diagnostic", options.Mode);
+    }
+
     [Theory]
     [InlineData("--mode", "voice", "--expected-sha", "bad")]
     [InlineData("--mode", "unsupported", "--expected-sha", "941c2d8635939bd1329daa81f34b6829bd447750")]

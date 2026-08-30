@@ -9,8 +9,9 @@ namespace ScreenGuide.Vision.Windows.Tests;
 public sealed class RealSingleWindowCaptureTests
 {
     [Fact]
-    public async Task CapturesAndRecognizesStage4CanaryWithoutWritingImageToDisk()
+    public async Task CapturesAndRecognizesExactStage4RunnerWindowWithoutWritingImageToDisk()
     {
+        const string title = "元枢本机单窗口评测";
         const string canary = "这是无个人数据的本机单窗口评测标记";
         var ready = new TaskCompletionSource<(WinForms.Form Form, long Handle)>(
             TaskCreationOptions.RunContinuationsAsynchronously);
@@ -18,18 +19,19 @@ public sealed class RealSingleWindowCaptureTests
         {
             var form = new WinForms.Form
             {
-                Text = "元枢单窗口读取自动验收",
-                Width = 620,
-                Height = 260,
-                StartPosition = WinForms.FormStartPosition.CenterScreen
+                Text = title,
+                Width = 680,
+                Height = 280,
+                StartPosition = WinForms.FormStartPosition.CenterScreen,
+                TopMost = true
             };
             form.Controls.Add(new WinForms.Label
             {
                 Text = canary,
                 AutoSize = true,
                 Font = new System.Drawing.Font("Microsoft YaHei UI", 18),
-                Left = 48,
-                Top = 72
+                Left = 46,
+                Top = 86
             });
             form.Shown += (_, _) => ready.TrySetResult((form, form.Handle.ToInt64()));
             WinForms.Application.Run(form);
@@ -43,7 +45,7 @@ public sealed class RealSingleWindowCaptureTests
             using var process = Process.GetCurrentProcess();
             var target = new WindowCaptureTarget(
                 handle,
-                "元枢单窗口读取自动验收",
+                title,
                 process.ProcessName,
                 process.Id,
                 new DateTimeOffset(process.StartTime.ToUniversalTime()),

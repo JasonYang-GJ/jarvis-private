@@ -15,7 +15,7 @@ public static class Program
         catch (ArgumentException)
         {
             Console.Error.WriteLine(
-                "用法：--mode voice|voice-diagnostic|vision|vision-identity-change --expected-sha <40位小写SHA>");
+                "用法：--mode voice|voice-diagnostic|vision|vision-diagnostic|vision-identity-change --expected-sha <40位小写SHA>");
             return 2;
         }
 

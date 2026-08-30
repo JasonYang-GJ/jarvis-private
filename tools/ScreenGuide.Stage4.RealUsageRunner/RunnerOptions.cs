@@ -34,7 +34,7 @@ public sealed record RunnerOptions(string Mode, string ExpectedSha)
             }
         }
 
-        if (mode is not ("voice" or "voice-diagnostic" or "vision" or "vision-identity-change"))
+        if (mode is not ("voice" or "voice-diagnostic" or "vision" or "vision-diagnostic" or "vision-identity-change"))
         {
             throw new ArgumentException("评测模式不受支持。", nameof(args));
         }

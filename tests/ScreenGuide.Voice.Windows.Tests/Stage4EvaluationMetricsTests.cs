@@ -72,7 +72,8 @@ public sealed class Stage4EvaluationMetricsTests
                 "mode",
                 "networkRequests",
                 "providerRequests",
-                "stage"
+                "stage",
+                "visionDiagnostic"
             ],
             document.RootElement.EnumerateObject().Select(item => item.Name).Order().ToArray());
     }

@@ -8,15 +8,12 @@ namespace ScreenGuide.Stage4.RealUsageRunner;
 
 internal static class VisionEvaluationRunner
 {
-    private const string FormTitle = "元枢本机单窗口评测";
-    private const string ChangedFormTitle = "元枢本机单窗口评测（身份已变化）";
-    private const string FixedCanary = "这是无个人数据的本机单窗口评测标记";
-
     public static async Task<EvaluationReport> RunAsync(
         RunnerOptions options,
         CancellationToken cancellationToken)
     {
         var attempts = new List<EvaluationAttempt>();
+        var visionDiagnostic = VisionDiagnosticSummary.Empty;
         using var input = new ConsoleLineInput();
         var supported = GraphicsCaptureSession.IsSupported();
         var environment = EvaluationEnvironmentFactory.Create(
@@ -35,18 +32,23 @@ internal static class VisionEvaluationRunner
         SyntheticEvaluationWindow? window = null;
         var cleanupConfirmed = true;
         var stage = "completed";
+        var diagnosticMode = options.Mode == "vision-diagnostic";
         try
         {
             window = await SyntheticEvaluationWindow.StartAsync(
-                    FormTitle,
-                    FixedCanary,
+                    VisionEvaluationContract.FormTitle,
+                    diagnosticMode
+                        ? VisionEvaluationContract.DiagnosticWindowText
+                        : VisionEvaluationContract.FormalCanary,
+                    diagnosticMode ? 760 : 680,
+                    diagnosticMode ? 420 : 280,
                     cancellationToken)
                 .ConfigureAwait(false);
             using var process = Process.GetCurrentProcess();
             var processStart = new DateTimeOffset(process.StartTime.ToUniversalTime());
             var consentedTarget = new WindowCaptureTarget(
                 window.Handle,
-                FormTitle,
+                VisionEvaluationContract.FormTitle,
                 process.ProcessName,
                 process.Id,
                 processStart,
@@ -73,15 +75,20 @@ internal static class VisionEvaluationRunner
                     new WindowsGraphicsCaptureBackend(verifier),
                     new WindowsSensitiveWindowPolicy(),
                     verifier);
+                var provider = new WindowsLocalWindowVisionProvider(
+                    new WindowsLocalOcrTextExtractor());
                 var evaluator = new VisionAttemptEvaluator(
                     capture,
-                    new WindowsLocalWindowVisionProvider(new WindowsLocalOcrTextExtractor()));
+                    provider);
+                var diagnosticEvaluator = new VisionDiagnosticEvaluator(capture, provider);
 
                 var attemptCount = options.Mode == "vision" ? 21 : 1;
                 for (var index = 0; index < attemptCount; index++)
                 {
                     var isWarmup = options.Mode == "vision" && index == 0;
-                    Console.WriteLine(options.Mode == "vision-identity-change"
+                    Console.WriteLine(options.Mode == "vision-diagnostic"
+                        ? "脱敏诊断样本：按 Enter 开始一次读取。"
+                        : options.Mode == "vision-identity-change"
                         ? "窗口身份变化场景：按 Enter 开始一次受控取消检查。"
                         : isWarmup
                             ? "预热：按 Enter 开始读取测试窗口。"
@@ -99,6 +106,48 @@ internal static class VisionEvaluationRunner
                         break;
                     }
 
+                    if (diagnosticMode)
+                    {
+                        var diagnosticControlled = await ManualAttemptControl.RunAsync(
+                                input,
+                                attemptCancellation => diagnosticEvaluator.EvaluateAsync(
+                                    consentedTarget,
+                                    VisionEvaluationContract.DiagnosticCandidates,
+                                    attemptCancellation),
+                                cancellationToken)
+                            .ConfigureAwait(false);
+                        var diagnosticResult = diagnosticControlled.Value.AttemptResult;
+                        if (diagnosticControlled.StopRequested)
+                        {
+                            diagnosticResult = new VisionAttemptResult(
+                                new EvaluationAttempt(
+                                    false,
+                                    EvaluationTerminalState.Cancelled,
+                                    diagnosticResult.Attempt.EndToEndElapsed,
+                                    "evaluation.cancelled",
+                                    diagnosticResult.Attempt.CaptureElapsed,
+                                    diagnosticResult.Attempt.AnalysisElapsed),
+                                diagnosticResult.CleanupConfirmed);
+                        }
+
+                        attempts.Add(diagnosticResult.Attempt);
+                        cleanupConfirmed &= diagnosticResult.CleanupConfirmed;
+                        visionDiagnostic = diagnosticControlled.StopRequested
+                            ? VisionDiagnosticSummary.Empty
+                            : diagnosticControlled.Value.Diagnostic;
+                        Console.WriteLine($"本次终态：{diagnosticResult.Attempt.State}；窗口内容未保存。 ");
+                        if (diagnosticResult.Attempt.State != EvaluationTerminalState.Success)
+                        {
+                            stage = diagnosticResult.Attempt.State == EvaluationTerminalState.Blocked
+                                ? "blocked"
+                                : diagnosticResult.Attempt.State == EvaluationTerminalState.Cancelled
+                                    ? "cancelled"
+                                    : "failed";
+                        }
+
+                        break;
+                    }
+
                     var controlled = await ManualAttemptControl.RunAsync(
                             input,
                             async attemptCancellation =>
@@ -106,14 +155,14 @@ internal static class VisionEvaluationRunner
                                 if (options.Mode == "vision-identity-change")
                                 {
                                     await window.ChangeTitleAsync(
-                                            ChangedFormTitle,
+                                            VisionEvaluationContract.ChangedFormTitle,
                                             attemptCancellation)
                                         .ConfigureAwait(false);
                                 }
 
                                 return await evaluator.EvaluateAsync(
                                         consentedTarget,
-                                        FixedCanary,
+                                        VisionEvaluationContract.FormalCanary,
                                         isWarmup,
                                         attemptCancellation)
                                     .ConfigureAwait(false);
@@ -186,7 +235,8 @@ internal static class VisionEvaluationRunner
                 reportStage,
                 EvaluationAggregator.Build(attempts),
                 environment,
-                cleanup);
+                cleanup,
+                visionDiagnostic);
     }
 
     private sealed class SyntheticEvaluationWindow : IAsyncDisposable
@@ -208,6 +258,8 @@ internal static class VisionEvaluationRunner
         public static async Task<SyntheticEvaluationWindow> StartAsync(
             string title,
             string canary,
+            int width,
+            int height,
             CancellationToken cancellationToken)
         {
             var ready = new TaskCompletionSource<(WinForms.Form Form, long Handle)>(
@@ -219,8 +271,8 @@ internal static class VisionEvaluationRunner
                     var form = new WinForms.Form
                     {
                         Text = title,
-                        Width = 680,
-                        Height = 280,
+                        Width = width,
+                        Height = height,
                         StartPosition = WinForms.FormStartPosition.CenterScreen,
                         TopMost = true
                     };

@@ -137,15 +137,6 @@ public sealed class VisionAttemptEvaluator(
 
 public static class VisionCanaryMatcher
 {
-    public static bool Contains(string analyzedSummary, string expectedCanary)
-    {
-        ArgumentNullException.ThrowIfNull(analyzedSummary);
-        ArgumentException.ThrowIfNullOrWhiteSpace(expectedCanary);
-
-        return RemoveWhitespace(analyzedSummary)
-            .Contains(RemoveWhitespace(expectedCanary), StringComparison.Ordinal);
-    }
-
-    private static string RemoveWhitespace(string value) =>
-        string.Concat(value.Where(character => !char.IsWhiteSpace(character)));
+    public static bool Contains(string analyzedSummary, string expectedCanary) =>
+        VisionDiagnosticAnalyzer.ContainsIgnoringWhitespace(analyzedSummary, expectedCanary);
 }
