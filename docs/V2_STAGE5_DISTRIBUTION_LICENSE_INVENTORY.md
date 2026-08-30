@@ -114,8 +114,8 @@
 
 ## 6. Sherpa / ONNX 与语音模型
 
-- 锁定包：`org.k2fsa.sherpa.onnx` 与 `org.k2fsa.sherpa.onnx.runtime.win-x64` 1.13.4；表中还包括同版本的其他 runtime RID 包。
-- 发布 native DLL 包括 `sherpa-onnx.dll`、`sherpa-onnx-c-api.dll`、`onnxruntime.dll`。
+- 锁定包：`org.k2fsa.sherpa.onnx` 与 `org.k2fsa.sherpa.onnx.runtime.win-x64` 1.13.4。精确 win-x64 RID lock/package asset graph 声明或预期提供 `sherpa-onnx.dll`、`sherpa-onnx-c-api.dll`、`onnxruntime.dll`；这是依赖/包证据，不证明这些文件实际存在于冻结的 V0.6.0 tag artifact。
+- 50 行锁表中的七个非 win-x64 Sherpa runtime package 只是 lock-graph entries；对 Windows x64 分发均为 `NOT_BUNDLED_RUNTIME_DEPENDENCY`。它们的 package license evidence 仍为 `UNKNOWN_BLOCKED_FOR_DISTRIBUTION`，但不得据此暗示其已随 Windows x64 安装包分发。
 - 本地包没有与 exact 1.13.4 绑定的完整 LICENSE/NOTICE：`UNKNOWN_BLOCKED_FOR_DISTRIBUTION`。
 - 当前安装包不捆绑语音模型或 tokens。运行时只从 `%LOCALAPPDATA%\ScreenGuideTeacher\models\sherpa-onnx-streaming-zipformer-zh-int8-2025-06-30` 读取四个文件；仓库没有该模型、tokens 或许可。
 - 未来模型分发状态：`UNKNOWN_BLOCKED_FOR_DISTRIBUTION`，需要 exact model card、license、source、version 与 hash。
@@ -133,8 +133,9 @@
 
 ## 9. 冻结产物证据边界
 
-- V0.6.0 基线文档只证明 installer size/hash/`NotSigned`、ProductVersion/FileVersion 与 539 个发布文件，不证明每个文件的许可 attribution。
-- 当前仓库根的 `artifacts/publish` 是旧 V0.3.0 内容，当前 `artifacts/release` 没有 V0.6.0 installer；两者都不能作为 V0.6.0 per-file manifest 证据。
+- V0.6.0 基线文档是当前唯一权威的冻结 installer evidence，只证明 installer size/hash/`NotSigned`、ProductVersion/FileVersion 与 539 个发布文件，不证明每个文件的许可 attribution。
+- 当前仓库根的 ignored `artifacts` 是非权威、可变的构建输出，不是只读 `v0.6.0-stage4` tag artifact manifest。当前 `artifacts/publish` 有 539 个文件，Client/Host informational version 绑定 `693719d09cead42304d7c3334b98e9161128c623`，不是正式 C0 `3a591a7b6af7da7d97e07093d4c33a3f44553b82`，因此不能用于 attribution。
+- 当前 `artifacts/release` 含一个 V0.6.0 命名的 installer，QA 观察大小为 64,216,176 bytes；它不是正式冻结的 tag-source installer identity，同样不得用于 attribution。
 - 未来只能对只读 V0.6.0 tag artifact 生成逐文件 manifest；不得移动 tag、重建 C0 identity 或把其他版本目录冒充冻结产物。
 
 ## 10. 相互独立的发布门禁
