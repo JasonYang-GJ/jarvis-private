@@ -188,6 +188,64 @@ public sealed class WindowsSingleWindowCaptureService(
 /// This is the conservative Windows fallback while the provider-neutral boundary allows a
 /// Windows Graphics Capture implementation to replace it without changing Host or UI code.
 /// </summary>
+internal readonly record struct ExactWindowCaptureBounds(
+    int Left,
+    int Top,
+    int Right,
+    int Bottom)
+{
+    public int Width => Right - Left;
+
+    public int Height => Bottom - Top;
+
+    public bool IsValid => Width >= 2 && Height >= 2;
+}
+
+internal static class PrintWindowCaptureBoundsSelector
+{
+    // DWM can occasionally return only a title-bar-sized rectangle even though
+    // GetWindowRect still describes the full exact HWND. Normal invisible-border
+    // trimming is only a few pixels, so losing over 20% in either dimension is
+    // treated as a truncated DWM result, not as authority to capture less content.
+    private const int MinimumDwmCoveragePercent = 80;
+
+    public static ExactWindowCaptureBounds Select(
+        ExactWindowCaptureBounds? windowBounds,
+        ExactWindowCaptureBounds? extendedFrameBounds)
+    {
+        var window = windowBounds is { IsValid: true } validWindow
+            ? validWindow
+            : (ExactWindowCaptureBounds?)null;
+        var extended = extendedFrameBounds is { IsValid: true } validExtended
+            ? validExtended
+            : (ExactWindowCaptureBounds?)null;
+        if (window is null && extended is null)
+        {
+            throw new InvalidOperationException("无法确定目标窗口范围，因此没有读取画面。 ");
+        }
+
+        if (window is null)
+        {
+            return extended!.Value;
+        }
+
+        if (extended is null)
+        {
+            return window.Value;
+        }
+
+        var dwmIsImplausiblyNarrow =
+            (long)extended.Value.Width * 100
+            < (long)window.Value.Width * MinimumDwmCoveragePercent;
+        var dwmIsImplausiblyShort =
+            (long)extended.Value.Height * 100
+            < (long)window.Value.Height * MinimumDwmCoveragePercent;
+        return dwmIsImplausiblyNarrow || dwmIsImplausiblyShort
+            ? window.Value
+            : extended.Value;
+    }
+}
+
 public sealed class PrintWindowCaptureBackend(
     IWindowCaptureTargetVerifier identityVerifier) : IExactWindowCaptureBackend
 {
@@ -243,18 +301,29 @@ public sealed class PrintWindowCaptureBackend(
 
     private static Rect GetBounds(IntPtr handle)
     {
-        if (DwmGetWindowAttribute(
-                handle,
-                DwmwaExtendedFrameBounds,
-                out var bounds,
-                Marshal.SizeOf<Rect>()) != 0
-            && !GetWindowRect(handle, out bounds))
+        var hasWindowBounds = GetWindowRect(handle, out var windowBounds);
+        var hasExtendedFrameBounds = DwmGetWindowAttribute(
+            handle,
+            DwmwaExtendedFrameBounds,
+            out var extendedFrameBounds,
+            Marshal.SizeOf<Rect>()) == 0;
+        var selected = PrintWindowCaptureBoundsSelector.Select(
+            hasWindowBounds ? Convert(windowBounds) : null,
+            hasExtendedFrameBounds ? Convert(extendedFrameBounds) : null);
+        return new Rect
         {
-            throw new InvalidOperationException("无法确定目标窗口范围，因此没有读取画面。 ");
-        }
-
-        return bounds;
+            Left = selected.Left,
+            Top = selected.Top,
+            Right = selected.Right,
+            Bottom = selected.Bottom
+        };
     }
+
+    private static ExactWindowCaptureBounds Convert(Rect bounds) => new(
+        bounds.Left,
+        bounds.Top,
+        bounds.Right,
+        bounds.Bottom);
 
     [StructLayout(LayoutKind.Sequential)]
     private struct Rect

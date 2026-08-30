@@ -191,6 +191,32 @@ public sealed class WindowVisionBoundaryTests
     }
 
     [Fact]
+    public void PrintWindowBoundsRejectImplausiblySmallDwmTitleBarResult()
+    {
+        var windowBounds = new ExactWindowCaptureBounds(100, 100, 1220, 820);
+        var truncatedDwmBounds = new ExactWindowCaptureBounds(100, 100, 285, 132);
+
+        var selected = PrintWindowCaptureBoundsSelector.Select(
+            windowBounds,
+            truncatedDwmBounds);
+
+        Assert.Equal(windowBounds, selected);
+    }
+
+    [Fact]
+    public void PrintWindowBoundsKeepNormalDwmBorderTrimming()
+    {
+        var windowBounds = new ExactWindowCaptureBounds(100, 100, 1220, 820);
+        var normalDwmBounds = new ExactWindowCaptureBounds(108, 108, 1212, 812);
+
+        var selected = PrintWindowCaptureBoundsSelector.Select(
+            windowBounds,
+            normalDwmBounds);
+
+        Assert.Equal(normalDwmBounds, selected);
+    }
+
+    [Fact]
     public async Task LocalProviderStatesTextBasedLimitation()
     {
         var provider = new WindowsLocalWindowVisionProvider(new FixedOcr("设置 系统 显示 蓝牙"));
