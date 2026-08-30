@@ -67,6 +67,32 @@ public static class ManualAttemptControl
     }
 }
 
+public static class VoiceReadyAttemptControl
+{
+    public static Task<ControlledAttemptResult<T>> RunAsync<T>(
+        IManualLineInput input,
+        Func<CancellationToken, Task> startListening,
+        Action announceReady,
+        Func<CancellationToken, Task<T>> capture,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        ArgumentNullException.ThrowIfNull(startListening);
+        ArgumentNullException.ThrowIfNull(announceReady);
+        ArgumentNullException.ThrowIfNull(capture);
+        return ManualAttemptControl.RunAsync(
+            input,
+            async attemptCancellation =>
+            {
+                await startListening(attemptCancellation).ConfigureAwait(false);
+                attemptCancellation.ThrowIfCancellationRequested();
+                announceReady();
+                return await capture(attemptCancellation).ConfigureAwait(false);
+            },
+            cancellationToken);
+    }
+}
+
 public sealed class ConsoleLineInput : IManualLineInput, IDisposable
 {
     private readonly Channel<string> _lines = Channel.CreateUnbounded<string>(

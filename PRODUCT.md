@@ -109,7 +109,7 @@
 ## 阶段 4 R2 候选评测能力
 
 - 新增独立的 `ScreenGuide.Stage4.RealUsageRunner`，不接入产品后台采样、遥测、Session、Provider 或凭据路径。它只在用户从可见终端手工启动并输入 `YES` 后工作。
-- 语音模式复用真实 `OfflineContinuousVoiceListener`，每次由用户按 Enter 主动开始并使用独立 Start/Stop 监听周期，按固定非个人短句完成 1 次预热和 20 次正式尝试；15 秒内必须只有一个非空最终结果，并按固定规范化做精确匹配。活动尝试期间输入 STOP 会触发 CancellationToken，listener fault 或取消会立即结束批次。
+- 语音模式复用真实 `OfflineContinuousVoiceListener`，每次由用户按 Enter 主动准备并使用独立 Start/Stop 监听周期；只有麦克风启动完成且 Runner 明确显示“监听已就绪”后用户才开始说话。按固定非个人短句完成 1 次预热和 20 次正式尝试；15 秒内必须只有一个非空最终结果，并按固定规范化做精确匹配。活动尝试期间输入 STOP 会触发 CancellationToken，listener fault 或取消会立即结束批次。
 - 正式语音批次发生无法解释的全文不匹配时，Runner 可在重新取得可见同意后执行 1 个不计入正式指标的诊断样本；只汇总长度关系与编辑距离分桶，不输出或保存识别正文。
 - 视觉模式先显示 Runner 自己的可见非个人测试窗口，再把批次同意绑定到该精确窗口；通过真实单 HWND Graphics Capture 和 Windows 本机 OCR 完成 1 次预热和 20 次正式尝试。普通批次或专用场景一旦窗口身份变化都立即取消。
 - 计时只使用单调 `Stopwatch`，汇总 count/min/p50/p95/max；失败率只以 success+failure 为分母，cancelled/blocked 单列，预热不计入正式指标且不删除离群值。

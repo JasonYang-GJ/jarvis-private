@@ -62,10 +62,10 @@ internal static class VoiceEvaluationRunner
             {
                 var isWarmup = index == 0;
                 Console.WriteLine(diagnosticOnly
-                    ? $"诊断样本：按 Enter 后清楚说出“{FixedPhrase}”。"
+                    ? $"诊断样本：按 Enter 准备；看到“监听已就绪”后再清楚说出“{FixedPhrase}”。"
                     : isWarmup
-                    ? $"预热：按 Enter 后清楚说出“{FixedPhrase}”。"
-                    : $"正式 {index}/20：按 Enter 后清楚说出“{FixedPhrase}”。");
+                    ? $"预热：按 Enter 准备；看到“监听已就绪”后再清楚说出“{FixedPhrase}”。"
+                    : $"正式 {index}/20：按 Enter 准备；看到“监听已就绪”后再清楚说出“{FixedPhrase}”。");
                 var command = await input.ReadLineAsync(cancellationToken).ConfigureAwait(false);
                 if (command is null
                     || string.Equals(command, "STOP", StringComparison.OrdinalIgnoreCase))
@@ -82,9 +82,10 @@ internal static class VoiceEvaluationRunner
                 EvaluationAttempt attempt;
                 try
                 {
-                    await listener.StartAsync(cancellationToken).ConfigureAwait(false);
-                    var controlled = await ManualAttemptControl.RunAsync(
+                    var controlled = await VoiceReadyAttemptControl.RunAsync(
                             input,
+                            listener.StartAsync,
+                            () => Console.WriteLine("监听已就绪，现在请开始说。 "),
                             attemptCancellation => events.RunAttemptAsync(
                                 FixedPhrase,
                                 isWarmup,

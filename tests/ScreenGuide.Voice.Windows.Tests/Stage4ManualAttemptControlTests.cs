@@ -6,6 +6,39 @@ namespace ScreenGuide.Voice.Windows.Tests;
 public sealed class Stage4ManualAttemptControlTests
 {
     [Fact]
+    public async Task VoiceAttemptAnnouncesReadyOnlyAfterListenerStarted()
+    {
+        var order = new List<string>();
+        var input = new ChannelLineInput();
+        var listenerReady = new TaskCompletionSource<bool>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+
+        var controlledTask = VoiceReadyAttemptControl.RunAsync(
+            input,
+            _ =>
+            {
+                order.Add("listener-starting");
+                return listenerReady.Task;
+            },
+            () => order.Add("ready-announced"),
+            _ =>
+            {
+                order.Add("capture-started");
+                return Task.FromResult(Success());
+            },
+            CancellationToken.None);
+
+        Assert.Equal(["listener-starting"], order);
+        listenerReady.TrySetResult(true);
+        var controlled = await controlledTask;
+
+        Assert.False(controlled.StopRequested);
+        Assert.Equal(
+            ["listener-starting", "ready-announced", "capture-started"],
+            order);
+    }
+
+    [Fact]
     public async Task StopDuringActiveAttemptCancelsOperationAndEndsBatch()
     {
         var input = new ChannelLineInput();
