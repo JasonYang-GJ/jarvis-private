@@ -28,6 +28,40 @@ public sealed class Stage4VisionAttemptEvaluatorTests
     }
 
     [Fact]
+    public async Task WhitespaceInsertedByLocalOcrStillMatchesExactCanaryCharacters()
+    {
+        var evaluator = new VisionAttemptEvaluator(
+            new StubCaptureService(() => new CapturedWindowFrame([1, 2, 3, 4], 2, 2, "test")),
+            new StubVisionProvider("这是 无 个人 数据 的 本机 单窗口 评测 标记"));
+
+        var result = await evaluator.EvaluateAsync(
+            Target(),
+            "这是无个人数据的本机单窗口评测标记",
+            isWarmup: false,
+            CancellationToken.None);
+
+        Assert.Equal(EvaluationTerminalState.Success, result.Attempt.State);
+        Assert.Null(result.Attempt.ErrorCode);
+    }
+
+    [Fact]
+    public async Task MissingCanaryCharacterStillFailsClosed()
+    {
+        var evaluator = new VisionAttemptEvaluator(
+            new StubCaptureService(() => new CapturedWindowFrame([1, 2, 3, 4], 2, 2, "test")),
+            new StubVisionProvider("这是 无 个人 数据 的 本机 单窗口 评测"));
+
+        var result = await evaluator.EvaluateAsync(
+            Target(),
+            "这是无个人数据的本机单窗口评测标记",
+            isWarmup: false,
+            CancellationToken.None);
+
+        Assert.Equal(EvaluationTerminalState.Failure, result.Attempt.State);
+        Assert.Equal("vision.canary_missing", result.Attempt.ErrorCode);
+    }
+
+    [Fact]
     public async Task IdentityChangeCancelsWithoutCallingAnalysis()
     {
         var provider = new StubVisionProvider("safe canary");

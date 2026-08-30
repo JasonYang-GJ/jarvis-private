@@ -82,7 +82,7 @@ public sealed class VisionAttemptEvaluator(
                     .ConfigureAwait(false);
                 var analysisElapsed = Stopwatch.GetElapsedTime(analysisStarted);
                 var endToEndElapsed = Stopwatch.GetElapsedTime(started);
-                var found = result.UserSummary.Contains(expectedCanary, StringComparison.Ordinal);
+                var found = VisionCanaryMatcher.Contains(result.UserSummary, expectedCanary);
                 return new VisionAttemptResult(
                     new EvaluationAttempt(
                         isWarmup,
@@ -133,4 +133,19 @@ public sealed class VisionAttemptEvaluator(
         new(
             new EvaluationAttempt(isWarmup, state, elapsed, errorCode),
             cleanupConfirmed);
+}
+
+public static class VisionCanaryMatcher
+{
+    public static bool Contains(string analyzedSummary, string expectedCanary)
+    {
+        ArgumentNullException.ThrowIfNull(analyzedSummary);
+        ArgumentException.ThrowIfNullOrWhiteSpace(expectedCanary);
+
+        return RemoveWhitespace(analyzedSummary)
+            .Contains(RemoveWhitespace(expectedCanary), StringComparison.Ordinal);
+    }
+
+    private static string RemoveWhitespace(string value) =>
+        string.Concat(value.Where(character => !char.IsWhiteSpace(character)));
 }

@@ -10,7 +10,7 @@ S4-R2 只回答两个问题：本机离线中文语音在真实麦克风下的�
 
 - Voice：1 次预热 + 20 次正式尝试；每次由用户按 Enter 主动准备，Runner 完成麦克风启动后必须给出“监听已就绪”提示，用户此时才开始说话。15 秒内只允许一个非空 final，固定版本规范化后必须精确匹配可见的非个人短句。短句只使用常用中文词，并须先在同一本地模型的内存探针中精确通过，避免把模型词表缺口误计为麦克风失败。
 - Voice diagnostic：仅在正式批次出现无法解释的 `voice.text_mismatch` 后使用；重新取得可见批次同意并采集 1 个样本，只输出预期/实际长度关系和编辑距离分桶，不输出或保存转写正文。诊断样本不计入正式成功率，也不能替代正式批次。
-- Vision：1 次预热 + 20 次正式尝试；每次由用户按 Enter 主动开始，只读取 Runner 创建的可见测试 HWND，并在内存中检查固定非个人标记。
+- Vision：1 次预热 + 20 次正式尝试；每次由用户按 Enter 主动开始，只读取 Runner 创建的可见测试 HWND，并在内存中检查固定非个人标记。Windows OCR 可能在汉字之间插入排版空白，因此标记比较只忽略空白字符；缺字、错字或顺序变化仍失败关闭。
 - Vision identity change：单独一次受控场景；捕获前改变目标标题，必须以 `Cancelled / vision.identity_changed` 结束且不得保留帧。
 - 终态只有 `Success`、`Failure`、`Cancelled`、`Blocked`。失败率为 `failure / (success + failure)`；cancelled/blocked 单独报告。预热不进入正式指标，不删除离群值。
 

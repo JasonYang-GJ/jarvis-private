@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using ScreenGuide.Stage4.RealUsageRunner;
 using ScreenGuide.Vision.Abstractions;
 using ScreenGuide.Vision.Windows;
 using WinForms = System.Windows.Forms;
@@ -8,8 +9,9 @@ namespace ScreenGuide.Vision.Windows.Tests;
 public sealed class RealSingleWindowCaptureTests
 {
     [Fact]
-    public async Task CapturesOnlySyntheticTestWindowWithoutWritingImageToDisk()
+    public async Task CapturesAndRecognizesStage4CanaryWithoutWritingImageToDisk()
     {
+        const string canary = "这是无个人数据的本机单窗口评测标记";
         var ready = new TaskCompletionSource<(WinForms.Form Form, long Handle)>(
             TaskCreationOptions.RunContinuationsAsynchronously);
         var thread = new Thread(() =>
@@ -23,7 +25,7 @@ public sealed class RealSingleWindowCaptureTests
             };
             form.Controls.Add(new WinForms.Label
             {
-                Text = "这是无个人数据的单窗口读取测试界面",
+                Text = canary,
                 AutoSize = true,
                 Font = new System.Drawing.Font("Microsoft YaHei UI", 18),
                 Left = 48,
@@ -59,7 +61,7 @@ public sealed class RealSingleWindowCaptureTests
 
             var provider = new WindowsLocalWindowVisionProvider(new WindowsLocalOcrTextExtractor());
             var result = await provider.AnalyzeAsync(new WindowVisionRequest(target, frame));
-            Assert.Contains("元枢单窗口读取自动验收", result.UserSummary);
+            Assert.True(VisionCanaryMatcher.Contains(result.UserSummary, canary));
             Assert.False(provider.SendsImageOffDevice);
         }
         finally
