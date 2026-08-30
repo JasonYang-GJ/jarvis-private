@@ -120,7 +120,7 @@ public sealed class RealSingleWindowCaptureTests
             var verifier = new WindowsWindowCaptureTargetVerifier();
             var capture = new WindowsSingleWindowCaptureService(
                 new ResilientExactWindowCaptureBackend(
-                    new WindowsGraphicsCaptureBackend(verifier),
+                    new ForcedInternalTimeoutBackend(),
                     new PrintWindowCaptureBackend(verifier),
                     verifier),
                 new WindowsSensitiveWindowPolicy(),
@@ -147,5 +147,13 @@ public sealed class RealSingleWindowCaptureTests
             form.BeginInvoke(form.Close);
             Assert.True(thread.Join(TimeSpan.FromSeconds(5)));
         }
+    }
+
+    private sealed class ForcedInternalTimeoutBackend : IExactWindowCaptureBackend
+    {
+        public Task<RawWindowFrame> CaptureAsync(
+            WindowCaptureTarget target,
+            CancellationToken cancellationToken) =>
+            throw new OperationCanceledException("simulated WGC first-frame timeout");
     }
 }

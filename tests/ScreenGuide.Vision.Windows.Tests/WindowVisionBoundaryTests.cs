@@ -157,6 +157,40 @@ public sealed class WindowVisionBoundaryTests
     }
 
     [Fact]
+    public async Task ResilientBackendFallsBackWhenPreferredTimesOutWithoutCallerCancellation()
+    {
+        var preferred = new InternallyTimedOutBackend();
+        var fallback = new RecordingBackend();
+        var verifier = new RecordingTargetVerifier();
+        var backend = new ResilientExactWindowCaptureBackend(preferred, fallback, verifier);
+
+        var frame = await backend.CaptureAsync(Target(), CancellationToken.None);
+
+        Assert.Equal("mock", frame.Technology);
+        Assert.Equal(1, preferred.Calls);
+        Assert.Equal(1, fallback.Calls);
+        Assert.Equal(2, verifier.Calls);
+    }
+
+    [Fact]
+    public async Task ResilientBackendDoesNotFallbackWhenCallerIsCancelled()
+    {
+        var preferred = new InternallyTimedOutBackend();
+        var fallback = new RecordingBackend();
+        var verifier = new RecordingTargetVerifier();
+        var backend = new ResilientExactWindowCaptureBackend(preferred, fallback, verifier);
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+
+        await Assert.ThrowsAsync<OperationCanceledException>(() =>
+            backend.CaptureAsync(Target(), cancellation.Token));
+
+        Assert.Equal(1, preferred.Calls);
+        Assert.Equal(0, fallback.Calls);
+        Assert.Equal(1, verifier.Calls);
+    }
+
+    [Fact]
     public async Task LocalProviderStatesTextBasedLimitation()
     {
         var provider = new WindowsLocalWindowVisionProvider(new FixedOcr("设置 系统 显示 蓝牙"));
@@ -295,6 +329,19 @@ public sealed class WindowVisionBoundaryTests
         {
             Calls++;
             throw new InvalidOperationException("preferred unavailable");
+        }
+    }
+
+    private sealed class InternallyTimedOutBackend : IExactWindowCaptureBackend
+    {
+        public int Calls { get; private set; }
+
+        public Task<RawWindowFrame> CaptureAsync(
+            WindowCaptureTarget target,
+            CancellationToken cancellationToken)
+        {
+            Calls++;
+            throw new OperationCanceledException("preferred backend internal timeout");
         }
     }
 

@@ -267,8 +267,11 @@ public sealed class ResilientExactWindowCaptureBackend : IExactWindowCaptureBack
             return await _preferred.CaptureAsync(target, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception exception) when (
-            exception is not OperationCanceledException
-            && exception is not UnauthorizedAccessException)
+            exception is not UnauthorizedAccessException
+            // WGC's linked first-frame timeout also surfaces as cancellation. Only a
+            // cancellation requested by our caller is authority to stop this capture.
+            && (exception is not OperationCanceledException
+                || !cancellationToken.IsCancellationRequested))
         {
             _identityVerifier.Verify(target);
             return await _fallback.CaptureAsync(target, cancellationToken).ConfigureAwait(false);
