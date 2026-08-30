@@ -132,6 +132,13 @@ public sealed class RealSingleWindowCaptureTests
                 VisionEvaluationContract.DiagnosticCandidates.Count,
                 result.Diagnostic.Candidates.Count);
             Assert.Contains(result.Diagnostic.Candidates, item => item.BestEditDistance == 0);
+            Assert.Equal(
+                "Windows.PrintWindow.SingleHwnd",
+                result.Diagnostic.FrameShape.CaptureTechnology);
+            Assert.True(result.Diagnostic.FrameShape.SampledPixelCount > 0);
+            Assert.True(result.Diagnostic.FrameShape.DarkPixelPermille > 0);
+            Assert.True(result.Diagnostic.FrameShape.BrightPixelPermille > 0);
+            Assert.True(result.Diagnostic.FrameShape.OcrTextDetected);
             Assert.True(result.AttemptResult.CleanupConfirmed);
         }
         finally

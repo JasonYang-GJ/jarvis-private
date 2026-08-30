@@ -20,6 +20,11 @@ public sealed class EvaluationReport
         "latin-token",
         "mixed-token"
     };
+    private static readonly HashSet<string> AllowedCaptureTechnologies = new(StringComparer.Ordinal)
+    {
+        "Windows.GraphicsCapture.SingleHwnd",
+        "Windows.PrintWindow.SingleHwnd"
+    };
 
     private EvaluationReport(
         string exactSha,
@@ -39,7 +44,7 @@ public sealed class EvaluationReport
         VisionDiagnostic = visionDiagnostic;
     }
 
-    public string ContractVersion => "s4-r2.usage-evaluation.v2";
+    public string ContractVersion => "s4-r2.usage-evaluation.v3";
 
     public string ExactSha { get; }
 
@@ -147,7 +152,30 @@ public sealed class EvaluationReport
         return new VisionDiagnosticSummary(
             Math.Clamp(diagnostic.SampleCount, 0, 1),
             Math.Clamp(diagnostic.CompactTextLength, 0, 4_000),
-            candidates);
+            candidates,
+            SanitizeFrameShape(diagnostic.FrameShape));
+    }
+
+    private static VisionFrameShapeSummary SanitizeFrameShape(VisionFrameShapeSummary? shape)
+    {
+        if (shape is null)
+        {
+            return VisionFrameShapeSummary.Empty;
+        }
+
+        var captureTechnology = shape.CaptureTechnology ?? string.Empty;
+        return new VisionFrameShapeSummary(
+            AllowedCaptureTechnologies.Contains(captureTechnology)
+                ? captureTechnology
+                : "unknown",
+            Math.Clamp(shape.PixelWidth, 0, 32_768),
+            Math.Clamp(shape.PixelHeight, 0, 32_768),
+            Math.Clamp(shape.SampledPixelCount, 0, 100_000),
+            Math.Clamp(shape.DarkPixelPermille, 0, 1_000),
+            Math.Clamp(shape.BrightPixelPermille, 0, 1_000),
+            Math.Clamp(shape.OpaquePixelPermille, 0, 1_000),
+            Math.Clamp(shape.LuminanceRange, 0, 255),
+            shape.OcrTextDetected);
     }
 }
 

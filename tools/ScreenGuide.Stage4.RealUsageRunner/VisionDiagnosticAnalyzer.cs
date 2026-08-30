@@ -8,16 +8,22 @@ public sealed record VisionCandidateMatchSummary(
 public sealed record VisionDiagnosticSummary(
     int SampleCount,
     int CompactTextLength,
-    IReadOnlyList<VisionCandidateMatchSummary> Candidates)
+    IReadOnlyList<VisionCandidateMatchSummary> Candidates,
+    VisionFrameShapeSummary FrameShape)
 {
-    public static VisionDiagnosticSummary Empty { get; } = new(0, 0, []);
+    public static VisionDiagnosticSummary Empty { get; } = new(
+        0,
+        0,
+        [],
+        VisionFrameShapeSummary.Empty);
 }
 
 public static class VisionDiagnosticAnalyzer
 {
     public static VisionDiagnosticSummary Analyze(
         string analyzedText,
-        IReadOnlyList<VisionDiagnosticCandidate> candidates)
+        IReadOnlyList<VisionDiagnosticCandidate> candidates,
+        VisionFrameShapeSummary? frameShape = null)
     {
         ArgumentNullException.ThrowIfNull(analyzedText);
         ArgumentNullException.ThrowIfNull(candidates);
@@ -35,7 +41,11 @@ public static class VisionDiagnosticAnalyzer
             })
             .ToArray();
 
-        return new VisionDiagnosticSummary(1, compactText.Length, summaries);
+        return new VisionDiagnosticSummary(
+            1,
+            compactText.Length,
+            summaries,
+            frameShape ?? VisionFrameShapeSummary.Empty);
     }
 
     public static bool ContainsIgnoringWhitespace(string analyzedText, string expectedText)

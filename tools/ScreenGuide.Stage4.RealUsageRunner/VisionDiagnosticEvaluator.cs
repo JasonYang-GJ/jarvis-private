@@ -63,6 +63,16 @@ public sealed class VisionDiagnosticEvaluator(
             var analysisStarted = Stopwatch.GetTimestamp();
             try
             {
+                var frameShape = VisionFrameShapeSummary.Empty;
+                try
+                {
+                    frameShape = VisionFrameShapeAnalyzer.Analyze(frame);
+                }
+                catch (ArgumentException)
+                {
+                    // Shape evidence is diagnostic-only. An unsupported test/frame encoding
+                    // must not change the existing OCR result or terminal state.
+                }
                 var result = await visionProvider.AnalyzeAsync(
                         new WindowVisionRequest(target, frame),
                         cancellationToken)
@@ -70,7 +80,14 @@ public sealed class VisionDiagnosticEvaluator(
                 var analysisElapsed = Stopwatch.GetElapsedTime(analysisStarted);
                 var diagnostic = VisionDiagnosticAnalyzer.Analyze(
                     result.UserSummary,
-                    candidates);
+                    candidates,
+                    frameShape with
+                    {
+                        OcrTextDetected = string.Equals(
+                            result.Confidence,
+                            "LocalTextRecognized",
+                            StringComparison.Ordinal)
+                    });
                 return new VisionDiagnosticAttemptResult(
                     new VisionAttemptResult(
                         new EvaluationAttempt(

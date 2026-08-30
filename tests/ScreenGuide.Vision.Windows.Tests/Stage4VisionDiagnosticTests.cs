@@ -1,6 +1,8 @@
 using ScreenGuide.Stage4.RealUsageRunner;
 using ScreenGuide.Vision.Abstractions;
 using ScreenGuide.Vision.Windows;
+using System.Drawing;
+using System.Drawing.Imaging;
 using System.Text.Json;
 
 namespace ScreenGuide.Vision.Windows.Tests;
@@ -48,6 +50,31 @@ public sealed class Stage4VisionDiagnosticTests
     }
 
     [Fact]
+    public void FrameShapeAnalyzerDistinguishesBlankAndRenderedFramesWithoutReturningPixels()
+    {
+        using var blank = Frame(graphics => graphics.Clear(Color.White));
+        using var rendered = Frame(graphics =>
+        {
+            graphics.Clear(Color.White);
+            graphics.FillRectangle(Brushes.Black, 16, 16, 96, 64);
+        });
+
+        var blankShape = VisionFrameShapeAnalyzer.Analyze(blank);
+        var renderedShape = VisionFrameShapeAnalyzer.Analyze(rendered);
+
+        Assert.Equal("Windows.PrintWindow.SingleHwnd", blankShape.CaptureTechnology);
+        Assert.Equal(128, blankShape.PixelWidth);
+        Assert.Equal(96, blankShape.PixelHeight);
+        Assert.Equal(0, blankShape.DarkPixelPermille);
+        Assert.Equal(1000, blankShape.BrightPixelPermille);
+        Assert.Equal(1000, blankShape.OpaquePixelPermille);
+        Assert.Equal(0, blankShape.LuminanceRange);
+        Assert.True(renderedShape.DarkPixelPermille > 0);
+        Assert.True(renderedShape.BrightPixelPermille > 0);
+        Assert.Equal(255, renderedShape.LuminanceRange);
+    }
+
+    [Fact]
     public void SafeReportDoesNotContainCandidateOrOcrText()
     {
         const string candidateText = "今天我们一起学习中文";
@@ -57,7 +84,17 @@ public sealed class Stage4VisionDiagnosticTests
             [
                 new VisionDiagnosticCandidate("common-cn", candidateText),
                 new VisionDiagnosticCandidate("private-token-abc123", "another candidate")
-            ]);
+            ],
+            new VisionFrameShapeSummary(
+                "Windows.PrintWindow.SingleHwnd",
+                1120,
+                720,
+                4096,
+                25,
+                970,
+                1000,
+                255,
+                OcrTextDetected: false));
         var report = EvaluationReport.Create(
             "vision-diagnostic",
             "941c2d8635939bd1329daa81f34b6829bd447750",
@@ -82,8 +119,14 @@ public sealed class Stage4VisionDiagnosticTests
         Assert.Contains("common-cn", json, StringComparison.Ordinal);
         Assert.Contains("unknown", json, StringComparison.Ordinal);
         Assert.Equal(
-            "s4-r2.usage-evaluation.v2",
+            "s4-r2.usage-evaluation.v3",
             document.RootElement.GetProperty("contractVersion").GetString());
+        var frameShape = document.RootElement
+            .GetProperty("visionDiagnostic")
+            .GetProperty("frameShape");
+        Assert.Equal("Windows.PrintWindow.SingleHwnd", frameShape.GetProperty("captureTechnology").GetString());
+        Assert.Equal(25, frameShape.GetProperty("darkPixelPermille").GetInt32());
+        Assert.False(frameShape.GetProperty("ocrTextDetected").GetBoolean());
     }
 
     [Fact]
@@ -120,6 +163,23 @@ public sealed class Stage4VisionDiagnosticTests
         1,
         DateTimeOffset.UnixEpoch,
         DateTimeOffset.UnixEpoch);
+
+    private static CapturedWindowFrame Frame(Action<Graphics> draw)
+    {
+        using var bitmap = new Bitmap(128, 96, PixelFormat.Format32bppArgb);
+        using (var graphics = Graphics.FromImage(bitmap))
+        {
+            draw(graphics);
+        }
+
+        using var stream = new MemoryStream();
+        bitmap.Save(stream, ImageFormat.Png);
+        return new CapturedWindowFrame(
+            stream.ToArray(),
+            bitmap.Width,
+            bitmap.Height,
+            "Windows.PrintWindow.SingleHwnd");
+    }
 
     private sealed class StubCaptureService(Func<CapturedWindowFrame> factory) : IWindowCaptureService
     {
