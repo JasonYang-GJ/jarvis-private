@@ -1,5 +1,6 @@
 using ScreenGuide.Stage4.RealUsageRunner;
 using ScreenGuide.Vision.Abstractions;
+using ScreenGuide.Vision.Windows;
 using System.Text.Json;
 
 namespace ScreenGuide.Vision.Windows.Tests;
@@ -82,6 +83,15 @@ public sealed class Stage4VisionDiagnosticTests
         Assert.All(bytes, value => Assert.Equal(0, value));
     }
 
+    [Fact]
+    public void RunnerCaptureCompositionUsesTheProductExactWindowFallback()
+    {
+        var verifier = new RecordingVerifier();
+        var backend = Stage4VisionCaptureFactory.CreateBackend(verifier);
+
+        Assert.IsType<ResilientExactWindowCaptureBackend>(backend);
+    }
+
     private static WindowCaptureTarget Target() => new(
         1,
         "test",
@@ -109,4 +119,12 @@ public sealed class Stage4VisionDiagnosticTests
             CancellationToken cancellationToken = default) =>
             Task.FromResult(new WindowVisionResult(summary, "test", [], []));
     }
+
+    private sealed class RecordingVerifier : IWindowCaptureTargetVerifier
+    {
+        public int Calls { get; private set; }
+
+        public void Verify(WindowCaptureTarget target) => Calls++;
+    }
+
 }

@@ -13,4 +13,7 @@
     <ProjectReference Include="..\..\src\ScreenGuide.Vision.Abstractions\ScreenGuide.Vision.Abstractions.csproj" />
     <ProjectReference Include="..\..\src\ScreenGuide.Vision.Windows\ScreenGuide.Vision.Windows.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="ScreenGuide.Vision.Windows.Tests" />
+  </ItemGroup>
 </Project>

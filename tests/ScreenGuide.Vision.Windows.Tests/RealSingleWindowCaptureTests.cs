@@ -72,4 +72,80 @@ public sealed class RealSingleWindowCaptureTests
             Assert.True(thread.Join(TimeSpan.FromSeconds(5)));
         }
     }
+
+    [Fact]
+    public async Task CapturesAndAnalyzesExactStage4DiagnosticWindowThroughProductFallback()
+    {
+        var ready = new TaskCompletionSource<(WinForms.Form Form, long Handle)>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var thread = new Thread(() =>
+        {
+            var form = new WinForms.Form
+            {
+                Text = VisionEvaluationContract.FormTitle,
+                Width = 760,
+                Height = 420,
+                StartPosition = WinForms.FormStartPosition.CenterScreen,
+                TopMost = true
+            };
+            form.Controls.Add(new WinForms.Label
+            {
+                Text = VisionEvaluationContract.DiagnosticWindowText,
+                AutoSize = true,
+                Font = new System.Drawing.Font("Microsoft YaHei UI", 18),
+                Left = 46,
+                Top = 86
+            });
+            form.Shown += (_, _) =>
+            {
+                form.Activate();
+                ready.TrySetResult((form, form.Handle.ToInt64()));
+            };
+            WinForms.Application.Run(form);
+        });
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+
+        var (form, handle) = await ready.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        try
+        {
+            using var process = Process.GetCurrentProcess();
+            var target = new WindowCaptureTarget(
+                handle,
+                VisionEvaluationContract.FormTitle,
+                process.ProcessName,
+                process.Id,
+                new DateTimeOffset(process.StartTime.ToUniversalTime()),
+                DateTimeOffset.UtcNow);
+            var verifier = new WindowsWindowCaptureTargetVerifier();
+            var capture = new WindowsSingleWindowCaptureService(
+                new ResilientExactWindowCaptureBackend(
+                    new WindowsGraphicsCaptureBackend(verifier),
+                    new PrintWindowCaptureBackend(verifier),
+                    verifier),
+                new WindowsSensitiveWindowPolicy(),
+                verifier);
+            var evaluator = new VisionDiagnosticEvaluator(
+                capture,
+                new WindowsLocalWindowVisionProvider(new WindowsLocalOcrTextExtractor()));
+
+            var result = await evaluator.EvaluateAsync(
+                target,
+                VisionEvaluationContract.DiagnosticCandidates,
+                CancellationToken.None);
+
+            Assert.Equal(EvaluationTerminalState.Success, result.AttemptResult.Attempt.State);
+            Assert.Equal(1, result.Diagnostic.SampleCount);
+            Assert.Equal(
+                VisionEvaluationContract.DiagnosticCandidates.Count,
+                result.Diagnostic.Candidates.Count);
+            Assert.Contains(result.Diagnostic.Candidates, item => item.BestEditDistance == 0);
+            Assert.True(result.AttemptResult.CleanupConfirmed);
+        }
+        finally
+        {
+            form.BeginInvoke(form.Close);
+            Assert.True(thread.Join(TimeSpan.FromSeconds(5)));
+        }
+    }
 }

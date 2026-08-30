@@ -71,10 +71,7 @@ internal static class VisionEvaluationRunner
             else
             {
                 var verifier = new WindowsWindowCaptureTargetVerifier();
-                var capture = new WindowsSingleWindowCaptureService(
-                    new WindowsGraphicsCaptureBackend(verifier),
-                    new WindowsSensitiveWindowPolicy(),
-                    verifier);
+                var capture = Stage4VisionCaptureFactory.Create(verifier);
                 var provider = new WindowsLocalWindowVisionProvider(
                     new WindowsLocalOcrTextExtractor());
                 var evaluator = new VisionAttemptEvaluator(
@@ -343,4 +340,23 @@ internal static class VisionEvaluationRunner
             return completed.Task.WaitAsync(cancellationToken);
         }
     }
+}
+
+internal static class Stage4VisionCaptureFactory
+{
+    public static IExactWindowCaptureBackend CreateBackend(
+        IWindowCaptureTargetVerifier verifier)
+    {
+        ArgumentNullException.ThrowIfNull(verifier);
+        return new ResilientExactWindowCaptureBackend(
+            new WindowsGraphicsCaptureBackend(verifier),
+            new PrintWindowCaptureBackend(verifier),
+            verifier);
+    }
+
+    public static IWindowCaptureService Create(IWindowCaptureTargetVerifier verifier) =>
+        new WindowsSingleWindowCaptureService(
+            CreateBackend(verifier),
+            new WindowsSensitiveWindowPolicy(),
+            verifier);
 }
