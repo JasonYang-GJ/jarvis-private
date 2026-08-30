@@ -5,7 +5,6 @@ namespace ScreenGuide.Stage4.RealUsageRunner;
 
 internal static class VoiceEvaluationRunner
 {
-    private const string FixedPhrase = "元枢今天练习中文语音";
     private static readonly TimeSpan AttemptTimeout = TimeSpan.FromSeconds(15);
     private static readonly TimeSpan MultipleFinalGrace = TimeSpan.FromMilliseconds(300);
 
@@ -62,10 +61,10 @@ internal static class VoiceEvaluationRunner
             {
                 var isWarmup = index == 0;
                 Console.WriteLine(diagnosticOnly
-                    ? $"诊断样本：按 Enter 准备；看到“监听已就绪”后再清楚说出“{FixedPhrase}”。"
+                    ? $"诊断样本：按 Enter 准备；看到“监听已就绪”后再清楚说出“{VoiceEvaluationContract.FixedPhrase}”。"
                     : isWarmup
-                    ? $"预热：按 Enter 准备；看到“监听已就绪”后再清楚说出“{FixedPhrase}”。"
-                    : $"正式 {index}/20：按 Enter 准备；看到“监听已就绪”后再清楚说出“{FixedPhrase}”。");
+                    ? $"预热：按 Enter 准备；看到“监听已就绪”后再清楚说出“{VoiceEvaluationContract.FixedPhrase}”。"
+                    : $"正式 {index}/20：按 Enter 准备；看到“监听已就绪”后再清楚说出“{VoiceEvaluationContract.FixedPhrase}”。");
                 var command = await input.ReadLineAsync(cancellationToken).ConfigureAwait(false);
                 if (command is null
                     || string.Equals(command, "STOP", StringComparison.OrdinalIgnoreCase))
@@ -88,7 +87,7 @@ internal static class VoiceEvaluationRunner
                             listener.StopAsync,
                             () => Console.WriteLine("监听已就绪，现在请开始说。 "),
                             attemptCancellation => events.RunAttemptAsync(
-                                FixedPhrase,
+                                VoiceEvaluationContract.FixedPhrase,
                                 isWarmup,
                                 AttemptTimeout,
                                 MultipleFinalGrace,

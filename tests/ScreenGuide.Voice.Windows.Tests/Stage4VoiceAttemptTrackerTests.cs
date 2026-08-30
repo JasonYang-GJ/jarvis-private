@@ -6,6 +6,13 @@ namespace ScreenGuide.Voice.Windows.Tests;
 public sealed class Stage4VoiceAttemptTrackerTests
 {
     [Fact]
+    public void EvaluationPhraseUsesOfflineModelValidatedCommonWords()
+    {
+        Assert.Equal("今天我们一起练习中文语音", VoiceEvaluationContract.FixedPhrase);
+        Assert.Equal(12, VoiceTextNormalizer.Normalize(VoiceEvaluationContract.FixedPhrase).Length);
+    }
+
+    [Fact]
     public void UniqueNormalizedFinalProducesOneSuccessfulAttempt()
     {
         const string expected = "元枢语音评测";
