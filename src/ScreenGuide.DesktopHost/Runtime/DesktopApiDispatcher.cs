@@ -711,11 +711,19 @@ public sealed class DesktopApiDispatcher(
                 request.TurnId,
                 cancellationToken)
             .ConfigureAwait(false);
-        return new SessionTurnDetailsDto(
+        var response = new SessionTurnDetailsDto(
             details.CoordinatorInstanceId,
             details.CoordinatorStartedAtUtc,
             details.SessionId,
             MapSessionTurn(details.Turn));
+        if (!FitsProjectionBudget(response))
+        {
+            throw new SessionProjectionException(
+                "session_projection_item_too_large",
+                "单条会话内容过大，无法安全显示。");
+        }
+
+        return response;
     }
 
     private static SessionProjectionUpdateDto EnsureProjectionBudget(SessionProjectionUpdateDto response)

@@ -6,8 +6,11 @@ public sealed class SessionProjectionCache
 {
     private const int MaximumCachedTurns = 32;
     private const int MaximumCachedMessages = 200;
+    private readonly HashSet<(Guid Id, long SequenceNumber)> _pinnedHistoryMessages = [];
 
     public SessionSnapshotDto? Snapshot { get; private set; }
+
+    public long LatestMessageSequenceNumber { get; private set; }
 
     public long? NextBeforeMessageSequenceNumber { get; private set; }
 
@@ -25,17 +28,16 @@ public sealed class SessionProjectionCache
             snapshot.Turns,
             snapshot.ActiveTurns.Concat(
                 snapshot.ForegroundTurn is null ? [] : [snapshot.ForegroundTurn]));
+        _pinnedHistoryMessages.Clear();
+        var messages = SelectMessages(snapshot.Messages, _pinnedHistoryMessages);
         Snapshot = snapshot with
         {
             ForegroundTurn = bounded.ForegroundTurn,
             ActiveTurns = bounded.AdditionalActiveTurns,
             Turns = bounded.Turns,
-            Messages = DeduplicateMessages(snapshot.Messages)
-                .OrderByDescending(item => item.SequenceNumber)
-                .Take(MaximumCachedMessages)
-                .OrderBy(item => item.SequenceNumber)
-                .ToArray()
+            Messages = messages
         };
+        LatestMessageSequenceNumber = messages.Select(item => item.SequenceNumber).DefaultIfEmpty(0).Max();
         NextBeforeMessageSequenceNumber = Snapshot.Messages.FirstOrDefault()?.SequenceNumber;
         HasEarlierMessages = snapshot.HasEarlierMessages;
         return true;
@@ -78,11 +80,9 @@ public sealed class SessionProjectionCache
             .Concat(bounded.AdditionalActiveTurns)
             .Where(item => !IsTerminal(item.Phase))
             .ToArray();
-        var messages = DeduplicateMessages(current.Messages.Concat(update.MessageUpserts))
-            .OrderByDescending(item => item.SequenceNumber)
-            .Take(MaximumCachedMessages)
-            .OrderBy(item => item.SequenceNumber)
-            .ToArray();
+        var messages = SelectMessages(
+            current.Messages.Concat(update.MessageUpserts),
+            _pinnedHistoryMessages);
         var status = bounded.ForegroundTurn?.Phase
                      ?? activeTurns.OrderBy(item => item.SequenceNumber).ThenBy(item => item.Id).LastOrDefault()?.Phase
                      ?? bounded.Turns.LastOrDefault()?.Phase
@@ -96,6 +96,11 @@ public sealed class SessionProjectionCache
             Turns = bounded.Turns,
             Messages = messages
         };
+        LatestMessageSequenceNumber = Math.Max(
+            LatestMessageSequenceNumber,
+            Math.Max(
+                update.LastMessageSequenceNumber,
+                update.MessageUpserts.Select(item => item.SequenceNumber).DefaultIfEmpty(0).Max()));
         return true;
     }
 
@@ -114,10 +119,15 @@ public sealed class SessionProjectionCache
             return false;
         }
 
-        var messages = DeduplicateMessages(current.Messages.Concat(page.Messages))
-            .OrderBy(item => item.SequenceNumber)
-            .Take(MaximumCachedMessages)
-            .ToArray();
+        _pinnedHistoryMessages.Clear();
+        foreach (var message in page.Messages)
+        {
+            _pinnedHistoryMessages.Add((message.Id, message.SequenceNumber));
+        }
+
+        var messages = SelectMessages(
+            current.Messages.Concat(page.Messages),
+            _pinnedHistoryMessages);
         Snapshot = current with
         {
             Messages = messages,
@@ -178,6 +188,31 @@ public sealed class SessionProjectionCache
         var seen = new HashSet<(Guid Id, long SequenceNumber)>();
         return messages
             .Where(item => seen.Add((item.Id, item.SequenceNumber)))
+            .ToArray();
+    }
+
+    private static IReadOnlyList<ConversationMessageDto> SelectMessages(
+        IEnumerable<ConversationMessageDto> messages,
+        IReadOnlySet<(Guid Id, long SequenceNumber)> pinnedHistoryMessages)
+    {
+        var distinct = DeduplicateMessages(messages);
+        var pinned = distinct
+            .Where(item => pinnedHistoryMessages.Contains((item.Id, item.SequenceNumber)))
+            .OrderBy(item => item.SequenceNumber)
+            .ThenBy(item => item.Id)
+            .Take(MaximumCachedMessages)
+            .ToArray();
+        var pinnedKeys = pinned
+            .Select(item => (item.Id, item.SequenceNumber))
+            .ToHashSet();
+        return pinned
+            .Concat(distinct
+                .Where(item => !pinnedKeys.Contains((item.Id, item.SequenceNumber)))
+                .OrderByDescending(item => item.SequenceNumber)
+                .ThenBy(item => item.Id)
+                .Take(MaximumCachedMessages - pinned.Length))
+            .OrderBy(item => item.SequenceNumber)
+            .ThenBy(item => item.Id)
             .ToArray();
     }
 

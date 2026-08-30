@@ -41,6 +41,7 @@ public sealed class SessionProjectionCacheTests
         var bootstrap = Snapshot(Guid.NewGuid(), 80, [Turn(1, "Responding")], [Message(1, "one")]);
         var cache = new SessionProjectionCache();
         Assert.True(cache.Reset(bootstrap));
+        Assert.Equal(1, cache.LatestMessageSequenceNumber);
 
         var reset = new SessionProjectionUpdateDto(
             "ResetRequired",
@@ -128,6 +129,66 @@ public sealed class SessionProjectionCacheTests
         Assert.True(cache.HasEarlierMessages);
         Assert.False(cache.ApplyEarlierMessages(page with { CoordinatorInstanceId = "stale-host" }));
         Assert.False(cache.ApplyEarlierMessages(page with { SessionId = Guid.NewGuid() }));
+    }
+
+    [Fact]
+    public void MoreThanTwoHundredEarlierMessagesKeepTheNewestLiveAndLastLoadedPageAcrossDelta()
+    {
+        var sessionId = Guid.NewGuid();
+        var bootstrap = Snapshot(
+            sessionId,
+            10,
+            [Turn(1, "Completed")],
+            Enumerable.Range(251, 50).Select(index => Message(index, $"live-{index}")).ToArray());
+        var cache = new SessionProjectionCache();
+        Assert.True(cache.Reset(bootstrap));
+        Assert.Equal(300, cache.LatestMessageSequenceNumber);
+
+        foreach (var firstSequence in new[] { 201, 151, 101, 51, 1 })
+        {
+            var page = new SessionMessagesPageDto(
+                bootstrap.CoordinatorInstanceId,
+                bootstrap.CoordinatorStartedAtUtc,
+                sessionId,
+                Enumerable.Range(firstSequence, 50)
+                    .Select(index => Message(index, $"history-{index}"))
+                    .ToArray(),
+                NextBeforeSequenceNumber: firstSequence,
+                HasMore: firstSequence > 1);
+            Assert.True(cache.ApplyEarlierMessages(page));
+            Assert.Equal(300, cache.LatestMessageSequenceNumber);
+        }
+
+        var afterHistory = Assert.IsType<SessionSnapshotDto>(cache.Snapshot);
+        Assert.All(Enumerable.Range(1, 50), sequence =>
+            Assert.Contains(afterHistory.Messages, item => item.SequenceNumber == sequence));
+        Assert.All(Enumerable.Range(251, 50), sequence =>
+            Assert.Contains(afterHistory.Messages, item => item.SequenceNumber == sequence));
+        Assert.Equal(1, cache.NextBeforeMessageSequenceNumber);
+
+        var next = Message(301, "live-301");
+        var delta = new SessionProjectionUpdateDto(
+            "Delta",
+            11,
+            bootstrap.CoordinatorInstanceId,
+            bootstrap.CoordinatorStartedAtUtc,
+            sessionId,
+            [],
+            [next],
+            next.SequenceNumber);
+        Assert.True(cache.Apply(delta));
+
+        var afterDelta = Assert.IsType<SessionSnapshotDto>(cache.Snapshot);
+        Assert.All(Enumerable.Range(1, 50), sequence =>
+            Assert.Contains(afterDelta.Messages, item => item.SequenceNumber == sequence));
+        Assert.All(Enumerable.Range(251, 51), sequence =>
+            Assert.Contains(afterDelta.Messages, item => item.SequenceNumber == sequence));
+        Assert.Equal(301, cache.LatestMessageSequenceNumber);
+        Assert.Equal(200, afterDelta.Messages.Count);
+        Assert.Equal(
+            afterDelta.Messages.Count,
+            afterDelta.Messages.Select(item => (item.Id, item.SequenceNumber)).Distinct().Count());
+        Assert.False(cache.Apply(delta));
     }
 
     [Fact]

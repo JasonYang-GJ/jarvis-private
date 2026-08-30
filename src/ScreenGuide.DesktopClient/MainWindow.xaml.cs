@@ -438,7 +438,7 @@ public partial class MainWindow : Window
                         current.CoordinatorStartedAtUtc,
                         current.SessionId,
                         current.ChangeVersion,
-                        current.Messages.LastOrDefault()?.SequenceNumber ?? 0,
+                        _sessionProjectionCache.LatestMessageSequenceNumber,
                         20_000),
                     _lifetime.Token);
                 SetHostOnline(true);

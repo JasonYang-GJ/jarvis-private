@@ -96,6 +96,30 @@ public sealed class SessionProjectionIntegrationTests
     }
 
     [Fact]
+    public async Task ExactTurnRejectsAnIndividuallyOversizedSerializedResponse()
+    {
+        await using var environment = DesktopHostTestEnvironment.Create();
+        using var host = environment.BuildHost();
+        await host.StartAsync();
+        IDesktopApiClient client = new DesktopApiClient(environment.Options.PipeName);
+        var session = await client.StartNewSessionAsync("精确 Turn 单项预算");
+        var store = host.Services.GetRequiredService<ISessionStore>();
+        var turn = (await store.StartTurnAsync(
+            session.SessionId,
+            new string('X', 600_000),
+            "Text",
+            "exact-turn-oversized",
+            ReadyRoute(environment.TimeProvider.GetUtcNow()),
+            environment.TimeProvider.GetUtcNow())).Turn;
+
+        var exception = await Assert.ThrowsAsync<DesktopApiException>(() =>
+            client.GetSessionTurnAsync(session.SessionId, turn.Id));
+        await host.StopAsync();
+
+        Assert.Equal("session_projection_item_too_large", exception.Error.Code);
+    }
+
+    [Fact]
     public async Task BootstrapUsesBoundedActiveQueryAcrossOneThousandTurnsAndExactTurnRemainsAuthoritative()
     {
         await using var environment = DesktopHostTestEnvironment.Create();

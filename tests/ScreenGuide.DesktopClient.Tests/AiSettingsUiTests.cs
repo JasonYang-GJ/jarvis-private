@@ -77,6 +77,8 @@ public sealed class AiSettingsUiTests
         Assert.Contains("AutomationProperties.AutomationId=\"LoadEarlierMessages\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Click=\"LoadEarlierMessagesButton_Click\"", xaml, StringComparison.Ordinal);
         Assert.Contains("GetSessionMessagesPageAsync", code, StringComparison.Ordinal);
+        Assert.Contains("_sessionProjectionCache.LatestMessageSequenceNumber", code, StringComparison.Ordinal);
+        Assert.DoesNotContain("current.Messages.LastOrDefault()?.SequenceNumber", code, StringComparison.Ordinal);
         Assert.DoesNotContain("LoadAllMessages", code, StringComparison.Ordinal);
     }
 
