@@ -156,13 +156,13 @@
 
 ## 9. 冻结产物证据边界
 
-- V0.6.0 基线文档是当前唯一权威的冻结 installer evidence，只证明 installer size/hash/`NotSigned`、ProductVersion/FileVersion 与 539 个发布文件，不证明每个文件的许可 attribution。
-- C0 installer 的**产品 payload**收纳合同只包含 win-x64 publish 树与删除脚本；Inno engine/translation 属于 installer 基础设施而不是额外产品 payload。该边界不等于已有逐文件名称/hash manifest。
+- V0.6.0 基线文档证明冻结 installer 的 size/hash/`NotSigned`、ProductVersion/FileVersion 与 539 个发布文件；本轮经 Owner 明确授权，对保留的原始 tag-source C0 只读生成 `docs/baselines/V0.6.0_STAGE4_C0_STATIC_MANIFEST.json`，以 1 条 `installerContainer` 与 539 条 `installedPayload` 记录补充相对路径、size 和 SHA-256 静态身份。它仍不自动证明每个文件的许可 attribution。
+- C0 installer 的**产品 payload**收纳合同只包含 win-x64 publish 树与删除脚本；Inno engine/translation 属于 installer 基础设施而不是额外产品 payload。本轮没有执行或解包 installer，因此 manifest 的 `installedPayload` 仅覆盖保留的 539 文件 publish 树，`installerContainer` 仅绑定 installer 本体，未枚举 Inno engine、translation 或其他 container entry，也不声称得到安装后文件系统。
 - 中文语音模型在当前 installer 中为 `VERIFIED-EXCLUDED`，不再作为当前安装包的硬阻断；未来若改为捆绑或下载，必须重新进入独立许可 Gate。
-- Microsoft.Windows.SDK.NET.Ref 与七个非 win-x64 Sherpa runtime package 为 `EXCLUDED-CONDITIONAL`；只有未来 frozen manifest 证明它们不存在，才能最终关闭该轴。
+- 静态 manifest 在保留的 publish 树中确认存在 `Microsoft.Windows.SDK.NET.dll`；因此 WinSDK 不再属于当前分发的 `EXCLUDED-CONDITIONAL`，必须重新完成该文件与锁定 package/version 的精确许可、再分发与 NOTICE 归属。七个非 win-x64 Sherpa runtime package 在该 publish 树中未出现，但 installer container 未解包，仍保持 `EXCLUDED-CONDITIONAL`。
 - 当前仓库根的 ignored `artifacts` 是非权威、可变的构建输出，不是只读 `v0.6.0-stage4` tag artifact manifest。当前 `artifacts/publish` 有 539 个文件，Client/Host informational version 绑定 `693719d09cead42304d7c3334b98e9161128c623`，不是正式 C0 `3a591a7b6af7da7d97e07093d4c33a3f44553b82`，因此不能用于 attribution。
 - 当前 `artifacts/release` 含一个 V0.6.0 命名的 installer，QA 观察大小为 64,216,176 bytes；它不是正式冻结的 tag-source installer identity，同样不得用于 attribution。
-- Stage 4 没有留下原 C0 逐文件名称/hash manifest。若原始 C0 artifact 仍存在，未来可在单独授权下只读生成 manifest；若不存在，clean rebuild 只能作为“可重建参考”，不能冒充原始 C0 事实。不得移动 tag、重建 C0 identity 或把其他版本目录冒充冻结产物。
+- Stage 4 构建当时没有产出逐文件 manifest；本轮仅从仍保留、且 installer size/SHA-256、tag target 与 publish file count 全部精确匹配的原始 C0 tag-source artifact 生成静态证据。该动作没有重建、修改或执行 artifact，也没有移动 tag。若未来使用 clean rebuild，只能作为“可重建参考”，不能替代本清单绑定的原始 C0 身份。
 
 ## 10. 相互独立的发布门禁
 
@@ -249,17 +249,17 @@
 | Component boundary | Source | Bundling | Attribution | Notice | 当前结论 |
 |---|---|---|---|---|---|
 | 仓库源码、文档与非 runtime 品牌材料 | `UNKNOWN` | `VERIFIED-EXCLUDED` | `VERIFIED-EXCLUDED` | `VERIFIED-EXCLUDED` | 不属于当前 installer 产品 payload；Owner 权利人/来源/允许分发形态仍须声明。 |
-| 由 C0 项目源码编译的自有 DesktopClient、DesktopHost 与项目 DLL | `PARTIAL` | `PARTIAL` | `UNKNOWN` | `UNKNOWN` | exact C0 Git 已绑定源码身份，但 Owner declaration 仍待确认；这些编译产物是产品 payload 候选，缺原 C0 逐文件 manifest，不得标为 excluded。 |
-| runtime Prompt、`.ico` 与删除脚本 | `UNKNOWN` | `PARTIAL` | `UNKNOWN` | `UNKNOWN` | publish/installer 规则显示会进入产品 payload，但没有原 C0 manifest；Owner 权利人/来源未声明。 |
+| 由 C0 项目源码编译的自有 DesktopClient、DesktopHost 与项目 DLL | `PARTIAL` | `VERIFIED` | `PARTIAL` | `UNKNOWN` | exact C0 Git 与保留 publish 树中的相对路径/size/SHA-256 已绑定；逐文件 component/package、Owner 权利边界与 LICENSE/NOTICE 映射仍未闭合。 |
+| runtime Prompt、`.ico` 与删除脚本 | `UNKNOWN` | `PARTIAL` | `PARTIAL` | `UNKNOWN` | manifest 已绑定 publish 树中的 4 个 runtime Prompt；installer 未解包，因此嵌入图标、删除脚本与 container entry 仍未得到同等级逐项证明，Owner 权利边界也未全部闭合。 |
 | NAudio 2.2.1 / System.Speech 10.0.10 | `VERIFIED` | `PARTIAL` | `PARTIAL` | `UNKNOWN` | exact 官方许可证据已核；原 C0 文件映射与 NOTICE 布置仍缺。 |
 | Microsoft.Data.Sqlite / Microsoft.Extensions application packages | `PARTIAL` | `PARTIAL` | `PARTIAL` | `UNKNOWN` | package/family 证据不等于冻结文件映射。 |
 | .NET / WindowsDesktop runtime 10.0.11 | `PARTIAL` | `PARTIAL` | `PARTIAL` | `UNKNOWN` | 本地 LICENSE/NOTICE 哈希与官方材料存在，runtime-pack→C0 文件与 NOTICE placement 未闭合。 |
-| Sherpa / ONNX Runtime win-x64 | `PARTIAL` | `PARTIAL` | `PARTIAL` | `UNKNOWN` | exact source license 与缓存静态哈希存在，但不是 frozen artifact manifest。 |
+| Sherpa / ONNX Runtime win-x64 | `PARTIAL` | `VERIFIED` | `PARTIAL` | `UNKNOWN` | exact source license、缓存静态哈希与 frozen publish 文件身份已分别存在，但 package/component 到每个文件及 NOTICE 的映射仍未闭合。 |
 | SQLite managed / native e_sqlite3 | `PARTIAL` | `PARTIAL` | `PARTIAL` | `UNKNOWN` | native 上游许可、C0 DLL 映射与 NOTICE placement 未闭合。 |
 | Inno installer engine / ChineseSimplified.isl | `PARTIAL` | `VERIFIED` | `PARTIAL` | `UNKNOWN` | engine/translation 会进入 installer；compiler exact version 与 translation upstream exact provenance 未闭合。 |
 | 中文语音模型 | `UNKNOWN` | `VERIFIED-EXCLUDED` | `VERIFIED-EXCLUDED` | `VERIFIED-EXCLUDED` | 当前 installer 不含模型；未来捆绑/下载必须重新做许可 Gate。 |
-| Microsoft.Windows.SDK.NET.Ref 10.0.19041.57 | `PARTIAL` | `EXCLUDED-CONDITIONAL` | `EXCLUDED-CONDITIONAL` | `EXCLUDED-CONDITIONAL` | 预计仅为构建引用；需 frozen manifest 不存在性关闭。 |
-| 七个非 win-x64 Sherpa runtime package | `PARTIAL` | `EXCLUDED-CONDITIONAL` | `EXCLUDED-CONDITIONAL` | `EXCLUDED-CONDITIONAL` | 只是 lock-graph entries；需 frozen manifest 不存在性关闭。 |
+| Microsoft.Windows.SDK.NET.Ref 10.0.19041.57 / `Microsoft.Windows.SDK.NET.dll` | `PARTIAL` | `VERIFIED` | `PARTIAL` | `UNKNOWN` | frozen publish manifest 确认该 DLL 存在；文件 metadata 显示 `10.0.19041.55+...`，必须先闭合其与锁定 `10.0.19041.57` package 的精确映射、许可、再分发和 NOTICE，不能继续按排除处理。 |
+| 七个非 win-x64 Sherpa runtime package | `PARTIAL` | `EXCLUDED-CONDITIONAL` | `EXCLUDED-CONDITIONAL` | `EXCLUDED-CONDITIONAL` | 只是 lock-graph entries，且未出现在保留的 539 文件 publish 树；因 installer container 未解包，仍需其不存在性门禁最终关闭。 |
 
 ### 12.2 已确认的静态绑定锚点
 
@@ -275,7 +275,7 @@
 
 ### 12.3 Frozen manifest 最小 schema
 
-未来 manifest 必须同时描述 installed payload 与 installer container；每条记录至少包含以下字段，不得记录用户绝对路径：
+`docs/baselines/V0.6.0_STAGE4_C0_STATIC_MANIFEST.json` 已按以下 schema 绑定保留的 publish 树与 installer 本体；由于本轮禁止执行或解包 installer，内嵌/派生 container entry 仍为空并作为明确限制保留。任何后续 manifest 仍必须同时描述 installed payload 与 installer container；每条记录至少包含以下字段，不得记录用户绝对路径：
 
 | Field | Contract |
 |---|---|
@@ -320,14 +320,13 @@ Owner 已作出的事实声明与保守边界如下：
 
 ### 12.6 新授权门禁
 
-以下动作各自需要新的、可见的 Owner 授权，不能相互替代：
+原始 C0 artifact 的只读静态 manifest 已在本轮 Owner 明确授权下完成；其余动作各自仍需要新的、可见的 Owner 授权，不能相互替代：
 
 1. Owner 对图标 AI 披露、第三方权利、商标与外部分发开放项，以及其他尚未闭合资产的补证、替换或排除决定；
-2. 原始 C0 artifact 的只读静态 manifest 生成；
-3. clean rebuild 及其可重建参考 manifest；
-4. NOTICE publish/installer 修改、安装后验证与新 release identity；
-5. 任何未来在线许可补证；
-6. S5-R2 隔离安装生命周期。
+2. clean rebuild 及其可重建参考 manifest；
+3. NOTICE publish/installer 修改、安装后验证与新 release identity；
+4. 任何未来在线许可补证；
+5. S5-R2 隔离安装生命周期。
 
 ## 13. Remaining blocks
 
@@ -335,14 +334,14 @@ Owner 已作出的事实声明与保守边界如下：
 
 - 图标仍有 `APPLICABLE_OPENAI_ACCOUNT_TERMS_NOT_BOUND=OPEN`、`OPENAI_OUTPUT_TERMS_CLEARANCE_NOT_ESTABLISHED=OPEN`、`AI_DISCLOSURE_REQUIRED=OPEN`、`THIRD_PARTY_RIGHTS_REVIEW_REQUIRED=OPEN`、`TRADEMARK_CLEARANCE_NOT_PERFORMED=OPEN` 与 `ICON_EXTERNAL_DISTRIBUTION_CLEARANCE_NOT_ESTABLISHED=OPEN`；copyrightability/uniqueness 亦未确定；
 - Owner 对 runtime Prompt、删除脚本及其他尚未由本次事实声明闭合资产的来源/允许分发形态补充；源码公开分发继续 `SOURCE_DISTRIBUTION_NOT_AUTHORIZED`；
-- 只读 `v0.6.0-stage4` artifact 的完整 per-file manifest、逐文件 hash、来源映射、LICENSE/NOTICE placement 与 attribution；
+- installer container 的 embedded/derived entry、publish 树之外的安装文件、逐文件 component/package 来源映射、LICENSE/NOTICE placement 与 attribution；installer 本体及保留的 539 文件 publish 树的相对路径/size/SHA-256 身份已由静态 manifest 闭合；
 - NOTICE 文件与索引的实际 publish/installer 布置、安装后验证及新 release identity；
 - SQLite native `e_sqlite3` 的上游许可与冻结 DLL attribution；
 - Inno compiler exact 小版本及 `ChineseSimplified.isl` 的本地 exact source commit/hash/provenance；
 - .NET、WindowsDesktop、Sherpa 与 ONNX Runtime 到冻结产物逐文件 LICENSE/NOTICE 的映射；
-- WinSDK Ref 与七个非 win-x64 Sherpa runtime 在 frozen manifest 中的不存在性。
+- frozen publish 中已发现 `Microsoft.Windows.SDK.NET.dll`：其与锁定 WinSDK package/version 的精确映射、许可、再分发与 NOTICE 已成为当前硬阻断；七个非 win-x64 Sherpa runtime 的 container 不存在性仍待关闭。
 
-WinSDK Ref 与七个非 win-x64 Sherpa runtime 保持 `EXCLUDED-CONDITIONAL`：当前硬阻断仅是 frozen manifest 尚未证明其不存在。若 manifest 发现它们被捆绑，或未来计划捆绑，必须重新执行适用于该 exact package/version 的 license/redistribution Gate；在排除状态下不把 WinSDK exact redistribution/license binding 当作当前硬阻断。
+WinSDK 已由静态 manifest 证明被捆绑，必须重新执行适用于 exact file/package/version 的 license/redistribution Gate；不得再套用排除状态。七个非 win-x64 Sherpa runtime 仍保持 `EXCLUDED-CONDITIONAL`：若未来 container evidence 发现其被捆绑，或计划捆绑，同样必须重新执行对应的 license/redistribution Gate。
 
 中文语音模型是当前 installer 的 `VERIFIED-EXCLUDED`，不是当前分发包的硬阻断；未来若捆绑或下载，必须重新核对权重、tokens、训练数据许可及 exact model card/source/version/hash。数字签名与 clean-machine same-AppId lifecycle 仍是彼此独立的后续 Gate。
 
