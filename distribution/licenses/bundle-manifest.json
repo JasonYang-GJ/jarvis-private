@@ -8,113 +8,1221 @@
   "noticeIndex": {
     "path": "notice-index.json",
     "hashProfile": "UTF8_NO_BOM_LF_V1",
-    "sha256": "4031716A6ADB685508363564DE41121E350061DA62590A2AC03F6FD1DCA054F1"
+    "sha256": "0142369F8C8C40907E69CE1F9D7229D2167A93D77C67061A69E483FDFB553755"
   },
   "components": [
     {
-      "componentId": "yuanshu-project-output",
+      "componentId": "payload-build-ScreenGuide.DesktopClient",
       "version": "0.6.0",
       "artifactScope": "installedPayload",
-      "payloadComponentId": "yuanshu-project-output",
+      "payloadSourceKind": "build",
+      "payloadComponentId": "ScreenGuide.DesktopClient",
       "sourceBinding": {
-        "kind": "git-commit-owner-declaration-pending",
-        "reference": "3a591a7b6af7da7d97e07093d4c33a3f44553b82",
+        "kind": "c0-payload-attribution-catalog",
+        "reference": "build/ScreenGuide.DesktopClient@0.6.0",
         "sha256": "PENDING"
       },
       "status": {
         "source": "PARTIAL",
         "bundling": "PARTIAL",
-        "attribution": "UNKNOWN",
-        "notice": "UNKNOWN"
-      },
-      "licenseNoticeFiles": []
-    },
-    {
-      "componentId": "dotnet-runtime",
-      "version": "10.0.11",
-      "artifactScope": "installedPayload",
-      "payloadComponentId": "dotnet-runtime",
-      "sourceBinding": {
-        "kind": "official-tag-evidence",
-        "reference": "dotnet/runtime@v10.0.11",
-        "sha256": "PENDING"
-      },
-      "status": {
-        "source": "VERIFIED",
-        "bundling": "VERIFIED",
         "attribution": "PARTIAL",
         "notice": "UNKNOWN"
       },
       "licenseNoticeFiles": []
     },
     {
-      "componentId": "sqlitepclraw-native",
-      "version": "2.1.12",
+      "componentId": "payload-build-ScreenGuide.DesktopHost",
+      "version": "0.6.0",
       "artifactScope": "installedPayload",
-      "payloadComponentId": "SQLitePCLRaw.lib.e_sqlite3",
+      "payloadSourceKind": "build",
+      "payloadComponentId": "ScreenGuide.DesktopHost",
       "sourceBinding": {
-        "kind": "official-tag-evidence",
-        "reference": "SQLitePCL.raw@v2.1.12",
-        "sha256": "PENDING"
-      },
-      "status": {
-        "source": "VERIFIED",
-        "bundling": "VERIFIED",
-        "attribution": "PARTIAL",
-        "notice": "UNKNOWN"
-      },
-      "licenseNoticeFiles": []
-    },
-    {
-      "componentId": "sherpa-onnx",
-      "version": "1.13.4",
-      "artifactScope": "installedPayload",
-      "payloadComponentId": "org.k2fsa.sherpa.onnx",
-      "sourceBinding": {
-        "kind": "official-exact-commit-evidence",
-        "reference": "142807252687d81b40d6315f23470a1512a00de3",
-        "sha256": "PENDING"
-      },
-      "status": {
-        "source": "VERIFIED",
-        "bundling": "VERIFIED",
-        "attribution": "PARTIAL",
-        "notice": "UNKNOWN"
-      },
-      "licenseNoticeFiles": []
-    },
-    {
-      "componentId": "onnxruntime",
-      "version": "1.27.0",
-      "artifactScope": "installedPayload",
-      "payloadComponentId": "Microsoft.ML.OnnxRuntime",
-      "sourceBinding": {
-        "kind": "official-tag-evidence",
-        "reference": "microsoft/onnxruntime@v1.27.0",
-        "sha256": "PENDING"
-      },
-      "status": {
-        "source": "VERIFIED",
-        "bundling": "VERIFIED",
-        "attribution": "PARTIAL",
-        "notice": "UNKNOWN"
-      },
-      "licenseNoticeFiles": []
-    },
-    {
-      "componentId": "windows-sdk-net",
-      "version": "10.0.19041.57",
-      "artifactScope": "installedPayload",
-      "payloadComponentId": "Microsoft.Windows.SDK.NET.Ref",
-      "sourceBinding": {
-        "kind": "official-package-and-redist-evidence",
-        "reference": "Microsoft.Windows.SDK.NET.Ref@10.0.19041.57",
+        "kind": "c0-payload-attribution-catalog",
+        "reference": "build/ScreenGuide.DesktopHost@0.6.0",
         "sha256": "PENDING"
       },
       "status": {
         "source": "PARTIAL",
-        "bundling": "VERIFIED",
-        "attribution": "VERIFIED",
+        "bundling": "PARTIAL",
+        "attribution": "PARTIAL",
+        "notice": "UNKNOWN"
+      },
+      "licenseNoticeFiles": []
+    },
+    {
+      "componentId": "payload-package-Microsoft.Data.Sqlite.Core",
+      "version": "10.0.11",
+      "artifactScope": "installedPayload",
+      "payloadSourceKind": "package",
+      "payloadComponentId": "Microsoft.Data.Sqlite.Core",
+      "sourceBinding": {
+        "kind": "c0-payload-attribution-catalog",
+        "reference": "package/Microsoft.Data.Sqlite.Core@10.0.11",
+        "sha256": "PENDING"
+      },
+      "status": {
+        "source": "PARTIAL",
+        "bundling": "PARTIAL",
+        "attribution": "PARTIAL",
+        "notice": "UNKNOWN"
+      },
+      "licenseNoticeFiles": []
+    },
+    {
+      "componentId": "payload-package-Microsoft.Extensions.Configuration",
+      "version": "10.0.11",
+      "artifactScope": "installedPayload",
+      "payloadSourceKind": "package",
+      "payloadComponentId": "Microsoft.Extensions.Configuration",
+      "sourceBinding": {
+        "kind": "c0-payload-attribution-catalog",
+        "reference": "package/Microsoft.Extensions.Configuration@10.0.11",
+        "sha256": "PENDING"
+      },
+      "status": {
+        "source": "PARTIAL",
+        "bundling": "PARTIAL",
+        "attribution": "PARTIAL",
+        "notice": "UNKNOWN"
+      },
+      "licenseNoticeFiles": []
+    },
+    {
+      "componentId": "payload-package-Microsoft.Extensions.Configuration.Abstractions",
+      "version": "10.0.11",
+      "artifactScope": "installedPayload",
+      "payloadSourceKind": "package",
+      "payloadComponentId": "Microsoft.Extensions.Configuration.Abstractions",
+      "sourceBinding": {
+        "kind": "c0-payload-attribution-catalog",
+        "reference": "package/Microsoft.Extensions.Configuration.Abstractions@10.0.11",
+        "sha256": "PENDING"
+      },
+      "status": {
+        "source": "PARTIAL",
+        "bundling": "PARTIAL",
+        "attribution": "PARTIAL",
+        "notice": "UNKNOWN"
+      },
+      "licenseNoticeFiles": []
+    },
+    {
+      "componentId": "payload-package-Microsoft.Extensions.Configuration.Binder",
+      "version": "10.0.11",
+      "artifactScope": "installedPayload",
+      "payloadSourceKind": "package",
+      "payloadComponentId": "Microsoft.Extensions.Configuration.Binder",
+      "sourceBinding": {
+        "kind": "c0-payload-attribution-catalog",
+        "reference": "package/Microsoft.Extensions.Configuration.Binder@10.0.11",
+        "sha256": "PENDING"
+      },
+      "status": {
+        "source": "PARTIAL",
+        "bundling": "PARTIAL",
+        "attribution": "PARTIAL",
+        "notice": "UNKNOWN"
+      },
+      "licenseNoticeFiles": []
+    },
+    {
+      "componentId": "payload-package-Microsoft.Extensions.Configuration.CommandLine",
+      "version": "10.0.11",
+      "artifactScope": "installedPayload",
+      "payloadSourceKind": "package",
+      "payloadComponentId": "Microsoft.Extensions.Configuration.CommandLine",
+      "sourceBinding": {
+        "kind": "c0-payload-attribution-catalog",
+        "reference": "package/Microsoft.Extensions.Configuration.CommandLine@10.0.11",
+        "sha256": "PENDING"
+      },
+      "status": {
+        "source": "PARTIAL",
+        "bundling": "PARTIAL",
+        "attribution": "PARTIAL",
+        "notice": "UNKNOWN"
+      },
+      "licenseNoticeFiles": []
+    },
+    {
+      "componentId": "payload-package-Microsoft.Extensions.Configuration.EnvironmentVariables",
+      "version": "10.0.11",
+      "artifactScope": "installedPayload",
+      "payloadSourceKind": "package",
+      "payloadComponentId": "Microsoft.Extensions.Configuration.EnvironmentVariables",
+      "sourceBinding": {
+        "kind": "c0-payload-attribution-catalog",
+        "reference": "package/Microsoft.Extensions.Configuration.EnvironmentVariables@10.0.11",
+        "sha256": "PENDING"
+      },
+      "status": {
+        "source": "PARTIAL",
+        "bundling": "PARTIAL",
+        "attribution": "PARTIAL",
+        "notice": "UNKNOWN"
+      },
+      "licenseNoticeFiles": []
+    },
+    {
+      "componentId": "payload-package-Microsoft.Extensions.Configuration.FileExtensions",
+      "version": "10.0.11",
+      "artifactScope": "installedPayload",
+      "payloadSourceKind": "package",
+      "payloadComponentId": "Microsoft.Extensions.Configuration.FileExtensions",
+      "sourceBinding": {
+        "kind": "c0-payload-attribution-catalog",
+        "reference": "package/Microsoft.Extensions.Configuration.FileExtensions@10.0.11",
+        "sha256": "PENDING"
+      },
+      "status": {
+        "source": "PARTIAL",
+        "bundling": "PARTIAL",
+        "attribution": "PARTIAL",
+        "notice": "UNKNOWN"
+      },
+      "licenseNoticeFiles": []
+    },
+    {
+      "componentId": "payload-package-Microsoft.Extensions.Configuration.Json",
+      "version": "10.0.11",
+      "artifactScope": "installedPayload",
+      "payloadSourceKind": "package",
+      "payloadComponentId": "Microsoft.Extensions.Configuration.Json",
+      "sourceBinding": {
+        "kind": "c0-payload-attribution-catalog",
+        "reference": "package/Microsoft.Extensions.Configuration.Json@10.0.11",
+        "sha256": "PENDING"
+      },
+      "status": {
+        "source": "PARTIAL",
+        "bundling": "PARTIAL",
+        "attribution": "PARTIAL",
+        "notice": "UNKNOWN"
+      },
+      "licenseNoticeFiles": []
+    },
+    {
+      "componentId": "payload-package-Microsoft.Extensions.Configuration.UserSecrets",
+      "version": "10.0.11",
+      "artifactScope": "installedPayload",
+      "payloadSourceKind": "package",
+      "payloadComponentId": "Microsoft.Extensions.Configuration.UserSecrets",
+      "sourceBinding": {
+        "kind": "c0-payload-attribution-catalog",
+        "reference": "package/Microsoft.Extensions.Configuration.UserSecrets@10.0.11",
+        "sha256": "PENDING"
+      },
+      "status": {
+        "source": "PARTIAL",
+        "bundling": "PARTIAL",
+        "attribution": "PARTIAL",
+        "notice": "UNKNOWN"
+      },
+      "licenseNoticeFiles": []
+    },
+    {
+      "componentId": "payload-package-Microsoft.Extensions.DependencyInjection",
+      "version": "10.0.11",
+      "artifactScope": "installedPayload",
+      "payloadSourceKind": "package",
+      "payloadComponentId": "Microsoft.Extensions.DependencyInjection",
+      "sourceBinding": {
+        "kind": "c0-payload-attribution-catalog",
+        "reference": "package/Microsoft.Extensions.DependencyInjection@10.0.11",
+        "sha256": "PENDING"
+      },
+      "status": {
+        "source": "PARTIAL",
+        "bundling": "PARTIAL",
+        "attribution": "PARTIAL",
+        "notice": "UNKNOWN"
+      },
+      "licenseNoticeFiles": []
+    },
+    {
+      "componentId": "payload-package-Microsoft.Extensions.DependencyInjection.Abstractions",
+      "version": "10.0.11",
+      "artifactScope": "installedPayload",
+      "payloadSourceKind": "package",
+      "payloadComponentId": "Microsoft.Extensions.DependencyInjection.Abstractions",
+      "sourceBinding": {
+        "kind": "c0-payload-attribution-catalog",
+        "reference": "package/Microsoft.Extensions.DependencyInjection.Abstractions@10.0.11",
+        "sha256": "PENDING"
+      },
+      "status": {
+        "source": "PARTIAL",
+        "bundling": "PARTIAL",
+        "attribution": "PARTIAL",
+        "notice": "UNKNOWN"
+      },
+      "licenseNoticeFiles": []
+    },
+    {
+      "componentId": "payload-package-Microsoft.Extensions.Diagnostics",
+      "version": "10.0.11",
+      "artifactScope": "installedPayload",
+      "payloadSourceKind": "package",
+      "payloadComponentId": "Microsoft.Extensions.Diagnostics",
+      "sourceBinding": {
+        "kind": "c0-payload-attribution-catalog",
+        "reference": "package/Microsoft.Extensions.Diagnostics@10.0.11",
+        "sha256": "PENDING"
+      },
+      "status": {
+        "source": "PARTIAL",
+        "bundling": "PARTIAL",
+        "attribution": "PARTIAL",
+        "notice": "UNKNOWN"
+      },
+      "licenseNoticeFiles": []
+    },
+    {
+      "componentId": "payload-package-Microsoft.Extensions.Diagnostics.Abstractions",
+      "version": "10.0.11",
+      "artifactScope": "installedPayload",
+      "payloadSourceKind": "package",
+      "payloadComponentId": "Microsoft.Extensions.Diagnostics.Abstractions",
+      "sourceBinding": {
+        "kind": "c0-payload-attribution-catalog",
+        "reference": "package/Microsoft.Extensions.Diagnostics.Abstractions@10.0.11",
+        "sha256": "PENDING"
+      },
+      "status": {
+        "source": "PARTIAL",
+        "bundling": "PARTIAL",
+        "attribution": "PARTIAL",
+        "notice": "UNKNOWN"
+      },
+      "licenseNoticeFiles": []
+    },
+    {
+      "componentId": "payload-package-Microsoft.Extensions.FileProviders.Abstractions",
+      "version": "10.0.11",
+      "artifactScope": "installedPayload",
+      "payloadSourceKind": "package",
+      "payloadComponentId": "Microsoft.Extensions.FileProviders.Abstractions",
+      "sourceBinding": {
+        "kind": "c0-payload-attribution-catalog",
+        "reference": "package/Microsoft.Extensions.FileProviders.Abstractions@10.0.11",
+        "sha256": "PENDING"
+      },
+      "status": {
+        "source": "PARTIAL",
+        "bundling": "PARTIAL",
+        "attribution": "PARTIAL",
+        "notice": "UNKNOWN"
+      },
+      "licenseNoticeFiles": []
+    },
+    {
+      "componentId": "payload-package-Microsoft.Extensions.FileProviders.Physical",
+      "version": "10.0.11",
+      "artifactScope": "installedPayload",
+      "payloadSourceKind": "package",
+      "payloadComponentId": "Microsoft.Extensions.FileProviders.Physical",
+      "sourceBinding": {
+        "kind": "c0-payload-attribution-catalog",
+        "reference": "package/Microsoft.Extensions.FileProviders.Physical@10.0.11",
+        "sha256": "PENDING"
+      },
+      "status": {
+        "source": "PARTIAL",
+        "bundling": "PARTIAL",
+        "attribution": "PARTIAL",
+        "notice": "UNKNOWN"
+      },
+      "licenseNoticeFiles": []
+    },
+    {
+      "componentId": "payload-package-Microsoft.Extensions.FileSystemGlobbing",
+      "version": "10.0.11",
+      "artifactScope": "installedPayload",
+      "payloadSourceKind": "package",
+      "payloadComponentId": "Microsoft.Extensions.FileSystemGlobbing",
+      "sourceBinding": {
+        "kind": "c0-payload-attribution-catalog",
+        "reference": "package/Microsoft.Extensions.FileSystemGlobbing@10.0.11",
+        "sha256": "PENDING"
+      },
+      "status": {
+        "source": "PARTIAL",
+        "bundling": "PARTIAL",
+        "attribution": "PARTIAL",
+        "notice": "UNKNOWN"
+      },
+      "licenseNoticeFiles": []
+    },
+    {
+      "componentId": "payload-package-Microsoft.Extensions.Hosting",
+      "version": "10.0.11",
+      "artifactScope": "installedPayload",
+      "payloadSourceKind": "package",
+      "payloadComponentId": "Microsoft.Extensions.Hosting",
+      "sourceBinding": {
+        "kind": "c0-payload-attribution-catalog",
+        "reference": "package/Microsoft.Extensions.Hosting@10.0.11",
+        "sha256": "PENDING"
+      },
+      "status": {
+        "source": "PARTIAL",
+        "bundling": "PARTIAL",
+        "attribution": "PARTIAL",
+        "notice": "UNKNOWN"
+      },
+      "licenseNoticeFiles": []
+    },
+    {
+      "componentId": "payload-package-Microsoft.Extensions.Hosting.Abstractions",
+      "version": "10.0.11",
+      "artifactScope": "installedPayload",
+      "payloadSourceKind": "package",
+      "payloadComponentId": "Microsoft.Extensions.Hosting.Abstractions",
+      "sourceBinding": {
+        "kind": "c0-payload-attribution-catalog",
+        "reference": "package/Microsoft.Extensions.Hosting.Abstractions@10.0.11",
+        "sha256": "PENDING"
+      },
+      "status": {
+        "source": "PARTIAL",
+        "bundling": "PARTIAL",
+        "attribution": "PARTIAL",
+        "notice": "UNKNOWN"
+      },
+      "licenseNoticeFiles": []
+    },
+    {
+      "componentId": "payload-package-Microsoft.Extensions.Logging",
+      "version": "10.0.11",
+      "artifactScope": "installedPayload",
+      "payloadSourceKind": "package",
+      "payloadComponentId": "Microsoft.Extensions.Logging",
+      "sourceBinding": {
+        "kind": "c0-payload-attribution-catalog",
+        "reference": "package/Microsoft.Extensions.Logging@10.0.11",
+        "sha256": "PENDING"
+      },
+      "status": {
+        "source": "PARTIAL",
+        "bundling": "PARTIAL",
+        "attribution": "PARTIAL",
+        "notice": "UNKNOWN"
+      },
+      "licenseNoticeFiles": []
+    },
+    {
+      "componentId": "payload-package-Microsoft.Extensions.Logging.Abstractions",
+      "version": "10.0.11",
+      "artifactScope": "installedPayload",
+      "payloadSourceKind": "package",
+      "payloadComponentId": "Microsoft.Extensions.Logging.Abstractions",
+      "sourceBinding": {
+        "kind": "c0-payload-attribution-catalog",
+        "reference": "package/Microsoft.Extensions.Logging.Abstractions@10.0.11",
+        "sha256": "PENDING"
+      },
+      "status": {
+        "source": "PARTIAL",
+        "bundling": "PARTIAL",
+        "attribution": "PARTIAL",
+        "notice": "UNKNOWN"
+      },
+      "licenseNoticeFiles": []
+    },
+    {
+      "componentId": "payload-package-Microsoft.Extensions.Logging.Configuration",
+      "version": "10.0.11",
+      "artifactScope": "installedPayload",
+      "payloadSourceKind": "package",
+      "payloadComponentId": "Microsoft.Extensions.Logging.Configuration",
+      "sourceBinding": {
+        "kind": "c0-payload-attribution-catalog",
+        "reference": "package/Microsoft.Extensions.Logging.Configuration@10.0.11",
+        "sha256": "PENDING"
+      },
+      "status": {
+        "source": "PARTIAL",
+        "bundling": "PARTIAL",
+        "attribution": "PARTIAL",
+        "notice": "UNKNOWN"
+      },
+      "licenseNoticeFiles": []
+    },
+    {
+      "componentId": "payload-package-Microsoft.Extensions.Logging.Console",
+      "version": "10.0.11",
+      "artifactScope": "installedPayload",
+      "payloadSourceKind": "package",
+      "payloadComponentId": "Microsoft.Extensions.Logging.Console",
+      "sourceBinding": {
+        "kind": "c0-payload-attribution-catalog",
+        "reference": "package/Microsoft.Extensions.Logging.Console@10.0.11",
+        "sha256": "PENDING"
+      },
+      "status": {
+        "source": "PARTIAL",
+        "bundling": "PARTIAL",
+        "attribution": "PARTIAL",
+        "notice": "UNKNOWN"
+      },
+      "licenseNoticeFiles": []
+    },
+    {
+      "componentId": "payload-package-Microsoft.Extensions.Logging.Debug",
+      "version": "10.0.11",
+      "artifactScope": "installedPayload",
+      "payloadSourceKind": "package",
+      "payloadComponentId": "Microsoft.Extensions.Logging.Debug",
+      "sourceBinding": {
+        "kind": "c0-payload-attribution-catalog",
+        "reference": "package/Microsoft.Extensions.Logging.Debug@10.0.11",
+        "sha256": "PENDING"
+      },
+      "status": {
+        "source": "PARTIAL",
+        "bundling": "PARTIAL",
+        "attribution": "PARTIAL",
+        "notice": "UNKNOWN"
+      },
+      "licenseNoticeFiles": []
+    },
+    {
+      "componentId": "payload-package-Microsoft.Extensions.Logging.EventLog",
+      "version": "10.0.11",
+      "artifactScope": "installedPayload",
+      "payloadSourceKind": "package",
+      "payloadComponentId": "Microsoft.Extensions.Logging.EventLog",
+      "sourceBinding": {
+        "kind": "c0-payload-attribution-catalog",
+        "reference": "package/Microsoft.Extensions.Logging.EventLog@10.0.11",
+        "sha256": "PENDING"
+      },
+      "status": {
+        "source": "PARTIAL",
+        "bundling": "PARTIAL",
+        "attribution": "PARTIAL",
+        "notice": "UNKNOWN"
+      },
+      "licenseNoticeFiles": []
+    },
+    {
+      "componentId": "payload-package-Microsoft.Extensions.Logging.EventSource",
+      "version": "10.0.11",
+      "artifactScope": "installedPayload",
+      "payloadSourceKind": "package",
+      "payloadComponentId": "Microsoft.Extensions.Logging.EventSource",
+      "sourceBinding": {
+        "kind": "c0-payload-attribution-catalog",
+        "reference": "package/Microsoft.Extensions.Logging.EventSource@10.0.11",
+        "sha256": "PENDING"
+      },
+      "status": {
+        "source": "PARTIAL",
+        "bundling": "PARTIAL",
+        "attribution": "PARTIAL",
+        "notice": "UNKNOWN"
+      },
+      "licenseNoticeFiles": []
+    },
+    {
+      "componentId": "payload-package-Microsoft.Extensions.Options",
+      "version": "10.0.11",
+      "artifactScope": "installedPayload",
+      "payloadSourceKind": "package",
+      "payloadComponentId": "Microsoft.Extensions.Options",
+      "sourceBinding": {
+        "kind": "c0-payload-attribution-catalog",
+        "reference": "package/Microsoft.Extensions.Options@10.0.11",
+        "sha256": "PENDING"
+      },
+      "status": {
+        "source": "PARTIAL",
+        "bundling": "PARTIAL",
+        "attribution": "PARTIAL",
+        "notice": "UNKNOWN"
+      },
+      "licenseNoticeFiles": []
+    },
+    {
+      "componentId": "payload-package-Microsoft.Extensions.Options.ConfigurationExtensions",
+      "version": "10.0.11",
+      "artifactScope": "installedPayload",
+      "payloadSourceKind": "package",
+      "payloadComponentId": "Microsoft.Extensions.Options.ConfigurationExtensions",
+      "sourceBinding": {
+        "kind": "c0-payload-attribution-catalog",
+        "reference": "package/Microsoft.Extensions.Options.ConfigurationExtensions@10.0.11",
+        "sha256": "PENDING"
+      },
+      "status": {
+        "source": "PARTIAL",
+        "bundling": "PARTIAL",
+        "attribution": "PARTIAL",
+        "notice": "UNKNOWN"
+      },
+      "licenseNoticeFiles": []
+    },
+    {
+      "componentId": "payload-package-Microsoft.Extensions.Primitives",
+      "version": "10.0.11",
+      "artifactScope": "installedPayload",
+      "payloadSourceKind": "package",
+      "payloadComponentId": "Microsoft.Extensions.Primitives",
+      "sourceBinding": {
+        "kind": "c0-payload-attribution-catalog",
+        "reference": "package/Microsoft.Extensions.Primitives@10.0.11",
+        "sha256": "PENDING"
+      },
+      "status": {
+        "source": "PARTIAL",
+        "bundling": "PARTIAL",
+        "attribution": "PARTIAL",
+        "notice": "UNKNOWN"
+      },
+      "licenseNoticeFiles": []
+    },
+    {
+      "componentId": "payload-package-Microsoft.NETCore.App.Runtime.win-x64",
+      "version": "10.0.11",
+      "artifactScope": "installedPayload",
+      "payloadSourceKind": "package",
+      "payloadComponentId": "Microsoft.NETCore.App.Runtime.win-x64",
+      "sourceBinding": {
+        "kind": "c0-payload-attribution-catalog",
+        "reference": "package/Microsoft.NETCore.App.Runtime.win-x64@10.0.11",
+        "sha256": "PENDING"
+      },
+      "status": {
+        "source": "PARTIAL",
+        "bundling": "PARTIAL",
+        "attribution": "PARTIAL",
+        "notice": "UNKNOWN"
+      },
+      "licenseNoticeFiles": []
+    },
+    {
+      "componentId": "payload-package-Microsoft.Windows.SDK.NET.Ref",
+      "version": "10.0.19041.57",
+      "artifactScope": "installedPayload",
+      "payloadSourceKind": "package",
+      "payloadComponentId": "Microsoft.Windows.SDK.NET.Ref",
+      "sourceBinding": {
+        "kind": "c0-payload-attribution-catalog",
+        "reference": "package/Microsoft.Windows.SDK.NET.Ref@10.0.19041.57",
+        "sha256": "PENDING"
+      },
+      "status": {
+        "source": "PARTIAL",
+        "bundling": "PARTIAL",
+        "attribution": "PARTIAL",
+        "notice": "UNKNOWN"
+      },
+      "licenseNoticeFiles": []
+    },
+    {
+      "componentId": "payload-package-Microsoft.WindowsDesktop.App.Runtime.win-x64",
+      "version": "10.0.11",
+      "artifactScope": "installedPayload",
+      "payloadSourceKind": "package",
+      "payloadComponentId": "Microsoft.WindowsDesktop.App.Runtime.win-x64",
+      "sourceBinding": {
+        "kind": "c0-payload-attribution-catalog",
+        "reference": "package/Microsoft.WindowsDesktop.App.Runtime.win-x64@10.0.11",
+        "sha256": "PENDING"
+      },
+      "status": {
+        "source": "PARTIAL",
+        "bundling": "PARTIAL",
+        "attribution": "PARTIAL",
+        "notice": "UNKNOWN"
+      },
+      "licenseNoticeFiles": []
+    },
+    {
+      "componentId": "payload-package-NAudio",
+      "version": "2.2.1",
+      "artifactScope": "installedPayload",
+      "payloadSourceKind": "package",
+      "payloadComponentId": "NAudio",
+      "sourceBinding": {
+        "kind": "c0-payload-attribution-catalog",
+        "reference": "package/NAudio@2.2.1",
+        "sha256": "PENDING"
+      },
+      "status": {
+        "source": "PARTIAL",
+        "bundling": "PARTIAL",
+        "attribution": "PARTIAL",
+        "notice": "UNKNOWN"
+      },
+      "licenseNoticeFiles": []
+    },
+    {
+      "componentId": "payload-package-NAudio.Asio",
+      "version": "2.2.1",
+      "artifactScope": "installedPayload",
+      "payloadSourceKind": "package",
+      "payloadComponentId": "NAudio.Asio",
+      "sourceBinding": {
+        "kind": "c0-payload-attribution-catalog",
+        "reference": "package/NAudio.Asio@2.2.1",
+        "sha256": "PENDING"
+      },
+      "status": {
+        "source": "PARTIAL",
+        "bundling": "PARTIAL",
+        "attribution": "PARTIAL",
+        "notice": "UNKNOWN"
+      },
+      "licenseNoticeFiles": []
+    },
+    {
+      "componentId": "payload-package-NAudio.Core",
+      "version": "2.2.1",
+      "artifactScope": "installedPayload",
+      "payloadSourceKind": "package",
+      "payloadComponentId": "NAudio.Core",
+      "sourceBinding": {
+        "kind": "c0-payload-attribution-catalog",
+        "reference": "package/NAudio.Core@2.2.1",
+        "sha256": "PENDING"
+      },
+      "status": {
+        "source": "PARTIAL",
+        "bundling": "PARTIAL",
+        "attribution": "PARTIAL",
+        "notice": "UNKNOWN"
+      },
+      "licenseNoticeFiles": []
+    },
+    {
+      "componentId": "payload-package-NAudio.Midi",
+      "version": "2.2.1",
+      "artifactScope": "installedPayload",
+      "payloadSourceKind": "package",
+      "payloadComponentId": "NAudio.Midi",
+      "sourceBinding": {
+        "kind": "c0-payload-attribution-catalog",
+        "reference": "package/NAudio.Midi@2.2.1",
+        "sha256": "PENDING"
+      },
+      "status": {
+        "source": "PARTIAL",
+        "bundling": "PARTIAL",
+        "attribution": "PARTIAL",
+        "notice": "UNKNOWN"
+      },
+      "licenseNoticeFiles": []
+    },
+    {
+      "componentId": "payload-package-NAudio.Wasapi",
+      "version": "2.2.1",
+      "artifactScope": "installedPayload",
+      "payloadSourceKind": "package",
+      "payloadComponentId": "NAudio.Wasapi",
+      "sourceBinding": {
+        "kind": "c0-payload-attribution-catalog",
+        "reference": "package/NAudio.Wasapi@2.2.1",
+        "sha256": "PENDING"
+      },
+      "status": {
+        "source": "PARTIAL",
+        "bundling": "PARTIAL",
+        "attribution": "PARTIAL",
+        "notice": "UNKNOWN"
+      },
+      "licenseNoticeFiles": []
+    },
+    {
+      "componentId": "payload-package-NAudio.WinForms",
+      "version": "2.2.1",
+      "artifactScope": "installedPayload",
+      "payloadSourceKind": "package",
+      "payloadComponentId": "NAudio.WinForms",
+      "sourceBinding": {
+        "kind": "c0-payload-attribution-catalog",
+        "reference": "package/NAudio.WinForms@2.2.1",
+        "sha256": "PENDING"
+      },
+      "status": {
+        "source": "PARTIAL",
+        "bundling": "PARTIAL",
+        "attribution": "PARTIAL",
+        "notice": "UNKNOWN"
+      },
+      "licenseNoticeFiles": []
+    },
+    {
+      "componentId": "payload-package-NAudio.WinMM",
+      "version": "2.2.1",
+      "artifactScope": "installedPayload",
+      "payloadSourceKind": "package",
+      "payloadComponentId": "NAudio.WinMM",
+      "sourceBinding": {
+        "kind": "c0-payload-attribution-catalog",
+        "reference": "package/NAudio.WinMM@2.2.1",
+        "sha256": "PENDING"
+      },
+      "status": {
+        "source": "PARTIAL",
+        "bundling": "PARTIAL",
+        "attribution": "PARTIAL",
+        "notice": "UNKNOWN"
+      },
+      "licenseNoticeFiles": []
+    },
+    {
+      "componentId": "payload-package-SQLitePCLRaw.bundle_e_sqlite3",
+      "version": "2.1.12",
+      "artifactScope": "installedPayload",
+      "payloadSourceKind": "package",
+      "payloadComponentId": "SQLitePCLRaw.bundle_e_sqlite3",
+      "sourceBinding": {
+        "kind": "c0-payload-attribution-catalog",
+        "reference": "package/SQLitePCLRaw.bundle_e_sqlite3@2.1.12",
+        "sha256": "PENDING"
+      },
+      "status": {
+        "source": "PARTIAL",
+        "bundling": "PARTIAL",
+        "attribution": "PARTIAL",
+        "notice": "UNKNOWN"
+      },
+      "licenseNoticeFiles": []
+    },
+    {
+      "componentId": "payload-package-SQLitePCLRaw.core",
+      "version": "2.1.12",
+      "artifactScope": "installedPayload",
+      "payloadSourceKind": "package",
+      "payloadComponentId": "SQLitePCLRaw.core",
+      "sourceBinding": {
+        "kind": "c0-payload-attribution-catalog",
+        "reference": "package/SQLitePCLRaw.core@2.1.12",
+        "sha256": "PENDING"
+      },
+      "status": {
+        "source": "PARTIAL",
+        "bundling": "PARTIAL",
+        "attribution": "PARTIAL",
+        "notice": "UNKNOWN"
+      },
+      "licenseNoticeFiles": []
+    },
+    {
+      "componentId": "payload-package-SQLitePCLRaw.lib.e_sqlite3",
+      "version": "2.1.12",
+      "artifactScope": "installedPayload",
+      "payloadSourceKind": "package",
+      "payloadComponentId": "SQLitePCLRaw.lib.e_sqlite3",
+      "sourceBinding": {
+        "kind": "c0-payload-attribution-catalog",
+        "reference": "package/SQLitePCLRaw.lib.e_sqlite3@2.1.12",
+        "sha256": "PENDING"
+      },
+      "status": {
+        "source": "PARTIAL",
+        "bundling": "PARTIAL",
+        "attribution": "PARTIAL",
+        "notice": "UNKNOWN"
+      },
+      "licenseNoticeFiles": []
+    },
+    {
+      "componentId": "payload-package-SQLitePCLRaw.provider.e_sqlite3",
+      "version": "2.1.12",
+      "artifactScope": "installedPayload",
+      "payloadSourceKind": "package",
+      "payloadComponentId": "SQLitePCLRaw.provider.e_sqlite3",
+      "sourceBinding": {
+        "kind": "c0-payload-attribution-catalog",
+        "reference": "package/SQLitePCLRaw.provider.e_sqlite3@2.1.12",
+        "sha256": "PENDING"
+      },
+      "status": {
+        "source": "PARTIAL",
+        "bundling": "PARTIAL",
+        "attribution": "PARTIAL",
+        "notice": "UNKNOWN"
+      },
+      "licenseNoticeFiles": []
+    },
+    {
+      "componentId": "payload-package-System.Speech",
+      "version": "10.0.10",
+      "artifactScope": "installedPayload",
+      "payloadSourceKind": "package",
+      "payloadComponentId": "System.Speech",
+      "sourceBinding": {
+        "kind": "c0-payload-attribution-catalog",
+        "reference": "package/System.Speech@10.0.10",
+        "sha256": "PENDING"
+      },
+      "status": {
+        "source": "PARTIAL",
+        "bundling": "PARTIAL",
+        "attribution": "PARTIAL",
+        "notice": "UNKNOWN"
+      },
+      "licenseNoticeFiles": []
+    },
+    {
+      "componentId": "payload-package-org.k2fsa.sherpa.onnx",
+      "version": "1.13.4",
+      "artifactScope": "installedPayload",
+      "payloadSourceKind": "package",
+      "payloadComponentId": "org.k2fsa.sherpa.onnx",
+      "sourceBinding": {
+        "kind": "c0-payload-attribution-catalog",
+        "reference": "package/org.k2fsa.sherpa.onnx@1.13.4",
+        "sha256": "PENDING"
+      },
+      "status": {
+        "source": "PARTIAL",
+        "bundling": "PARTIAL",
+        "attribution": "PARTIAL",
+        "notice": "UNKNOWN"
+      },
+      "licenseNoticeFiles": []
+    },
+    {
+      "componentId": "payload-package-org.k2fsa.sherpa.onnx.runtime.win-x64",
+      "version": "1.13.4",
+      "artifactScope": "installedPayload",
+      "payloadSourceKind": "package",
+      "payloadComponentId": "org.k2fsa.sherpa.onnx.runtime.win-x64",
+      "sourceBinding": {
+        "kind": "c0-payload-attribution-catalog",
+        "reference": "package/org.k2fsa.sherpa.onnx.runtime.win-x64@1.13.4",
+        "sha256": "PENDING"
+      },
+      "status": {
+        "source": "PARTIAL",
+        "bundling": "PARTIAL",
+        "attribution": "PARTIAL",
+        "notice": "UNKNOWN"
+      },
+      "licenseNoticeFiles": []
+    },
+    {
+      "componentId": "payload-project-ScreenGuide.AI.Core",
+      "version": "0.6.0",
+      "artifactScope": "installedPayload",
+      "payloadSourceKind": "project",
+      "payloadComponentId": "ScreenGuide.AI.Core",
+      "sourceBinding": {
+        "kind": "c0-payload-attribution-catalog",
+        "reference": "project/ScreenGuide.AI.Core@0.6.0",
+        "sha256": "PENDING"
+      },
+      "status": {
+        "source": "PARTIAL",
+        "bundling": "PARTIAL",
+        "attribution": "PARTIAL",
+        "notice": "UNKNOWN"
+      },
+      "licenseNoticeFiles": []
+    },
+    {
+      "componentId": "payload-project-ScreenGuide.AI.DeepSeek",
+      "version": "0.6.0",
+      "artifactScope": "installedPayload",
+      "payloadSourceKind": "project",
+      "payloadComponentId": "ScreenGuide.AI.DeepSeek",
+      "sourceBinding": {
+        "kind": "c0-payload-attribution-catalog",
+        "reference": "project/ScreenGuide.AI.DeepSeek@0.6.0",
+        "sha256": "PENDING"
+      },
+      "status": {
+        "source": "PARTIAL",
+        "bundling": "PARTIAL",
+        "attribution": "PARTIAL",
+        "notice": "UNKNOWN"
+      },
+      "licenseNoticeFiles": []
+    },
+    {
+      "componentId": "payload-project-ScreenGuide.AI.Qwen",
+      "version": "0.6.0",
+      "artifactScope": "installedPayload",
+      "payloadSourceKind": "project",
+      "payloadComponentId": "ScreenGuide.AI.Qwen",
+      "sourceBinding": {
+        "kind": "c0-payload-attribution-catalog",
+        "reference": "project/ScreenGuide.AI.Qwen@0.6.0",
+        "sha256": "PENDING"
+      },
+      "status": {
+        "source": "PARTIAL",
+        "bundling": "PARTIAL",
+        "attribution": "PARTIAL",
+        "notice": "UNKNOWN"
+      },
+      "licenseNoticeFiles": []
+    },
+    {
+      "componentId": "payload-project-ScreenGuide.Agent.Abstractions",
+      "version": "0.6.0",
+      "artifactScope": "installedPayload",
+      "payloadSourceKind": "project",
+      "payloadComponentId": "ScreenGuide.Agent.Abstractions",
+      "sourceBinding": {
+        "kind": "c0-payload-attribution-catalog",
+        "reference": "project/ScreenGuide.Agent.Abstractions@0.6.0",
+        "sha256": "PENDING"
+      },
+      "status": {
+        "source": "PARTIAL",
+        "bundling": "PARTIAL",
+        "attribution": "PARTIAL",
+        "notice": "UNKNOWN"
+      },
+      "licenseNoticeFiles": []
+    },
+    {
+      "componentId": "payload-project-ScreenGuide.Agent.Codex",
+      "version": "0.6.0",
+      "artifactScope": "installedPayload",
+      "payloadSourceKind": "project",
+      "payloadComponentId": "ScreenGuide.Agent.Codex",
+      "sourceBinding": {
+        "kind": "c0-payload-attribution-catalog",
+        "reference": "project/ScreenGuide.Agent.Codex@0.6.0",
+        "sha256": "PENDING"
+      },
+      "status": {
+        "source": "PARTIAL",
+        "bundling": "PARTIAL",
+        "attribution": "PARTIAL",
+        "notice": "UNKNOWN"
+      },
+      "licenseNoticeFiles": []
+    },
+    {
+      "componentId": "payload-project-ScreenGuide.Core",
+      "version": "0.6.0",
+      "artifactScope": "installedPayload",
+      "payloadSourceKind": "project",
+      "payloadComponentId": "ScreenGuide.Core",
+      "sourceBinding": {
+        "kind": "c0-payload-attribution-catalog",
+        "reference": "project/ScreenGuide.Core@0.6.0",
+        "sha256": "PENDING"
+      },
+      "status": {
+        "source": "PARTIAL",
+        "bundling": "PARTIAL",
+        "attribution": "PARTIAL",
+        "notice": "UNKNOWN"
+      },
+      "licenseNoticeFiles": []
+    },
+    {
+      "componentId": "payload-project-ScreenGuide.DesktopClient",
+      "version": "0.6.0",
+      "artifactScope": "installedPayload",
+      "payloadSourceKind": "project",
+      "payloadComponentId": "ScreenGuide.DesktopClient",
+      "sourceBinding": {
+        "kind": "c0-payload-attribution-catalog",
+        "reference": "project/ScreenGuide.DesktopClient@0.6.0",
+        "sha256": "PENDING"
+      },
+      "status": {
+        "source": "PARTIAL",
+        "bundling": "PARTIAL",
+        "attribution": "PARTIAL",
+        "notice": "UNKNOWN"
+      },
+      "licenseNoticeFiles": []
+    },
+    {
+      "componentId": "payload-project-ScreenGuide.DesktopHost",
+      "version": "0.6.0",
+      "artifactScope": "installedPayload",
+      "payloadSourceKind": "project",
+      "payloadComponentId": "ScreenGuide.DesktopHost",
+      "sourceBinding": {
+        "kind": "c0-payload-attribution-catalog",
+        "reference": "project/ScreenGuide.DesktopHost@0.6.0",
+        "sha256": "PENDING"
+      },
+      "status": {
+        "source": "PARTIAL",
+        "bundling": "PARTIAL",
+        "attribution": "PARTIAL",
+        "notice": "UNKNOWN"
+      },
+      "licenseNoticeFiles": []
+    },
+    {
+      "componentId": "payload-project-ScreenGuide.DesktopProtocol",
+      "version": "0.6.0",
+      "artifactScope": "installedPayload",
+      "payloadSourceKind": "project",
+      "payloadComponentId": "ScreenGuide.DesktopProtocol",
+      "sourceBinding": {
+        "kind": "c0-payload-attribution-catalog",
+        "reference": "project/ScreenGuide.DesktopProtocol@0.6.0",
+        "sha256": "PENDING"
+      },
+      "status": {
+        "source": "PARTIAL",
+        "bundling": "PARTIAL",
+        "attribution": "PARTIAL",
+        "notice": "UNKNOWN"
+      },
+      "licenseNoticeFiles": []
+    },
+    {
+      "componentId": "payload-project-ScreenGuide.Evidence",
+      "version": "0.6.0",
+      "artifactScope": "installedPayload",
+      "payloadSourceKind": "project",
+      "payloadComponentId": "ScreenGuide.Evidence",
+      "sourceBinding": {
+        "kind": "c0-payload-attribution-catalog",
+        "reference": "project/ScreenGuide.Evidence@0.6.0",
+        "sha256": "PENDING"
+      },
+      "status": {
+        "source": "PARTIAL",
+        "bundling": "PARTIAL",
+        "attribution": "PARTIAL",
+        "notice": "UNKNOWN"
+      },
+      "licenseNoticeFiles": []
+    },
+    {
+      "componentId": "payload-project-ScreenGuide.Persistence",
+      "version": "0.6.0",
+      "artifactScope": "installedPayload",
+      "payloadSourceKind": "project",
+      "payloadComponentId": "ScreenGuide.Persistence",
+      "sourceBinding": {
+        "kind": "c0-payload-attribution-catalog",
+        "reference": "project/ScreenGuide.Persistence@0.6.0",
+        "sha256": "PENDING"
+      },
+      "status": {
+        "source": "PARTIAL",
+        "bundling": "PARTIAL",
+        "attribution": "PARTIAL",
+        "notice": "UNKNOWN"
+      },
+      "licenseNoticeFiles": []
+    },
+    {
+      "componentId": "payload-project-ScreenGuide.Skills.Abstractions",
+      "version": "0.6.0",
+      "artifactScope": "installedPayload",
+      "payloadSourceKind": "project",
+      "payloadComponentId": "ScreenGuide.Skills.Abstractions",
+      "sourceBinding": {
+        "kind": "c0-payload-attribution-catalog",
+        "reference": "project/ScreenGuide.Skills.Abstractions@0.6.0",
+        "sha256": "PENDING"
+      },
+      "status": {
+        "source": "PARTIAL",
+        "bundling": "PARTIAL",
+        "attribution": "PARTIAL",
+        "notice": "UNKNOWN"
+      },
+      "licenseNoticeFiles": []
+    },
+    {
+      "componentId": "payload-project-ScreenGuide.Skills.Windows",
+      "version": "0.6.0",
+      "artifactScope": "installedPayload",
+      "payloadSourceKind": "project",
+      "payloadComponentId": "ScreenGuide.Skills.Windows",
+      "sourceBinding": {
+        "kind": "c0-payload-attribution-catalog",
+        "reference": "project/ScreenGuide.Skills.Windows@0.6.0",
+        "sha256": "PENDING"
+      },
+      "status": {
+        "source": "PARTIAL",
+        "bundling": "PARTIAL",
+        "attribution": "PARTIAL",
+        "notice": "UNKNOWN"
+      },
+      "licenseNoticeFiles": []
+    },
+    {
+      "componentId": "payload-project-ScreenGuide.Vision.Abstractions",
+      "version": "0.6.0",
+      "artifactScope": "installedPayload",
+      "payloadSourceKind": "project",
+      "payloadComponentId": "ScreenGuide.Vision.Abstractions",
+      "sourceBinding": {
+        "kind": "c0-payload-attribution-catalog",
+        "reference": "project/ScreenGuide.Vision.Abstractions@0.6.0",
+        "sha256": "PENDING"
+      },
+      "status": {
+        "source": "PARTIAL",
+        "bundling": "PARTIAL",
+        "attribution": "PARTIAL",
+        "notice": "UNKNOWN"
+      },
+      "licenseNoticeFiles": []
+    },
+    {
+      "componentId": "payload-project-ScreenGuide.Vision.Windows",
+      "version": "0.6.0",
+      "artifactScope": "installedPayload",
+      "payloadSourceKind": "project",
+      "payloadComponentId": "ScreenGuide.Vision.Windows",
+      "sourceBinding": {
+        "kind": "c0-payload-attribution-catalog",
+        "reference": "project/ScreenGuide.Vision.Windows@0.6.0",
+        "sha256": "PENDING"
+      },
+      "status": {
+        "source": "PARTIAL",
+        "bundling": "PARTIAL",
+        "attribution": "PARTIAL",
+        "notice": "UNKNOWN"
+      },
+      "licenseNoticeFiles": []
+    },
+    {
+      "componentId": "payload-project-ScreenGuide.Voice.Windows",
+      "version": "0.6.0",
+      "artifactScope": "installedPayload",
+      "payloadSourceKind": "project",
+      "payloadComponentId": "ScreenGuide.Voice.Windows",
+      "sourceBinding": {
+        "kind": "c0-payload-attribution-catalog",
+        "reference": "project/ScreenGuide.Voice.Windows@0.6.0",
+        "sha256": "PENDING"
+      },
+      "status": {
+        "source": "PARTIAL",
+        "bundling": "PARTIAL",
+        "attribution": "PARTIAL",
+        "notice": "UNKNOWN"
+      },
+      "licenseNoticeFiles": []
+    },
+    {
+      "componentId": "payload-project-runtime-prompts",
+      "version": "0.6.0",
+      "artifactScope": "installedPayload",
+      "payloadSourceKind": "project",
+      "payloadComponentId": "runtime-prompts",
+      "sourceBinding": {
+        "kind": "c0-payload-attribution-catalog",
+        "reference": "project/runtime-prompts@0.6.0",
+        "sha256": "PENDING"
+      },
+      "status": {
+        "source": "PARTIAL",
+        "bundling": "PARTIAL",
+        "attribution": "PARTIAL",
         "notice": "UNKNOWN"
       },
       "licenseNoticeFiles": []
@@ -156,11 +1264,25 @@
       "licenseNoticeFiles": []
     }
   ],
+  "exclusions": {
+    "packageIds": [
+      "org.k2fsa.sherpa.onnx.runtime.android-arm64",
+      "org.k2fsa.sherpa.onnx.runtime.linux-arm64",
+      "org.k2fsa.sherpa.onnx.runtime.linux-x64",
+      "org.k2fsa.sherpa.onnx.runtime.osx-arm64",
+      "org.k2fsa.sherpa.onnx.runtime.osx-x64",
+      "org.k2fsa.sherpa.onnx.runtime.win-arm64",
+      "org.k2fsa.sherpa.onnx.runtime.win-x86"
+    ],
+    "pathPrefixes": [
+      "models/sherpa-onnx-streaming-zipformer-zh-int8-2025-06-30/"
+    ]
+  },
   "remainingBlockers": [
     "owner_root_license_decision_open",
     "icon_external_distribution_clearance_open",
     "exact_license_notice_files_not_bundled",
-    "payload_notice_mapping_not_implemented",
+    "payload_notice_license_paths_open",
     "dotnet_runtime_notice_placement_open",
     "sqlite_native_notice_placement_open",
     "sherpa_onnx_notice_placement_open",

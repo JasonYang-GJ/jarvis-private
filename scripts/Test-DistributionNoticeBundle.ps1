@@ -9,6 +9,9 @@ param(
     [string]$PayloadManifestPath,
 
     [Parameter(Mandatory = $true)]
+    [string]$ApprovedStagingRoot,
+
+    [Parameter(Mandatory = $true)]
     [string]$InnoIncludePath
 )
 
@@ -70,21 +73,35 @@ function Test-Sha256([string]$value) {
     return -not [string]::IsNullOrWhiteSpace($value) -and $value -match '^[0-9A-Fa-f]{64}$'
 }
 
+function Test-PathChainHasReparsePoint([string]$path) {
+    $current = [IO.Path]::GetFullPath($path)
+    while (-not [string]::IsNullOrWhiteSpace($current)) {
+        if (Test-Path -LiteralPath $current) {
+            $attributes = [IO.File]::GetAttributes($current)
+            if (($attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { return $true }
+        }
+        $parent = [IO.Directory]::GetParent($current)
+        if ($null -eq $parent) { break }
+        $current = $parent.FullName
+    }
+    return $false
+}
+
 function Get-ProfiledSha256([string]$path, [string]$profile) {
     if ($profile -eq 'RAW_BYTES_SHA256') { return Get-FileSha256 $path }
     if ($profile -eq 'UTF8_NO_BOM_LF_V1') { return Get-CanonicalUtf8LfSha256 $path }
     throw [InvalidOperationException]::new('invalid_hash_profile')
 }
 
-function Get-PayloadComponentId($payload) {
+function Get-PayloadSourceIdentity($payload) {
     if ($null -ne $payload.sourcePackage -and -not [string]::IsNullOrWhiteSpace([string]$payload.sourcePackage.packageId)) {
-        return [string]$payload.sourcePackage.packageId
+        return [pscustomobject]@{ Kind = 'package'; Id = [string]$payload.sourcePackage.packageId }
     }
     if ($null -ne $payload.sourceProject -and -not [string]::IsNullOrWhiteSpace([string]$payload.sourceProject.projectId)) {
-        return [string]$payload.sourceProject.projectId
+        return [pscustomobject]@{ Kind = 'project'; Id = [string]$payload.sourceProject.projectId }
     }
     if ($null -ne $payload.sourceBuild -and -not [string]::IsNullOrWhiteSpace([string]$payload.sourceBuild.projectId)) {
-        return [string]$payload.sourceBuild.projectId
+        return [pscustomobject]@{ Kind = 'build'; Id = [string]$payload.sourceBuild.projectId }
     }
     return $null
 }
@@ -93,6 +110,23 @@ try {
     $resolvedBundleRoot = [IO.Path]::GetFullPath($BundleRoot)
     $resolvedManifestPath = [IO.Path]::GetFullPath($ManifestPath)
     $resolvedPayloadPath = [IO.Path]::GetFullPath($PayloadManifestPath)
+    $resolvedStagingRoot = [IO.Path]::GetFullPath($ApprovedStagingRoot)
+    $resolvedIncludePath = [IO.Path]::GetFullPath($InnoIncludePath)
+    $bundlePrefix = $resolvedBundleRoot.TrimEnd('\') + '\'
+    $stagingPrefix = $resolvedStagingRoot.TrimEnd('\') + '\'
+    if (-not $resolvedManifestPath.StartsWith($bundlePrefix, [StringComparison]::OrdinalIgnoreCase)) {
+        Write-ResultAndExit $false 'distribution_notice_bundle_invalid' @('manifest_outside_bundle') 0 1
+    }
+    if (-not $resolvedIncludePath.StartsWith($stagingPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+        Write-ResultAndExit $false 'distribution_notice_output_out_of_bounds' @('output_out_of_bounds') 0 1
+    }
+    if ((Test-PathChainHasReparsePoint $resolvedBundleRoot) -or
+        (Test-PathChainHasReparsePoint $resolvedManifestPath) -or
+        (Test-PathChainHasReparsePoint $resolvedPayloadPath) -or
+        (Test-PathChainHasReparsePoint $resolvedStagingRoot) -or
+        (Test-PathChainHasReparsePoint $resolvedIncludePath)) {
+        Write-ResultAndExit $false 'distribution_notice_reparse_point' @('reparse_point_rejected') 0 1
+    }
 
     if (-not (Test-Path -LiteralPath $resolvedManifestPath -PathType Leaf) -or
         -not (Test-Path -LiteralPath $resolvedPayloadPath -PathType Leaf)) {
@@ -127,6 +161,9 @@ try {
     }
     catch {
         Write-ResultAndExit $false 'distribution_notice_bundle_invalid' @('invalid_notice_index_path') $payloadCount 1
+    }
+    if (Test-PathChainHasReparsePoint $noticeIndexPath) {
+        Write-ResultAndExit $false 'distribution_notice_reparse_point' @('reparse_point_rejected') $payloadCount 1
     }
     if (-not (Test-Path -LiteralPath $noticeIndexPath -PathType Leaf)) {
         $blockers.Add('notice_index_missing')
@@ -191,6 +228,9 @@ try {
             catch {
                 Write-ResultAndExit $false 'distribution_notice_bundle_invalid' @('invalid_license_notice_path') $payloadCount 1
             }
+            if (Test-PathChainHasReparsePoint $resolvedFile) {
+                Write-ResultAndExit $false 'distribution_notice_reparse_point' @('reparse_point_rejected') $payloadCount 1
+            }
             if (-not (Test-Path -LiteralPath $resolvedFile -PathType Leaf)) {
                 $blockers.Add(('license_notice_file_missing:' + $componentId))
                 continue
@@ -250,9 +290,10 @@ try {
                     Write-ResultAndExit $false 'distribution_notice_bundle_invalid' @('duplicate_unknown_or_unmapped_component') $payloadCount 1
                 }
                 $mappedPaths[$payloadPath] = $true
-                $derivedComponentId = Get-PayloadComponentId $payloadByPath[$payloadPath]
-                if ([string]::IsNullOrWhiteSpace($derivedComponentId) -or
-                    [string]$component.payloadComponentId -ne $derivedComponentId) {
+                $derivedSource = Get-PayloadSourceIdentity $payloadByPath[$payloadPath]
+                if ($null -eq $derivedSource -or
+                    [string]$component.payloadSourceKind -ne $derivedSource.Kind -or
+                    [string]$component.payloadComponentId -ne $derivedSource.Id) {
                     $blockers.Add(('payload_component_binding_mismatch:' + $componentId))
                 }
                 $mappingTarget = $payloadPath
@@ -310,11 +351,14 @@ try {
         $includeLines.Add(('Source: "..\distribution\licenses\' + $licensePath + '"; DestDir: "{app}\licenses' + $destinationSuffix + '"; Flags: ignoreversion'))
     }
 
-    $includeDirectory = [IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($InnoIncludePath))
+    $includeDirectory = [IO.Path]::GetDirectoryName($resolvedIncludePath)
+    if (Test-PathChainHasReparsePoint $resolvedIncludePath) {
+        Write-ResultAndExit $false 'distribution_notice_reparse_point' @('reparse_point_rejected') $payloadCount 1
+    }
     [IO.Directory]::CreateDirectory($includeDirectory) | Out-Null
-    $temporaryInclude = [IO.Path]::GetFullPath($InnoIncludePath) + '.tmp'
+    $temporaryInclude = $resolvedIncludePath + '.tmp'
     [IO.File]::WriteAllLines($temporaryInclude, $includeLines, [Text.UTF8Encoding]::new($true))
-    Move-Item -LiteralPath $temporaryInclude -Destination ([IO.Path]::GetFullPath($InnoIncludePath)) -Force
+    Move-Item -LiteralPath $temporaryInclude -Destination $resolvedIncludePath -Force
 
     Write-ResultAndExit $true $null @() $payloadCount 0
 }

@@ -35,7 +35,8 @@ function New-PassFixture([string]$root) {
     $noticeIndexPath = Join-Path $bundleRoot 'notice-index.json'
     $manifestPath = Join-Path $bundleRoot 'bundle-manifest.json'
     $payloadPath = Join-Path $root 'payload-manifest.json'
-    $includePath = Join-Path $root 'distribution-notice-files.iss'
+    $stagingRoot = Join-Path $root 'approved-staging'
+    $includePath = Join-Path $stagingRoot 'distribution-notice-files.iss'
 
     [IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($licensePath)) | Out-Null
     [IO.File]::WriteAllText($licensePath, "FAKE LICENSE FOR TESTS ONLY`n", [Text.UTF8Encoding]::new($false))
@@ -93,6 +94,7 @@ function New-PassFixture([string]$root) {
                 componentId = 'alpha'
                 version = '1.0.0'
                 artifactScope = 'installedPayload'
+                payloadSourceKind = 'package'
                 payloadComponentId = 'alpha'
                 sourceBinding = [ordered]@{
                     kind = 'test-fixture'
@@ -145,9 +147,11 @@ function New-PassFixture([string]$root) {
     Write-Utf8Json $manifestPath $manifest
 
     return [pscustomobject]@{
+        Root = $root
         BundleRoot = $bundleRoot
         ManifestPath = $manifestPath
         PayloadPath = $payloadPath
+        StagingRoot = $stagingRoot
         IncludePath = $includePath
     }
 }
@@ -157,6 +161,7 @@ function Invoke-Validator($fixture) {
         -ManifestPath $fixture.ManifestPath `
         -BundleRoot $fixture.BundleRoot `
         -PayloadManifestPath $fixture.PayloadPath `
+        -ApprovedStagingRoot $fixture.StagingRoot `
         -InnoIncludePath $fixture.IncludePath 2>&1)
     return [pscustomobject]@{
         ExitCode = $LASTEXITCODE
@@ -254,7 +259,53 @@ try {
     Write-Utf8Json $illegalPath.ManifestPath $illegalManifest
     Assert-Failure $illegalPath 'distribution_notice_bundle_invalid' 'invalid_license_notice_layout'
 
-    Write-Host 'FAIL-CLOSED fixtures: 8 passed'
+    $wrongSourceKind = New-PassFixture (Join-Path $testRoot 'wrong-source-kind')
+    $wrongSourceManifest = Read-Json $wrongSourceKind.ManifestPath
+    $wrongSourceManifest.components[0].payloadSourceKind = 'project'
+    Write-Utf8Json $wrongSourceKind.ManifestPath $wrongSourceManifest
+    Assert-Failure $wrongSourceKind 'distribution_notice_bundle_incomplete' 'payload_component_binding_mismatch:alpha'
+
+    $outputEscape = New-PassFixture (Join-Path $testRoot 'output-escape')
+    $outputEscape.IncludePath = Join-Path $outputEscape.Root 'outside\distribution-notice-files.iss'
+    Assert-Failure $outputEscape 'distribution_notice_output_out_of_bounds' 'output_out_of_bounds'
+
+    $reparseBundle = New-PassFixture (Join-Path $testRoot 'reparse-bundle')
+    $bundleAlias = Join-Path $reparseBundle.Root 'bundle-alias'
+    New-Item -ItemType Junction -Path $bundleAlias -Target $reparseBundle.BundleRoot | Out-Null
+    $reparseBundle.BundleRoot = $bundleAlias
+    $reparseBundle.ManifestPath = Join-Path $bundleAlias 'bundle-manifest.json'
+    Assert-Failure $reparseBundle 'distribution_notice_reparse_point' 'reparse_point_rejected'
+
+    $reparseMaterial = New-PassFixture (Join-Path $testRoot 'reparse-material')
+    $betaDirectory = Join-Path $reparseMaterial.BundleRoot 'files\beta-installer'
+    $materialTarget = Join-Path $reparseMaterial.Root 'material-target'
+    [IO.Directory]::CreateDirectory($materialTarget) | Out-Null
+    Move-Item -LiteralPath (Join-Path $betaDirectory 'LICENSE.txt') -Destination (Join-Path $materialTarget 'LICENSE.txt')
+    Remove-Item -LiteralPath $betaDirectory -Force
+    New-Item -ItemType Junction -Path $betaDirectory -Target $materialTarget | Out-Null
+    Assert-Failure $reparseMaterial 'distribution_notice_reparse_point' 'reparse_point_rejected'
+
+    $reparseIndex = New-PassFixture (Join-Path $testRoot 'reparse-index')
+    $indexTarget = Join-Path $reparseIndex.Root 'index-target'
+    [IO.Directory]::CreateDirectory($indexTarget) | Out-Null
+    Move-Item -LiteralPath (Join-Path $reparseIndex.BundleRoot 'notice-index.json') -Destination (Join-Path $indexTarget 'notice-index.json')
+    $indexLink = Join-Path $reparseIndex.BundleRoot 'index-link'
+    New-Item -ItemType Junction -Path $indexLink -Target $indexTarget | Out-Null
+    $reparseIndexManifest = Read-Json $reparseIndex.ManifestPath
+    $reparseIndexManifest.noticeIndex.path = 'index-link/notice-index.json'
+    Write-Utf8Json $reparseIndex.ManifestPath $reparseIndexManifest
+    Assert-Failure $reparseIndex 'distribution_notice_reparse_point' 'reparse_point_rejected'
+
+    $reparseInclude = New-PassFixture (Join-Path $testRoot 'reparse-include')
+    [IO.Directory]::CreateDirectory($reparseInclude.StagingRoot) | Out-Null
+    $includeTarget = Join-Path $reparseInclude.Root 'include-target'
+    [IO.Directory]::CreateDirectory($includeTarget) | Out-Null
+    $includeLink = Join-Path $reparseInclude.StagingRoot 'linked'
+    New-Item -ItemType Junction -Path $includeLink -Target $includeTarget | Out-Null
+    $reparseInclude.IncludePath = Join-Path $includeLink 'distribution-notice-files.iss'
+    Assert-Failure $reparseInclude 'distribution_notice_reparse_point' 'reparse_point_rejected'
+
+    Write-Host 'FAIL-CLOSED fixtures: 14 passed'
 
     $currentInclude = Join-Path $testRoot 'current-repository\distribution-notice-files.iss'
     $sentinelInstaller = Join-Path $testRoot 'current-repository\release-output.exe'
@@ -265,6 +316,7 @@ try {
         BundleRoot = Join-Path $repoRoot 'distribution\licenses'
         ManifestPath = Join-Path $repoRoot 'distribution\licenses\bundle-manifest.json'
         PayloadPath = Join-Path $repoRoot 'docs\baselines\V0.6.0_STAGE4_C0_PAYLOAD_ATTRIBUTION.json'
+        StagingRoot = Join-Path $testRoot 'current-repository'
         IncludePath = $currentInclude
     }
     $currentRun = Invoke-Validator $currentFixture
@@ -285,6 +337,8 @@ try {
     Assert-True ($gatePosition -lt $restorePosition) 'The bundle gate must run before restore.'
     Assert-True ($gatePosition -lt $resetPosition) 'The bundle gate must run before publish directory mutation.'
     Assert-True ($gatePosition -lt $isccPosition) 'The bundle gate must run before installer compilation.'
+    Assert-True ($releaseScript.Contains("`$distributionStagingRoot = Join-Path `$artifactsRoot 'staging'")) 'The release script must bind generated evidence to artifacts/staging.'
+    Assert-True ($releaseScript.Contains('-ApprovedStagingRoot $distributionStagingRoot')) 'The release script must pass the approved staging root to the validator.'
 
     $iss = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'installer\ScreenGuideDesktop.iss')
     Assert-True ($iss.Contains('#include "..\artifacts\staging\distribution-notice-files.iss"')) 'Inno must require the validated generated include.'
@@ -292,7 +346,7 @@ try {
 
     Write-Host 'CURRENT bundle: blocked before installer mutation'
     Write-Host 'RELEASE wiring: passed'
-    Write-Host 'TOTAL: 11 targeted cases passed'
+    Write-Host 'TOTAL: 17 targeted cases passed'
 }
 finally {
     $fullTestRoot = [IO.Path]::GetFullPath($testRoot)

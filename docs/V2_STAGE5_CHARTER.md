@@ -26,7 +26,7 @@ Stage 5 的用户价值是给出可核验、失败关闭的答案：**是否可�
 ### S5-R1 Distribution Contract & License Inventory
 
 - Offline Inventory 与 Official Evidence Verification：**PASS**；唯一详细证据见 [S5-R1 分发许可与归属清单](V2_STAGE5_DISTRIBUTION_LICENSE_INVENTORY.md)。
-- Attribution / NOTICE Contract：**S5-R1_CONTRACT_PASS**；Packaging / NOTICE Gate Infrastructure：**FAIL_CLOSED_INFRASTRUCTURE_IMPLEMENTED**；NOTICE Implementation：**NOTICE_IMPLEMENTATION_PENDING**；External Distribution：**EXTERNAL_DISTRIBUTION_BLOCKED**。
+- Attribution / NOTICE Contract：**S5-R1_CONTRACT_PASS**；Packaging / NOTICE Gate Infrastructure：**FAIL_CLOSED_INFRASTRUCTURE_IMPLEMENTED**。冻结 payload 已完成 539/539 条确定性 component/version index，七个非 win-x64 Sherpa runtime 与中文语音模型排除断言通过；路径重解析与 staging 越界均失败关闭。真实 LICENSE/NOTICE 材料及逐记录 NOTICE path 尚未布置，因此 NOTICE Implementation：**NOTICE_IMPLEMENTATION_PENDING**；External Distribution：**EXTERNAL_DISTRIBUTION_BLOCKED**。
 - 只读盘点安装包、语音模型、第三方资产和依赖的许可与分发边界。
 - 为每项给出可分发、不可分发或证据不足的明确判定；证据不足时失败关闭。
 - 不下载模型，不接受许可条款，不采购服务，不修改 V0.6.0 tag 或产物。

@@ -16,7 +16,7 @@
 - External Distribution：**EXTERNAL_DISTRIBUTION_BLOCKED**
 - Stage 5 产品与可分发安装包实施：**NOT_STARTED / NOT_AUTHORIZED**；本轮只实现分发构建前置门禁，不产生可分发安装包。
 
-本清单不是法律意见，不建立 `PROHIBITED` 或 `INCOMPATIBLE` 结论。`S5-R1_CONTRACT_PASS` 只表示四轴归属、manifest schema、NOTICE layout 与授权门禁已经形成合同；`FAIL_CLOSED_INFRASTRUCTURE_IMPLEMENTED` 只表示 release 脚本和 Inno 已接入确定性离线验证器。当前受版本控制的 bundle skeleton 仍含 OPEN/PARTIAL、没有可冒充正文的 LICENSE/NOTICE 文件和完整 payload 映射，因此稳定返回 `distribution_notice_bundle_incomplete`，在 restore、publish 和 installer compile 前停止。它不表示 NOTICE 已闭合或产品可对外分发。`UNKNOWN_BLOCKED_FOR_DISTRIBUTION` 表示当前证据不足，必须在分发前补齐材料并重新获得相应 Owner 授权；它不等于认定权利人禁止分发。
+本清单不是法律意见，不建立 `PROHIBITED` 或 `INCOMPATIBLE` 结论。`S5-R1_CONTRACT_PASS` 只表示四轴归属、manifest schema、NOTICE layout 与授权门禁已经形成合同；`FAIL_CLOSED_INFRASTRUCTURE_IMPLEMENTED` 只表示 release 脚本和 Inno 已接入确定性离线验证器。当前受版本控制的 bundle skeleton 已由冻结 attribution 机械生成 539/539 条 payload→显式 component/version 映射，但仍含 OPEN/PARTIAL、没有可冒充正文的 LICENSE/NOTICE 文件，各记录的 `licenseNoticePaths` 仍为空，因此稳定返回 `distribution_notice_bundle_incomplete`，在 restore、publish 和 installer compile 前停止。它不表示 NOTICE 已闭合或产品可对外分发。`UNKNOWN_BLOCKED_FOR_DISTRIBUTION` 表示当前证据不足，必须在分发前补齐材料并重新获得相应 Owner 授权；它不等于认定权利人禁止分发。
 
 ## 2. 证据边界与方法
 
@@ -334,7 +334,7 @@
 - 同一许可证不能仅凭家族相似性覆盖不同 package/version；缺失映射必须失败关闭；
 - 安装目标 layout 已由 fail-closed 生成器固定：索引进入安装根、bundle manifest 进入 `distribution/`、经验证材料进入 `licenses/<component>/`；当前 skeleton 无合格正文与完整映射，因而不会生成 Inno include，也不会形成实际 installer layout。该技术门禁不是分发许可或法律结论。
 
-`distribution/licenses/bundle-manifest.json` 与 `notice-index.json` 是唯一受版本控制的 bundle/index skeleton；`scripts/Test-DistributionNoticeBundle.ps1` 只在四轴均为 `VERIFIED`、文件/hash/路径/组件与 539 条 payload 映射全部闭合后，原子生成不含通配符和 optional flag 的 Inno 文件清单。`build-desktop-release.ps1` 在任何 restore 或输出目录改动前调用门禁，`ScreenGuideDesktop.iss` 强制 include 该生成文件。当前真实清单保持失败关闭，未执行 build/installer，也未改变 V0.6.0 frozen identity。补齐真实材料、安装后验证与形成新 release identity 仍需单独 S5-R1 授权；不得塞入 S5-R2 或拖到 S5-R4。
+`distribution/licenses/bundle-manifest.json` 与 `notice-index.json` 是唯一受版本控制的 bundle/index skeleton；`scripts/New-DistributionNoticeIndex.ps1` 按 package/project/build + ID + exact version 的显式 catalog 确定性生成 539/539 条映射，目录缺失、冲突或排除项进入 payload 均失败关闭。静态排除证据确认七个非 win-x64 Sherpa runtime package 与中文语音模型目录均未进入 539 条 payload；中文模型仍为 `VERIFIED-EXCLUDED`，不改变未来许可 Gate。`scripts/Test-DistributionNoticeBundle.ps1` 只在四轴均为 `VERIFIED`、文件/hash/路径/组件与 NOTICE 映射全部闭合后，原子生成不含通配符和 optional flag 的 Inno 文件清单；bundle、材料、index、staging/include 路径链出现 NTFS reparse point 或 include 越出调用方明确批准的 staging root 时均稳定失败关闭。`build-desktop-release.ps1` 在任何 restore 或输出目录改动前调用门禁，并把生成位置限定为 `artifacts/staging`；`ScreenGuideDesktop.iss` 强制 include 该生成文件。当前真实清单仍因材料与 NOTICE path 映射未闭合返回 `distribution_notice_bundle_incomplete`，不生成 include，未执行 build/installer，也未改变 V0.6.0 frozen identity。补齐真实材料、安装后验证与形成新 release identity 仍需单独 S5-R1 授权；不得塞入 S5-R2 或拖到 S5-R4。
 
 ### 12.5 Owner Decision Gate
 

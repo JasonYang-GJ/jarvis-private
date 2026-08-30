@@ -15,7 +15,8 @@ $hostProject = Join-Path $repoRoot 'src\ScreenGuide.DesktopHost\ScreenGuide.Desk
 $distributionBundleRoot = Join-Path $repoRoot 'distribution\licenses'
 $distributionBundleManifest = Join-Path $distributionBundleRoot 'bundle-manifest.json'
 $distributionPayloadManifest = Join-Path $repoRoot 'docs\baselines\V0.6.0_STAGE4_C0_PAYLOAD_ATTRIBUTION.json'
-$distributionInnoInclude = Join-Path $artifactsRoot 'staging\distribution-notice-files.iss'
+$distributionStagingRoot = Join-Path $artifactsRoot 'staging'
+$distributionInnoInclude = Join-Path $distributionStagingRoot 'distribution-notice-files.iss'
 $distributionBundleValidator = Join-Path $repoRoot 'scripts\Test-DistributionNoticeBundle.ps1'
 
 function Reset-BuildDirectory([string]$path) {
@@ -37,6 +38,7 @@ $distributionGateOutput = @(& powershell.exe -NoProfile -ExecutionPolicy Bypass 
     -ManifestPath $distributionBundleManifest `
     -BundleRoot $distributionBundleRoot `
     -PayloadManifestPath $distributionPayloadManifest `
+    -ApprovedStagingRoot $distributionStagingRoot `
     -InnoIncludePath $distributionInnoInclude 2>&1)
 $distributionGateExitCode = $LASTEXITCODE
 $distributionGateOutput | ForEach-Object { Write-Output $_ }
