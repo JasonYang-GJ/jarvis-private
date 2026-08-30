@@ -112,12 +112,12 @@ S3-R3 已完成范围：
 
 ## 阶段 4：体验与分发加固
 
-状态：进行中；S4-R1、S4-R2 与 S4-R3 已 `INTEGRATED_PASS`；S4-R4 Session runtime gate 有界化为待独立 QA 的开发候选。
+状态：进行中；S4-R1、S4-R2、S4-R3 与 S4-R4 均已 `INTEGRATED_PASS`。Stage 4 Final Freeze 尚未批准或执行，本状态不代表发布冻结；S4-R5 与 Stage 5 均未开始。
 
 - S4-R1 Window Identity v2：Host 可信 `{HWND, PID, ProcessStartTimeUtc, ProcessName, Title}`、schema v11/pre-v11、确认/UIA/捕获/回退/分析逐层 fail-closed；Desktop IPC 维持 v10。
 - S4-R2（已集成）：独立本机评测 Runner 以 1 次预热 + 20 次正式尝试统计语音/视觉失败率与 Stopwatch 延迟；真实语音 18/20、STOP 取消 PASS，真实视觉 20/20、identity-change fail-closed PASS；只输出脱敏汇总，不保存声音、识别正文或窗口图像；
 - S4-R3（已集成）：protocol v11 有界 bootstrap/delta/reset、消息 keyset 分页、精确 Turn 查询、Client 有界缓存，以及提交后 Task 事件同步；schema 保持 v11，不新增持久 delta 表；
-- S4-R4（开发候选）：抽取 Host 内部 Session/Turn 临时门闩注册表，以 holder+waiter 引用计数和同实例归零移除避免 Guid key 永久增长；不改变 SessionCoordinator 状态所有权、权限或事件合同；
+- S4-R4（已集成）：抽取 Host 内部 Session/Turn 临时门闩注册表，以 holder+waiter 引用计数和同实例归零移除避免 Guid key 永久增长；不改变 SessionCoordinator 状态所有权、权限或事件合同；
 - 后续只在新的批准切片中继续拆分 SessionCoordinator 大文件；
 - 语音模型许可证与下载更新方案；
 - 安装包数字签名、升级/回滚和发布自动化；

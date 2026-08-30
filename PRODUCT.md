@@ -1,6 +1,6 @@
-# 元枢产品事实（V0.5.0 / V2 阶段 3 正式冻结；Stage 4 R1/R2/R3 已集成，R4 候选）
+# 元枢产品事实（V0.5.0 / V2 阶段 3 正式冻结；Stage 4 R1/R2/R3/R4 已集成）
 
-> 当前产品事实的唯一入口。更新时间：2026-08-30。V0.5.0 / Stage 3 已正式冻结；Stage 4 的 S4-R1 Window Identity v2、S4-R2 本机真实使用评测与 S4-R3 有界 Session 投影均已完成集成，S4-R4 runtime gate 有界化为待独立 QA 的开发候选。
+> 当前产品事实的唯一入口。更新时间：2026-08-30。V0.5.0 / Stage 3 已正式冻结；Stage 4 的 S4-R1 Window Identity v2、S4-R2 本机真实使用评测、S4-R3 有界 Session 投影与 S4-R4 runtime gate 有界化均已 `INTEGRATED_PASS`。Stage 4 Final Freeze 尚未批准或执行，本状态不代表发布冻结，也不开始 S4-R5 或 Stage 5。
 
 ## 产品定位
 
@@ -44,7 +44,7 @@
 
 - UI 统一显示：理解中、回答中、执行中、查看窗口、编程任务运行中、等待项目、等待文件、等待窗口、等待窗口同意、等待确认、等待用户补充、已完成、已取消、失败和被重启中断。
 - S4-R3 已将 Desktop IPC 升为 protocol v11：`sessions.current` 只返回最多 32 个 Turn 与 50 条最新消息的 bootstrap；`sessions.wait` 返回 `NoChange`、最多 32 个 Turn/50 条消息的 delta，或 `ResetRequired`。消息历史通过每页最多 50 条的 keyset 游标读取，精确确认继续由 Host 权威 Turn 查询负责；客户端显示缓存不授予权限。
-- S4-R4 开发候选把 Session/Turn 临时操作门闩集中到 Host 内部单例注册表；holder 与 waiter 共同计数，空闲 key 会被移除。它只负责同 key 串行，不读取或决定 Session/Turn 状态、权限和事件。
+- S4-R4 已把 Session/Turn 临时操作门闩集中到 Host 内部单例注册表；holder 与 waiter 共同计数，空闲 key 会被移除。它只负责同 key 串行，不读取或决定 Session/Turn 状态、权限和事件。
 - IPC 服务具备监听失败重试、连接并发上限、忙碌响应和无请求连接超时，避免长轮询阻塞普通操作。
 - SQLite schema v7 保存 `sessions` 与 `session_turns`，并新增结构化 `ExpectedIntentKind`、`ExpectedTarget`、`PlanTarget`：应用绑定已发现的 Application ID，网站绑定规范化完整 HTTPS URI，Host 在规划和确认两处都做区分大小写的精确比较。
 
