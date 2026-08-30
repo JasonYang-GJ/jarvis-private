@@ -22,6 +22,7 @@ public sealed class AgentTaskExecutionService(
     TaskCancellationService cancellationService,
     TaskCancellationRegistry cancellationRegistry,
     TaskEvidenceService evidenceService,
+    TaskStateChangeHub taskStateChanges,
     TimeProvider timeProvider) : IAsyncDisposable
 {
     private readonly ConcurrentDictionary<Guid, Task> _attemptPumps = new();
@@ -353,6 +354,8 @@ public sealed class AgentTaskExecutionService(
                 requestedAt,
                 cancellationToken)
             .ConfigureAwait(false);
+        await PublishPersistedTaskStateAsync(taskId, finalized: false, cancellationToken)
+            .ConfigureAwait(false);
         var adapter = skillAdapters.GetRequired(invocation.SkillId);
         await adapter.CancelAsync(
                 new SkillRunReference(taskId, invocation.Id, run.ExternalRunId, attempt.Id),
@@ -468,16 +471,69 @@ public sealed class AgentTaskExecutionService(
                             skillEvent,
                             CancellationToken.None)
                         .ConfigureAwait(false);
+                    if (!IsTerminal(applied.Task.Status))
+                    {
+                        await PublishPersistedTaskStateAsync(
+                                reference.TaskId,
+                                finalized: false,
+                                CancellationToken.None)
+                            .ConfigureAwait(false);
+                    }
                 }
             }
         }
         finally
         {
             cancellationRegistry.Complete(reference.TaskId);
-            _ = await evidenceService.FinalizeIfTerminalAsync(reference.TaskId, CancellationToken.None)
+            var evidence = await evidenceService.FinalizeIfTerminalAsync(
+                    reference.TaskId,
+                    CancellationToken.None)
                 .ConfigureAwait(false);
+            if (evidence is not null)
+            {
+                await PublishPersistedTaskStateAsync(
+                        reference.TaskId,
+                        finalized: true,
+                        CancellationToken.None)
+                    .ConfigureAwait(false);
+            }
         }
     }
+
+    private async Task PublishPersistedTaskStateAsync(
+        Guid taskId,
+        bool finalized,
+        CancellationToken cancellationToken)
+    {
+        var taskTask = store.GetTaskAsync(taskId, cancellationToken);
+        var runTask = store.GetAgentRunByTaskAsync(taskId, cancellationToken);
+        var evidenceTask = finalized
+            ? store.GetTaskEvidenceAsync(taskId, cancellationToken)
+            : Task.FromResult<TaskEvidence?>(null);
+        await Task.WhenAll(taskTask, runTask, evidenceTask).ConfigureAwait(false);
+        var task = await taskTask.ConfigureAwait(false);
+        if (task is null)
+        {
+            return;
+        }
+
+        var run = await runTask.ConfigureAwait(false);
+        var evidence = await evidenceTask.ConfigureAwait(false);
+        taskStateChanges.Publish(new LocalTaskStateSnapshot(
+            task.Id,
+            task.Version,
+            run?.LastEventSequence ?? 0,
+            finalized && evidence is not null,
+            task.Status,
+            evidence?.UserSummary,
+            task.FailureCode,
+            task.FailureMessage,
+            task.CompletedAtUtc));
+    }
+
+    private static bool IsTerminal(AgentTaskStatus status) => status is
+        AgentTaskStatus.Succeeded or AgentTaskStatus.Failed or AgentTaskStatus.Cancelled
+        or AgentTaskStatus.Interrupted;
 
     private async Task<AgentEventApplyRequest> MapEventAsync(
         ISkillAdapter adapter,

@@ -367,6 +367,40 @@ public sealed class SqliteSessionStore : ISessionStore
         return await ReadTurnsAsync(command, cancellationToken).ConfigureAwait(false);
     }
 
+    public async Task<SessionTurnPage> GetTurnsPageAsync(
+        Guid sessionId,
+        int? beforeSequenceNumber,
+        int pageSize,
+        CancellationToken cancellationToken = default)
+    {
+        if (pageSize is < 1 or > 32)
+        {
+            throw new ArgumentOutOfRangeException(nameof(pageSize));
+        }
+
+        await using var connection = await OpenAsync(cancellationToken).ConfigureAwait(false);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT * FROM session_turns
+            WHERE session_id = $id
+              AND ($beforeSequenceNumber IS NULL OR sequence_number < $beforeSequenceNumber)
+            ORDER BY sequence_number DESC
+            LIMIT $limit;
+            """;
+        Add(command, "$id", sessionId);
+        command.Parameters.AddWithValue(
+            "$beforeSequenceNumber",
+            beforeSequenceNumber is { } value ? value : DBNull.Value);
+        command.Parameters.AddWithValue("$limit", pageSize + 1);
+        var descending = await ReadTurnsAsync(command, cancellationToken).ConfigureAwait(false);
+        var hasMore = descending.Count > pageSize;
+        var items = descending.Take(pageSize).Reverse().ToArray();
+        return new SessionTurnPage(
+            items,
+            hasMore && items.Length > 0 ? items[0].SequenceNumber : null,
+            hasMore);
+    }
+
     public async Task<IReadOnlyList<SessionTurnRecord>> GetActiveTurnsAsync(
         Guid sessionId,
         CancellationToken cancellationToken = default)

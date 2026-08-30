@@ -31,7 +31,7 @@ public sealed class LocalTaskEntryService(
     AgentTaskExecutionService executionService,
     DesktopHostState hostState,
     ProjectInspector projectInspector,
-    TimeProvider timeProvider)
+    TimeProvider timeProvider) : ILocalTaskStateReader
 {
     public Task<IReadOnlyList<ProjectRecord>> GetAuthorizedProjectsAsync(
         CancellationToken cancellationToken = default) =>
@@ -167,6 +167,38 @@ public sealed class LocalTaskEntryService(
             await evidenceTask.ConfigureAwait(false),
             await resourceScopesTask.ConfigureAwait(false),
             await skillInvocationsTask.ConfigureAwait(false));
+    }
+
+    public async Task<LocalTaskStateSnapshot?> ReadTaskStateAsync(
+        Guid taskId,
+        CancellationToken cancellationToken = default)
+    {
+        var taskTask = store.GetTaskAsync(taskId, cancellationToken);
+        var runTask = store.GetAgentRunByTaskAsync(taskId, cancellationToken);
+        var evidenceTask = store.GetTaskEvidenceAsync(taskId, cancellationToken);
+        await Task.WhenAll(taskTask, runTask, evidenceTask).ConfigureAwait(false);
+        var task = await taskTask.ConfigureAwait(false);
+        if (task is null)
+        {
+            return null;
+        }
+
+        var run = await runTask.ConfigureAwait(false);
+        var evidence = await evidenceTask.ConfigureAwait(false);
+        var terminal = task.Status is Core.Tasking.TaskStatus.Succeeded
+            or Core.Tasking.TaskStatus.Failed
+            or Core.Tasking.TaskStatus.Cancelled
+            or Core.Tasking.TaskStatus.Interrupted;
+        return new LocalTaskStateSnapshot(
+            task.Id,
+            task.Version,
+            run?.LastEventSequence ?? 0,
+            terminal && evidence is not null,
+            task.Status,
+            evidence?.UserSummary,
+            task.FailureCode,
+            task.FailureMessage,
+            task.CompletedAtUtc);
     }
 
     public async Task<LocalTaskCommandResult> CreateTaskAsync(

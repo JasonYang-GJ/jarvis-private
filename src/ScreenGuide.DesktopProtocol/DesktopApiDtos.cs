@@ -194,7 +194,52 @@ public sealed record CancelSessionTurnRequestDto(
 
 public sealed record WaitForSessionUpdateRequestDto(
     long KnownChangeVersion,
+    int WaitMilliseconds = 20_000,
+    string? CoordinatorInstanceId = null,
+    DateTimeOffset? CoordinatorStartedAtUtc = null,
+    Guid? SessionId = null,
+    long KnownMessageSequenceNumber = 0);
+
+public sealed record SessionProjectionCursorDto(
+    string CoordinatorInstanceId,
+    DateTimeOffset CoordinatorStartedAtUtc,
+    Guid SessionId,
+    long KnownChangeVersion,
+    long KnownMessageSequenceNumber,
     int WaitMilliseconds = 20_000);
+
+public sealed record SessionProjectionUpdateDto(
+    string Kind,
+    long ChangeVersion,
+    string CoordinatorInstanceId,
+    DateTimeOffset CoordinatorStartedAtUtc,
+    Guid? SessionId,
+    IReadOnlyList<UnifiedSessionTurnDto> TurnUpserts,
+    IReadOnlyList<ConversationMessageDto> MessageUpserts,
+    long LastMessageSequenceNumber,
+    string? ResetReason = null,
+    SessionSnapshotDto? Bootstrap = null);
+
+public sealed record SessionMessagesPageRequestDto(
+    Guid SessionId,
+    long? BeforeSequenceNumber,
+    int PageSize = 50);
+
+public sealed record SessionMessagesPageDto(
+    string CoordinatorInstanceId,
+    DateTimeOffset CoordinatorStartedAtUtc,
+    Guid SessionId,
+    IReadOnlyList<ConversationMessageDto> Messages,
+    long? NextBeforeSequenceNumber,
+    bool HasMore);
+
+public sealed record SessionTurnGetRequestDto(Guid SessionId, Guid TurnId);
+
+public sealed record SessionTurnDetailsDto(
+    string CoordinatorInstanceId,
+    DateTimeOffset CoordinatorStartedAtUtc,
+    Guid SessionId,
+    UnifiedSessionTurnDto Turn);
 
 public sealed record SessionTurnCommandResultDto(
     Guid SessionId,

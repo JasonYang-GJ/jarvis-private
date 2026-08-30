@@ -59,7 +59,7 @@ V0.4.0 Stage 2 正式源码由下面这些内容共同组成：
 | 模块 | 当前职责 | 不应承担 |
 |---|---|---|
 | `ScreenGuide.DesktopClient` | WPF 界面、托盘、可见确认、Host 生命周期、语音交互、Session 状态呈现 | 直接执行动作、直接读写 SQLite、直接调用 Codex |
-| `ScreenGuide.DesktopProtocol` | IPC protocol v10、Session/AI/显式记忆与逐 Turn 出站确认 DTO、当前用户 Pipe 客户端、跨 IPC 敏感文本清理 | 业务规则、权限判断、Key 或记忆密文持久化和模型调用 |
+| `ScreenGuide.DesktopProtocol` | IPC protocol v11、Session 有界投影/游标页/精确 Turn、AI/显式记忆与逐 Turn 出站确认 DTO、当前用户 Pipe 客户端、跨 IPC 敏感文本清理 | 业务规则、权限判断、Key 或记忆密文持久化和模型调用 |
 | `ScreenGuide.DesktopHost` | SessionCoordinator、业务编排、MemoryService、权限、恢复、审计、增量状态通知 | 让 UI 绕过 Host Service 直接访问存储 |
 | `ScreenGuide.AI.Core` | 供应商无关 Chat Model 契约、Provider Registry、Model Router、Prompt Registry、语义建议校验及确定性意图规划 | Provider HTTP/CLI 细节、自由执行工具或隐式授予权限 |
 | `ScreenGuide.AI.DeepSeek` | 固定 DeepSeek 官方目的地的普通聊天 HTTP/SSE Provider、错误和健康映射 | 保存 Key、决定 Session、编程 Agent 或电脑权限 |
@@ -169,11 +169,12 @@ V0.4.0 Stage 2 正式源码由下面这些内容共同组成：
 - DesktopClient 与 DesktopHost 使用当前 Windows 用户专属 Named Pipe，当前候选 protocol v10；v10 增加逐 Turn 记忆选择和出站确认，v9/v10 不混用。
 - v8 新增 `ai.settings.get`、`ai.chat-route.set`、`ai.credentials.set/delete` 和 `ai.provider.health`。AI 设置 DTO 只返回 Provider/Model、能力、数据目的地、健康和配置状态，绝不返回完整 Key。
 - 普通聊天路由存入本地 `settings/ai-settings.json`；Key 单独存入 DPAPI 密文。设置页明确显示同一 Session 的既有历史会随下一条消息发送给新 Provider；当前运行回答不切换。
-- `sessions.wait` 使用最长 30 秒的本机长轮询：只有 ChangeVersion 变化或等待超时才返回快照；DesktopClient 当前使用 20 秒等待。
-- Session 变化通过进程内 ChangeVersion 唤醒等待者；Host 重启后版本从进程初始值重新开始。快照中的 Coordinator 实例 ID 与启动时间划分版本世代，使客户端可以接受新 Host 的较小版本并拒绝旧 Host 的迟到结果。
+- `sessions.current` 返回最多 32 个最新 Turn、全部非终态 Turn 和 50 条最新消息的有界 bootstrap；`sessions.messages.page` 使用 `(sequence_number < cursor)` keyset 分页，每页最多 50 条；`sessions.turn.get` 读取精确权威 Turn。
+- `sessions.wait` 使用最长 30 秒的本机长轮询，返回 `NoChange`、最多 32 个 Turn/50 条消息 upsert 的 `Delta`，或 `ResetRequired`。Host journal 只是有界唤醒/投影状态；SQLite Store 仍是事实真源，不建立持久 delta 表。
+- Host 重启、Session 切换、旧 Coordinator 世代、journal gap/overflow 或响应倒退均要求 reset。Coordinator 实例 ID、启动时间、Session ID 和 ChangeVersion 共同绑定响应；DesktopClient 只维护有界显示缓存，按消息 ID+序号去重，不能用缓存授予确认或动作权限。
 - IPC 服务将并发连接限制为 64，另保留 8 个忙碌响应槽；未发送首个请求的连接 1 秒释放，监听临时错误会退避重试。
 - 无效长度、无效 JSON 等坏请求帧只记录并关闭该连接，不会让 Host 接受循环或关停流程失败。
-- 当前 Session 快照仍包含该 Session 的全部 Turn、Conversation 消息和项目名称查询。长历史的快照体积与数据库读取仍是后续性能技术债。
+- 单次投影软上限为 512 KiB，Named Pipe 仍保留 4 MiB 硬帧上限；单条内容导致超限时稳定失败关闭，不截断内容。
 
 ## 9. AI、Prompt 与模型接入
 
@@ -261,8 +262,8 @@ Codex 普通聊天适配器由 `CodexChatModelProvider` 承载，但生产策略
 ## 12. 当前主要技术债
 
 - `SessionCoordinator.cs`、`MainWindow.xaml.cs`、`SqliteTaskStore.cs` 等文件较大；阶段 1 为稳定边界保留了集中实现，后续只能在测试保护下逐步拆分。
-- Session 快照随完整会话历史增长；ChangeVersion 是单 Host 进程内信号，实例 ID/启动时间只解决重启后的快照世代判断，不是跨进程持久事件日志。
-- 编程任务监视器仍在 Host 内部定时查询 Task 状态；这不等于 DesktopClient 的全量轮询，但仍可在后续改为更直接的任务事件。
+- ChangeVersion 与有界 Host journal 仍是单 Host 进程内的显示唤醒状态，不是持久事件日志；journal gap 必须回到 SQLite 有界 bootstrap。
+- 编程 Task 状态由 `TaskStateChangeHub` 在持久化提交后发布唤醒提示。Session 同步器先订阅游标、再做一次轻量权威读取，忽略重复/倒序通知；终态只有证据最终提交后才投影，已移除 250ms 轮询和周期性完整 Task Details 读取。
 - 单窗口身份已绑定 HWND、PID、进程启动时间、进程名和标题；公开 `desktop.action.execute` 不把客户端 HWND/标题当作窗口授权，Session Host 冻结的完整身份会在 UI Automation 控件读取、写入和提交前重复核验。动态标题变化会保守地要求重新确认，这是防止 HWND/PID 复用和目标漂移的安全取舍。
 - DeepSeek/Qwen 真实验收是已冻结的精确 SHA 证据；日后修改 Provider 或模型合同时必须对新 SHA 重新获得最小真实请求授权，不得泛化旧结论。
 - Codex 普通聊天只保留 `codex-default` 描述并在生产策略下失败关闭，不提供真实普通聊天模型或 Usage；这不影响独立 Codex 编程 Agent。

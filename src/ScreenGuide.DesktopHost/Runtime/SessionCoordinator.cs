@@ -36,9 +36,11 @@ public interface ISessionMemoryConsentPublicationObserver
 /// </summary>
 public sealed class SessionCoordinator(
     ISessionStore sessionStore,
+    IConversationStore conversationStore,
     ConversationService conversations,
     AssistantCommandService assistantCommands,
     LocalTaskEntryService tasks,
+    SessionTaskStateSynchronizer taskStateSynchronizer,
     DesktopHostState hostState,
     ModelRouter modelRouter,
     PromptRegistry prompts,
@@ -60,6 +62,7 @@ public sealed class SessionCoordinator(
     private readonly ConcurrentDictionary<Guid, MemoryOutboundPreparedConsent>
         _preparedMemoryConsents = new();
     private readonly object _changeGate = new();
+    private readonly SessionChangeJournal _changeJournal = new();
     private TaskCompletionSource<long> _nextChange = NewChangeSource();
     private long _changeVersion = 1;
 
@@ -295,7 +298,7 @@ public sealed class SessionCoordinator(
                 active.SetCompletion(Task.Run(
                     () => RunInitialTurnAsync(session, registeredTurn, active.Cancellation.Token),
                     CancellationToken.None));
-                PublishChange();
+                PublishChange(session.Id, registeredTurn);
                 return new SessionSubmitResult(session.Id, registeredTurn.Id, false);
             }
             finally
@@ -785,6 +788,141 @@ public sealed class SessionCoordinator(
         return await GetCurrentAsync(cancellationToken).ConfigureAwait(false);
     }
 
+    public async Task<LocalSessionProjectionUpdate> WaitForProjectionAsync(
+        string coordinatorInstanceId,
+        DateTimeOffset coordinatorStartedAtUtc,
+        Guid sessionId,
+        long knownChangeVersion,
+        long knownMessageSequenceNumber,
+        TimeSpan maximumWait,
+        CancellationToken cancellationToken = default)
+    {
+        if (maximumWait < TimeSpan.Zero || maximumWait > TimeSpan.FromSeconds(30))
+        {
+            throw new ArgumentOutOfRangeException(nameof(maximumWait));
+        }
+
+        if (!string.Equals(coordinatorInstanceId, _coordinatorInstanceId, StringComparison.Ordinal)
+            || coordinatorStartedAtUtc != _coordinatorStartedAtUtc)
+        {
+            return ResetProjection(sessionId, "coordinator_changed");
+        }
+
+        var currentSession = await sessionStore.GetCurrentSessionAsync(cancellationToken)
+            .ConfigureAwait(false);
+        if (currentSession is null || currentSession.Id != sessionId)
+        {
+            return ResetProjection(currentSession?.Id, "session_changed");
+        }
+
+        Task<long>? wait = null;
+        lock (_changeGate)
+        {
+            if (knownChangeVersion == _changeVersion)
+            {
+                wait = _nextChange.Task;
+            }
+        }
+
+        if (wait is not null)
+        {
+            try
+            {
+                await wait.WaitAsync(maximumWait, cancellationToken).ConfigureAwait(false);
+            }
+            catch (TimeoutException)
+            {
+            }
+        }
+
+        var currentVersion = ChangeVersion;
+        if (knownChangeVersion == currentVersion)
+        {
+            return new LocalSessionProjectionUpdate(
+                LocalSessionProjectionKind.NoChange,
+                currentVersion,
+                _coordinatorInstanceId,
+                _coordinatorStartedAtUtc,
+                sessionId,
+                [],
+                [],
+                knownMessageSequenceNumber);
+        }
+
+        if (knownChangeVersion < 0 || knownChangeVersion > currentVersion)
+        {
+            return ResetProjection(sessionId, "change_version_invalid");
+        }
+
+        var journal = _changeJournal.Read(knownChangeVersion, currentVersion, sessionId);
+        if (journal.ResetRequired)
+        {
+            return ResetProjection(sessionId, journal.ResetReason ?? "journal_gap");
+        }
+
+        var messageChanges = await conversationStore.GetMessageChangesAsync(
+                currentSession.ConversationId,
+                knownMessageSequenceNumber,
+                50,
+                cancellationToken)
+            .ConfigureAwait(false);
+        if (messageChanges.HasMore)
+        {
+            return ResetProjection(sessionId, "message_upsert_overflow");
+        }
+
+        return new LocalSessionProjectionUpdate(
+            LocalSessionProjectionKind.Delta,
+            currentVersion,
+            _coordinatorInstanceId,
+            _coordinatorStartedAtUtc,
+            sessionId,
+            journal.TurnUpserts,
+            messageChanges.Items,
+            messageChanges.LastSequenceNumber);
+    }
+
+    public async Task<LocalSessionMessagesPage> GetMessagesPageAsync(
+        Guid sessionId,
+        long? beforeSequenceNumber,
+        int pageSize,
+        CancellationToken cancellationToken = default)
+    {
+        var session = await RequireSessionAsync(sessionId, cancellationToken).ConfigureAwait(false);
+        var page = await conversationStore.GetMessagesPageAsync(
+                session.ConversationId,
+                beforeSequenceNumber,
+                pageSize,
+                cancellationToken)
+            .ConfigureAwait(false);
+        return new LocalSessionMessagesPage(
+            _coordinatorInstanceId,
+            _coordinatorStartedAtUtc,
+            sessionId,
+            page);
+    }
+
+    public async Task<LocalSessionTurnDetails> GetTurnDetailsAsync(
+        Guid sessionId,
+        Guid turnId,
+        CancellationToken cancellationToken = default)
+    {
+        _ = await RequireSessionAsync(sessionId, cancellationToken).ConfigureAwait(false);
+        var turn = await sessionStore.GetTurnAsync(turnId, cancellationToken).ConfigureAwait(false);
+        if (turn is null || turn.SessionId != sessionId)
+        {
+            throw new SessionProjectionException(
+                "session_turn_not_found",
+                "没有找到这条会话请求。");
+        }
+
+        return new LocalSessionTurnDetails(
+            _coordinatorInstanceId,
+            _coordinatorStartedAtUtc,
+            sessionId,
+            turn);
+    }
+
     public async Task<SessionRecoveryResult> RecoverAsync(
         CancellationToken cancellationToken = default)
     {
@@ -971,7 +1109,6 @@ public sealed class SessionCoordinator(
         finally
         {
             RemoveActiveWork(turn.Id);
-            PublishChange();
         }
     }
 
@@ -1036,10 +1173,8 @@ public sealed class SessionCoordinator(
             finally
             {
                 RemoveActiveWork(turn.Id);
-                PublishChange();
             }
         }, CancellationToken.None));
-        PublishChange();
         return active;
     }
 
@@ -1867,96 +2002,71 @@ public sealed class SessionCoordinator(
     {
         try
         {
-            while (!monitor.Cancellation.IsCancellationRequested)
-            {
-                var details = await tasks.GetTaskDetailsAsync(
-                        monitor.TaskId,
-                        monitor.Cancellation.Token)
-                    .ConfigureAwait(false);
-                if (details is null)
-                {
-                    await TryEndTurnAsync(
-                            monitor.TurnId,
-                            SessionTurnPhase.Failed,
-                            "task_missing",
-                            "编程任务记录已经不存在。")
-                        .ConfigureAwait(false);
-                    return;
-                }
-
-                var phase = details.Task.Status switch
-                {
-                    AgentTaskStatus.Pending or AgentTaskStatus.Running or
-                        AgentTaskStatus.CancellationRequested => SessionTurnPhase.ProgrammingTask,
-                    AgentTaskStatus.WaitingForUser => SessionTurnPhase.WaitingForUser,
-                    AgentTaskStatus.Succeeded => SessionTurnPhase.Completed,
-                    AgentTaskStatus.Cancelled => SessionTurnPhase.Cancelled,
-                    AgentTaskStatus.Interrupted => SessionTurnPhase.Interrupted,
-                    _ => SessionTurnPhase.Failed
-                };
-                var current = await sessionStore.GetTurnAsync(
-                        monitor.TurnId,
-                        monitor.Cancellation.Token)
-                    .ConfigureAwait(false);
-                if (current is null || SessionTurnPhases.IsTerminal(current.Phase))
-                {
-                    return;
-                }
-
-                if (current.Phase != phase
-                    || (phase == SessionTurnPhase.Completed
-                        && !string.Equals(current.ResultSummary, details.Evidence?.UserSummary, StringComparison.Ordinal)))
-                {
-                    await TransitionAsync(
-                            current.Id,
-                            turn => turn with
-                            {
-                                Phase = phase,
-                                MissingContext = phase == SessionTurnPhase.WaitingForUser
-                                    ? SessionMissingContext.UserInput
-                                    : SessionMissingContext.None,
-                                ResultSummary = details.Evidence?.UserSummary ?? turn.ResultSummary,
-                                FailureCode = phase == SessionTurnPhase.Failed
-                                    ? details.Task.FailureCode ?? "task_failed"
-                                    : null,
-                                FailureMessage = phase == SessionTurnPhase.Failed
-                                    ? details.Task.FailureMessage ?? "编程任务没有成功完成。"
-                                    : null,
-                                CompletedAtUtc = SessionTurnPhases.IsTerminal(phase)
-                                    ? details.Task.CompletedAtUtc ?? timeProvider.GetUtcNow()
-                                    : null
-                            },
-                            CancellationToken.None)
-                        .ConfigureAwait(false);
-                }
-
-                if (SessionTurnPhases.IsTerminal(phase))
-                {
-                    return;
-                }
-
-                await Task.Delay(TimeSpan.FromMilliseconds(250), monitor.Cancellation.Token)
-                    .ConfigureAwait(false);
-            }
+            await taskStateSynchronizer.RunAsync(
+                    monitor.TurnId,
+                    monitor.TaskId,
+                    (update, _) => ApplyTaskStateAsync(monitor, update),
+                    monitor.Cancellation.Token)
+                .ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (monitor.Cancellation.IsCancellationRequested)
         {
-        }
-        catch (Exception)
-        {
-            await TryEndTurnAsync(
-                    monitor.TurnId,
-                    SessionTurnPhase.Interrupted,
-                    "task_monitor_failed",
-                    "编程任务状态暂时无法继续同步，请在任务页查看实际状态。")
-                .ConfigureAwait(false);
         }
         finally
         {
             _taskMonitors.TryRemove(monitor.TurnId, out _);
             monitor.Cancellation.Dispose();
-            PublishChange();
         }
+    }
+
+    private async Task ApplyTaskStateAsync(
+        ActiveTaskMonitor monitor,
+        SessionTaskStateUpdate update)
+    {
+        if (update.TaskId != monitor.TaskId)
+        {
+            return;
+        }
+
+        var current = await sessionStore.GetTurnAsync(monitor.TurnId, CancellationToken.None)
+            .ConfigureAwait(false);
+        if (current is null
+            || current.TaskId != monitor.TaskId
+            || SessionTurnPhases.IsTerminal(current.Phase))
+        {
+            return;
+        }
+
+        var phase = Enum.Parse<SessionTurnPhase>(update.Phase, ignoreCase: false);
+        if (SessionTurnPhases.IsTerminal(phase) && !update.Finalized)
+        {
+            return;
+        }
+
+        if (current.Phase == phase
+            && string.Equals(current.ResultSummary, update.ResultSummary, StringComparison.Ordinal)
+            && string.Equals(current.FailureCode, update.FailureCode, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        await TransitionAsync(
+                current.Id,
+                turn => turn with
+                {
+                    Phase = phase,
+                    MissingContext = phase == SessionTurnPhase.WaitingForUser
+                        ? SessionMissingContext.UserInput
+                        : SessionMissingContext.None,
+                    ResultSummary = update.ResultSummary ?? turn.ResultSummary,
+                    FailureCode = update.FailureCode,
+                    FailureMessage = update.FailureMessage,
+                    CompletedAtUtc = SessionTurnPhases.IsTerminal(phase)
+                        ? update.CompletedAtUtc ?? timeProvider.GetUtcNow()
+                        : null
+                },
+                CancellationToken.None)
+            .ConfigureAwait(false);
     }
 
     private async Task<SessionRecord> RequireSessionAsync(
@@ -2213,7 +2323,7 @@ public sealed class SessionCoordinator(
                 timeProvider.GetUtcNow(),
                 cancellationToken)
             .ConfigureAwait(false);
-        PublishChange();
+        PublishChange(updated.SessionId, updated);
         return updated;
     }
 
@@ -2256,15 +2366,23 @@ public sealed class SessionCoordinator(
         {
             var before = ChangeVersion;
             var latestSessionTask = sessionStore.GetSessionAsync(session.Id, cancellationToken);
-            var turnsTask = sessionStore.GetTurnsAsync(session.Id, cancellationToken);
+            var turnsTask = sessionStore.GetTurnsPageAsync(
+                session.Id,
+                beforeSequenceNumber: null,
+                pageSize: 32,
+                cancellationToken);
             var activeTask = sessionStore.GetActiveTurnsAsync(session.Id, cancellationToken);
-            var detailsTask = conversations.GetDetailsAsync(session.ConversationId, cancellationToken);
+            var messagesTask = conversationStore.GetMessagesPageAsync(
+                session.ConversationId,
+                beforeSequenceNumber: null,
+                pageSize: 50,
+                cancellationToken);
             var projectsTask = tasks.GetAuthorizedProjectsAsync(cancellationToken);
             await Task.WhenAll(
                     latestSessionTask,
                     turnsTask,
                     activeTask,
-                    detailsTask,
+                    messagesTask,
                     projectsTask)
                 .ConfigureAwait(false);
             var after = ChangeVersion;
@@ -2274,7 +2392,9 @@ public sealed class SessionCoordinator(
             }
 
             var latestSession = await latestSessionTask.ConfigureAwait(false) ?? session;
-            var details = await detailsTask.ConfigureAwait(false);
+            var turns = await turnsTask.ConfigureAwait(false);
+            var messages = await messagesTask.ConfigureAwait(false);
+            var activeTurns = await activeTask.ConfigureAwait(false);
             var selectedName = latestSession.SelectedProjectId is { } selectedProjectId
                 ? (await projectsTask.ConfigureAwait(false))
                     .SingleOrDefault(project => project.Id == selectedProjectId)?.Name
@@ -2285,11 +2405,13 @@ public sealed class SessionCoordinator(
                 _coordinatorStartedAtUtc,
                 latestSession,
                 selectedName,
-                await turnsTask.ConfigureAwait(false),
-                await activeTask.ConfigureAwait(false),
-                details?.Messages ?? [],
+                turns.Items,
+                activeTurns,
+                messages.Items,
                 _preparedMemoryConsents.Values
-                    .Where(item => item.SessionId == session.Id)
+                    .Where(item => item.SessionId == session.Id
+                                   && activeTurns.Any(turn => turn.Id == item.TurnId
+                                       && SessionTurnPhases.IsForegroundWork(turn.Phase)))
                     .OrderBy(item => item.PreparedAtUtc)
                     .ToArray());
         }
@@ -2316,7 +2438,18 @@ public sealed class SessionCoordinator(
         }
     }
 
-    private void PublishChange()
+    private LocalSessionProjectionUpdate ResetProjection(Guid? sessionId, string reason) => new(
+        LocalSessionProjectionKind.ResetRequired,
+        ChangeVersion,
+        _coordinatorInstanceId,
+        _coordinatorStartedAtUtc,
+        sessionId,
+        [],
+        [],
+        0,
+        reason);
+
+    private void PublishChange(Guid? sessionId = null, SessionTurnRecord? turnUpsert = null)
     {
         TaskCompletionSource<long> completed;
         long version;
@@ -2325,6 +2458,15 @@ public sealed class SessionCoordinator(
             version = ++_changeVersion;
             completed = _nextChange;
             _nextChange = NewChangeSource();
+        }
+
+        if (turnUpsert is null)
+        {
+            _changeJournal.AppendReset(version, sessionId);
+        }
+        else
+        {
+            _changeJournal.AppendTurn(version, turnUpsert);
         }
 
         completed.TrySetResult(version);

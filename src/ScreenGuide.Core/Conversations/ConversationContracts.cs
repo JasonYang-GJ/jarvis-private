@@ -22,6 +22,54 @@ public interface IConversationStore
         Guid conversationId,
         CancellationToken cancellationToken = default);
 
+    async Task<ConversationMessagePage> GetMessagesPageAsync(
+        Guid conversationId,
+        long? beforeSequenceNumber,
+        int pageSize,
+        CancellationToken cancellationToken = default)
+    {
+        if (pageSize is < 1 or > 50)
+        {
+            throw new ArgumentOutOfRangeException(nameof(pageSize));
+        }
+
+        var values = (await GetMessagesAsync(conversationId, cancellationToken).ConfigureAwait(false))
+            .Where(item => beforeSequenceNumber is null || item.SequenceNumber < beforeSequenceNumber)
+            .OrderByDescending(item => item.SequenceNumber)
+            .Take(pageSize + 1)
+            .ToArray();
+        var hasMore = values.Length > pageSize;
+        var items = values.Take(pageSize).OrderBy(item => item.SequenceNumber).ToArray();
+        return new ConversationMessagePage(
+            items,
+            hasMore && items.Length > 0 ? items[0].SequenceNumber : null,
+            hasMore);
+    }
+
+    async Task<ConversationMessageChangeBatch> GetMessageChangesAsync(
+        Guid conversationId,
+        long afterSequenceNumber,
+        int limit,
+        CancellationToken cancellationToken = default)
+    {
+        if (limit is < 1 or > 50)
+        {
+            throw new ArgumentOutOfRangeException(nameof(limit));
+        }
+
+        var values = (await GetMessagesAsync(conversationId, cancellationToken).ConfigureAwait(false))
+            .Where(item => item.SequenceNumber > afterSequenceNumber)
+            .OrderBy(item => item.SequenceNumber)
+            .Take(limit + 1)
+            .ToArray();
+        var hasMore = values.Length > limit;
+        var items = values.Take(limit).ToArray();
+        return new ConversationMessageChangeBatch(
+            items,
+            items.Length == 0 ? afterSequenceNumber : items[^1].SequenceNumber,
+            hasMore);
+    }
+
     Task<IReadOnlyList<ConversationTurnRecord>> GetTurnsAsync(
         Guid conversationId,
         CancellationToken cancellationToken = default);

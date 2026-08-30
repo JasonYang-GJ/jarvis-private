@@ -148,6 +148,21 @@ public interface IDesktopApiClient
         int waitMilliseconds = 20_000,
         CancellationToken cancellationToken = default);
 
+    Task<SessionProjectionUpdateDto> WaitForSessionProjectionAsync(
+        SessionProjectionCursorDto cursor,
+        CancellationToken cancellationToken = default);
+
+    Task<SessionMessagesPageDto> GetSessionMessagesPageAsync(
+        Guid sessionId,
+        long? beforeSequenceNumber,
+        int pageSize = 50,
+        CancellationToken cancellationToken = default);
+
+    Task<SessionTurnDetailsDto> GetSessionTurnAsync(
+        Guid sessionId,
+        Guid turnId,
+        CancellationToken cancellationToken = default);
+
     Task<AiSettingsDto> GetAiSettingsAsync(CancellationToken cancellationToken = default);
 
     Task<AiSettingsDto> SetChatRouteAsync(
@@ -491,13 +506,49 @@ public sealed class DesktopApiClient(
             new CancelSessionTurnRequestDto(sessionId, turnId),
             cancellationToken);
 
-    public Task<SessionSnapshotDto?> WaitForSessionUpdateAsync(
+    public async Task<SessionSnapshotDto?> WaitForSessionUpdateAsync(
         long knownChangeVersion,
         int waitMilliseconds = 20_000,
-        CancellationToken cancellationToken = default) =>
-        CallAsync<WaitForSessionUpdateRequestDto, SessionSnapshotDto?>(
+        CancellationToken cancellationToken = default)
+    {
+        var update = await CallAsync<WaitForSessionUpdateRequestDto, SessionProjectionUpdateDto>(
             DesktopApiMethods.WaitForSessionUpdate,
             new WaitForSessionUpdateRequestDto(knownChangeVersion, waitMilliseconds),
+            cancellationToken).ConfigureAwait(false);
+        return update.Bootstrap;
+    }
+
+    public Task<SessionProjectionUpdateDto> WaitForSessionProjectionAsync(
+        SessionProjectionCursorDto cursor,
+        CancellationToken cancellationToken = default) =>
+        CallAsync<WaitForSessionUpdateRequestDto, SessionProjectionUpdateDto>(
+            DesktopApiMethods.WaitForSessionUpdate,
+            new WaitForSessionUpdateRequestDto(
+                cursor.KnownChangeVersion,
+                cursor.WaitMilliseconds,
+                cursor.CoordinatorInstanceId,
+                cursor.CoordinatorStartedAtUtc,
+                cursor.SessionId,
+                cursor.KnownMessageSequenceNumber),
+            cancellationToken);
+
+    public Task<SessionMessagesPageDto> GetSessionMessagesPageAsync(
+        Guid sessionId,
+        long? beforeSequenceNumber,
+        int pageSize = 50,
+        CancellationToken cancellationToken = default) =>
+        CallAsync<SessionMessagesPageRequestDto, SessionMessagesPageDto>(
+            DesktopApiMethods.GetSessionMessagesPage,
+            new SessionMessagesPageRequestDto(sessionId, beforeSequenceNumber, pageSize),
+            cancellationToken);
+
+    public Task<SessionTurnDetailsDto> GetSessionTurnAsync(
+        Guid sessionId,
+        Guid turnId,
+        CancellationToken cancellationToken = default) =>
+        CallAsync<SessionTurnGetRequestDto, SessionTurnDetailsDto>(
+            DesktopApiMethods.GetSessionTurn,
+            new SessionTurnGetRequestDto(sessionId, turnId),
             cancellationToken);
 
     public Task<AiSettingsDto> GetAiSettingsAsync(

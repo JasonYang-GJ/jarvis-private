@@ -90,6 +90,7 @@ public static class DesktopHostFactory
         builder.Services.AddSingleton<TaskCancellationRegistry>();
         builder.Services.AddSingleton<TaskCancellationService>();
         builder.Services.AddSingleton<TaskRecoveryService>();
+        builder.Services.AddSingleton<TaskStateChangeHub>();
         builder.Services.AddSingleton(services =>
         {
             var hostOptions = services.GetRequiredService<DesktopHostOptions>();
@@ -167,6 +168,9 @@ public static class DesktopHostFactory
         builder.Services.AddSingleton<AgentConnectorRegistry>();
         builder.Services.AddSingleton<AgentTaskExecutionService>();
         builder.Services.AddSingleton<LocalTaskEntryService>();
+        builder.Services.AddSingleton<ILocalTaskStateReader>(services =>
+            services.GetRequiredService<LocalTaskEntryService>());
+        builder.Services.AddSingleton<SessionTaskStateSynchronizer>();
         builder.Services.AddSingleton<RoutedConversationProvider>();
         builder.Services.AddSingleton<IConversationProvider>(services =>
             services.GetRequiredService<RoutedConversationProvider>());

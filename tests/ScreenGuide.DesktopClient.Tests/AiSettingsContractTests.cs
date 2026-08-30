@@ -9,7 +9,7 @@ public sealed class AiSettingsContractTests
     [Fact]
     public void ProtocolV9PreservesStableAiSettingsMethods()
     {
-        Assert.Equal(10, DesktopProtocolVersion.Current);
+        Assert.Equal(11, DesktopProtocolVersion.Current);
         Assert.Equal("ai.settings.get", DesktopApiMethods.GetAiSettings);
         Assert.Equal("ai.chat-route.set", DesktopApiMethods.SetChatRoute);
         Assert.Equal("ai.credentials.set", DesktopApiMethods.SetProviderCredential);

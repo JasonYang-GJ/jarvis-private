@@ -180,6 +180,14 @@ public sealed class DesktopApiDispatcher(
                     DesktopProtocolJson.ToElement(await WaitForSessionUpdateAsync(
                         Deserialize<WaitForSessionUpdateRequestDto>(request),
                         cancellationToken).ConfigureAwait(false)),
+                DesktopApiMethods.GetSessionMessagesPage =>
+                    DesktopProtocolJson.ToElement(await GetSessionMessagesPageAsync(
+                        Deserialize<SessionMessagesPageRequestDto>(request),
+                        cancellationToken).ConfigureAwait(false)),
+                DesktopApiMethods.GetSessionTurn =>
+                    DesktopProtocolJson.ToElement(await GetSessionTurnAsync(
+                        Deserialize<SessionTurnGetRequestDto>(request),
+                        cancellationToken).ConfigureAwait(false)),
                 DesktopApiMethods.GetAiSettings =>
                     DesktopProtocolJson.ToElement(await aiSettings.GetAsync(cancellationToken)
                         .ConfigureAwait(false)),
@@ -587,7 +595,7 @@ public sealed class DesktopApiDispatcher(
             request.TurnId,
             cancellationToken);
 
-    private async Task<SessionSnapshotDto?> WaitForSessionUpdateAsync(
+    private async Task<SessionProjectionUpdateDto> WaitForSessionUpdateAsync(
         WaitForSessionUpdateRequestDto request,
         CancellationToken cancellationToken)
     {
@@ -596,11 +604,101 @@ public sealed class DesktopApiDispatcher(
             throw new ArgumentOutOfRangeException(nameof(request.WaitMilliseconds));
         }
 
-        return MapSession(await sessions.WaitForChangeAsync(
+        if (request.CoordinatorInstanceId is null
+            || request.CoordinatorStartedAtUtc is null
+            || request.SessionId is null)
+        {
+            var bootstrap = MapSession(await sessions.WaitForChangeAsync(
+                    request.KnownChangeVersion,
+                    TimeSpan.FromMilliseconds(request.WaitMilliseconds),
+                    cancellationToken)
+                .ConfigureAwait(false));
+            return EnsureProjectionBudget(new SessionProjectionUpdateDto(
+                bootstrap is null ? "NoChange" : "Bootstrap",
+                bootstrap?.ChangeVersion ?? request.KnownChangeVersion,
+                bootstrap?.CoordinatorInstanceId ?? string.Empty,
+                bootstrap?.CoordinatorStartedAtUtc ?? default,
+                bootstrap?.SessionId,
+                [],
+                [],
+                bootstrap?.Messages.LastOrDefault()?.SequenceNumber ?? 0,
+                Bootstrap: bootstrap));
+        }
+
+        var update = await sessions.WaitForProjectionAsync(
+                request.CoordinatorInstanceId,
+                request.CoordinatorStartedAtUtc.Value,
+                request.SessionId.Value,
                 request.KnownChangeVersion,
+                request.KnownMessageSequenceNumber,
                 TimeSpan.FromMilliseconds(request.WaitMilliseconds),
                 cancellationToken)
-            .ConfigureAwait(false));
+            .ConfigureAwait(false);
+        return EnsureProjectionBudget(new SessionProjectionUpdateDto(
+            update.Kind.ToString(),
+            update.ChangeVersion,
+            update.CoordinatorInstanceId,
+            update.CoordinatorStartedAtUtc,
+            update.SessionId,
+            update.TurnUpserts.Select(MapSessionTurn).ToArray(),
+            update.MessageUpserts.Select(MapConversationMessage).ToArray(),
+            update.LastMessageSequenceNumber,
+            update.ResetReason));
+    }
+
+    private async Task<SessionMessagesPageDto> GetSessionMessagesPageAsync(
+        SessionMessagesPageRequestDto request,
+        CancellationToken cancellationToken)
+    {
+        var page = await sessions.GetMessagesPageAsync(
+                request.SessionId,
+                request.BeforeSequenceNumber,
+                request.PageSize,
+                cancellationToken)
+            .ConfigureAwait(false);
+        var response = new SessionMessagesPageDto(
+            page.CoordinatorInstanceId,
+            page.CoordinatorStartedAtUtc,
+            page.SessionId,
+            page.Page.Items.Select(MapConversationMessage).ToArray(),
+            page.Page.NextBeforeSequenceNumber,
+            page.Page.HasMore);
+        if (JsonSerializer.SerializeToUtf8Bytes(response, DesktopProtocolJson.Options).Length > 512 * 1024)
+        {
+            throw new SessionProjectionException(
+                "session_projection_item_too_large",
+                "单条会话内容过大，无法安全显示。");
+        }
+
+        return response;
+    }
+
+    private async Task<SessionTurnDetailsDto> GetSessionTurnAsync(
+        SessionTurnGetRequestDto request,
+        CancellationToken cancellationToken)
+    {
+        var details = await sessions.GetTurnDetailsAsync(
+                request.SessionId,
+                request.TurnId,
+                cancellationToken)
+            .ConfigureAwait(false);
+        return new SessionTurnDetailsDto(
+            details.CoordinatorInstanceId,
+            details.CoordinatorStartedAtUtc,
+            details.SessionId,
+            MapSessionTurn(details.Turn));
+    }
+
+    private static SessionProjectionUpdateDto EnsureProjectionBudget(SessionProjectionUpdateDto response)
+    {
+        if (JsonSerializer.SerializeToUtf8Bytes(response, DesktopProtocolJson.Options).Length > 512 * 1024)
+        {
+            throw new SessionProjectionException(
+                "session_projection_item_too_large",
+                "单条会话内容过大，无法安全显示。");
+        }
+
+        return response;
     }
 
     private static SessionSnapshotDto? MapSession(LocalSessionSnapshot? snapshot)
@@ -618,7 +716,7 @@ public sealed class DesktopApiDispatcher(
         var status = foreground?.Phase.ToString()
                      ?? snapshot.ActiveTurns.LastOrDefault()?.Phase.ToString()
                      ?? "Ready";
-        return new SessionSnapshotDto(
+        var response = new SessionSnapshotDto(
             snapshot.ChangeVersion,
             snapshot.CoordinatorInstanceId,
             snapshot.CoordinatorStartedAtUtc,
@@ -631,12 +729,7 @@ public sealed class DesktopApiDispatcher(
             foreground is null ? null : MapSessionTurn(foreground),
             active,
             snapshot.Turns.Select(MapSessionTurn).ToArray(),
-            snapshot.Messages.Select(message => new ConversationMessageDto(
-                message.Id,
-                message.SequenceNumber,
-                message.Role.ToString(),
-                message.Content,
-                message.CreatedAtUtc)).ToArray(),
+            snapshot.Messages.Select(MapConversationMessage).ToArray(),
             snapshot.MemoryOutboundConsents.Select(consent => new MemoryOutboundConsentDto(
                 consent.ConsentId,
                 consent.TurnId,
@@ -661,6 +754,14 @@ public sealed class DesktopApiDispatcher(
                 consent.PreparedAtUtc,
                 consent.ExpiresAtUtc,
                 consent.ManifestHash)).ToArray());
+        if (JsonSerializer.SerializeToUtf8Bytes(response, DesktopProtocolJson.Options).Length > 512 * 1024)
+        {
+            throw new SessionProjectionException(
+                "session_projection_item_too_large",
+                "单条会话内容过大，无法安全显示。");
+        }
+
+        return response;
     }
 
     private static UnifiedSessionTurnDto MapSessionTurn(SessionTurnRecord turn) => new(
@@ -691,6 +792,13 @@ public sealed class DesktopApiDispatcher(
         turn.MemoryOutboundState.ToString(),
         turn.MemoryOutbound?.ConsentId,
         turn.MemoryOutbound?.ManifestHash);
+
+    private static ConversationMessageDto MapConversationMessage(ConversationMessageRecord message) => new(
+        message.Id,
+        message.SequenceNumber,
+        message.Role.ToString(),
+        message.Content,
+        message.CreatedAtUtc);
 
     private static ConversationSummaryDto MapConversation(ConversationRecord conversation) => new(
         conversation.Id,
@@ -827,6 +935,8 @@ internal static class DesktopApiErrors
         {
             WindowIdentityException windowIdentityException =>
                 (windowIdentityException.Code, windowIdentityException.Message),
+            SessionProjectionException projectionException =>
+                (projectionException.Code, projectionException.Message),
             MemoryServiceException memoryException =>
                 (memoryException.Code, memoryException.Message),
             MemoryValidationException =>

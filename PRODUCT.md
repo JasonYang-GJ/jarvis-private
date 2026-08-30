@@ -1,6 +1,6 @@
-# 元枢产品事实（V0.5.0 / V2 阶段 3 正式冻结；Stage 4 R1/R2 已集成）
+# 元枢产品事实（V0.5.0 / V2 阶段 3 正式冻结；Stage 4 R1/R2 已集成，R3 候选）
 
-> 当前产品事实的唯一入口。更新时间：2026-08-30。V0.5.0 / Stage 3 已正式冻结；Stage 4 的 S4-R1 Window Identity v2 与 S4-R2 本机真实使用评测已完成集成。
+> 当前产品事实的唯一入口。更新时间：2026-08-30。V0.5.0 / Stage 3 已正式冻结；Stage 4 的 S4-R1 Window Identity v2 与 S4-R2 本机真实使用评测已完成集成，S4-R3 为待独立 QA 的开发候选。
 
 ## 产品定位
 
@@ -43,7 +43,7 @@
 ### 统一状态与增量更新
 
 - UI 统一显示：理解中、回答中、执行中、查看窗口、编程任务运行中、等待项目、等待文件、等待窗口、等待窗口同意、等待确认、等待用户补充、已完成、已取消、失败和被重启中断。
-- DesktopClient 通过 protocol v7 的本机 Named Pipe 长轮询等待 Session 版本变化；快照带 Host 实例身份和启动时间，可区分重启后的新旧版本；项目、任务等非实时数据保留低频兜底刷新。
+- S4-R3 候选将 Desktop IPC 升为 protocol v11：`sessions.current` 只返回最多 32 个 Turn 与 50 条最新消息的 bootstrap；`sessions.wait` 返回 `NoChange`、最多 32 个 Turn/50 条消息的 delta，或 `ResetRequired`。消息历史通过每页最多 50 条的 keyset 游标读取，精确确认继续由 Host 权威 Turn 查询负责；客户端显示缓存不授予权限。
 - IPC 服务具备监听失败重试、连接并发上限、忙碌响应和无请求连接超时，避免长轮询阻塞普通操作。
 - SQLite schema v7 保存 `sessions` 与 `session_turns`，并新增结构化 `ExpectedIntentKind`、`ExpectedTarget`、`PlanTarget`：应用绑定已发现的 Application ID，网站绑定规范化完整 HTTPS URI，Host 在规划和确认两处都做区分大小写的精确比较。
 
@@ -149,5 +149,5 @@
 - V0.2.1 标签 `v0.2.1-baseline` 保留为上一版回滚点；回滚数据必须使用 pre-v7 备份或隔离数据目录。
 - 阶段 2 候选代码把 SQLite 升到 schema v8 并在升级前建立 `pre-v8` 备份。V0.3.0 不能直接打开 schema v8；回滚到阶段 1 时必须使用 pre-v8 备份或隔离数据目录，不能覆盖正式数据库。
 - V0.5.0 使用 schema v10。直接从 V0.4.0 schema v8 升级只建立 `pre-v10-from-v8`，不会自动建立中间 pre-v9；从 v9 升级建立 `pre-v10-from-v9`。V0.4.0 不能直接打开 v9/v10；回滚时必须保留新主库，并使用匹配来源的 pre-v10、既有 v8 备份或隔离数据目录。
-- 阶段 4 S4-R1 候选使用 schema v11、protocol v10。v10→v11 建立 `pre-v11-from-v10`；从更早版本直接升级时只按打开时的原始版本建立一个 `pre-v11-from-vN`。回滚到 V0.5.0 必须保留 v11 主库，并在隔离目录使用匹配的 pre-v11 备份。
+- 阶段 4 S4-R3 候选使用 schema v11、protocol v11；本批没有 schema 迁移。v10→v11 schema 仍建立 `pre-v11-from-v10`；从更早版本直接升级时只按打开时的原始版本建立一个 `pre-v11-from-vN`。回滚到 V0.5.0 必须保留 v11 主库，并在隔离目录使用匹配的 pre-v11 备份。
 - 为保护本机同 AppId 的现有 V0.2.0 安装、卸载登记和用户数据，本阶段没有在该机器重复完整安装—卸载—重装；该发布生命周期仍应在干净机执行。

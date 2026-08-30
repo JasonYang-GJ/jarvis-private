@@ -109,6 +109,87 @@ public sealed class SqliteConversationStore : IConversationStore
         return results;
     }
 
+    public async Task<ConversationMessagePage> GetMessagesPageAsync(
+        Guid conversationId,
+        long? beforeSequenceNumber,
+        int pageSize,
+        CancellationToken cancellationToken = default)
+    {
+        if (pageSize is < 1 or > 50)
+        {
+            throw new ArgumentOutOfRangeException(nameof(pageSize));
+        }
+
+        await using var connection = await OpenAsync(cancellationToken).ConfigureAwait(false);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT * FROM conversation_messages
+            WHERE conversation_id = $conversationId
+              AND ($beforeSequenceNumber IS NULL OR sequence_number < $beforeSequenceNumber)
+            ORDER BY sequence_number DESC
+            LIMIT $limit;
+            """;
+        Add(command, "$conversationId", conversationId);
+        command.Parameters.AddWithValue(
+            "$beforeSequenceNumber",
+            beforeSequenceNumber is { } value ? value : DBNull.Value);
+        command.Parameters.AddWithValue("$limit", pageSize + 1);
+        var descending = new List<ConversationMessageRecord>(pageSize + 1);
+        await using (var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false))
+        {
+            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+            {
+                descending.Add(ReadMessage(reader));
+            }
+        }
+
+        var hasMore = descending.Count > pageSize;
+        var items = descending.Take(pageSize).Reverse().ToArray();
+        return new ConversationMessagePage(
+            items,
+            hasMore && items.Length > 0 ? items[0].SequenceNumber : null,
+            hasMore);
+    }
+
+    public async Task<ConversationMessageChangeBatch> GetMessageChangesAsync(
+        Guid conversationId,
+        long afterSequenceNumber,
+        int limit,
+        CancellationToken cancellationToken = default)
+    {
+        if (limit is < 1 or > 50)
+        {
+            throw new ArgumentOutOfRangeException(nameof(limit));
+        }
+
+        await using var connection = await OpenAsync(cancellationToken).ConfigureAwait(false);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT * FROM conversation_messages
+            WHERE conversation_id = $conversationId AND sequence_number > $afterSequenceNumber
+            ORDER BY sequence_number
+            LIMIT $limit;
+            """;
+        Add(command, "$conversationId", conversationId);
+        command.Parameters.AddWithValue("$afterSequenceNumber", afterSequenceNumber);
+        command.Parameters.AddWithValue("$limit", limit + 1);
+        var values = new List<ConversationMessageRecord>(limit + 1);
+        await using (var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false))
+        {
+            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+            {
+                values.Add(ReadMessage(reader));
+            }
+        }
+
+        var hasMore = values.Count > limit;
+        var items = values.Take(limit).ToArray();
+        return new ConversationMessageChangeBatch(
+            items,
+            items.Length == 0 ? afterSequenceNumber : items[^1].SequenceNumber,
+            hasMore);
+    }
+
     public async Task<IReadOnlyList<ConversationTurnRecord>> GetTurnsAsync(
         Guid conversationId,
         CancellationToken cancellationToken = default)

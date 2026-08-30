@@ -123,6 +123,11 @@ public sealed record SessionTurnRecord
 
 public sealed record SessionTurnRegistration(bool Accepted, SessionTurnRecord Turn);
 
+public sealed record SessionTurnPage(
+    IReadOnlyList<SessionTurnRecord> Items,
+    int? NextBeforeSequenceNumber,
+    bool HasMore);
+
 public sealed record SessionRecoveryResult(IReadOnlyList<Guid> InterruptedTurnIds);
 
 public static class SessionTurnPhases

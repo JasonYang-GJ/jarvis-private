@@ -106,4 +106,14 @@ public sealed record ConversationTurnRegistration(
     ConversationTurnRecord Turn,
     ConversationMessageRecord UserMessage);
 
+public sealed record ConversationMessagePage(
+    IReadOnlyList<ConversationMessageRecord> Items,
+    long? NextBeforeSequenceNumber,
+    bool HasMore);
+
+public sealed record ConversationMessageChangeBatch(
+    IReadOnlyList<ConversationMessageRecord> Items,
+    long LastSequenceNumber,
+    bool HasMore);
+
 public sealed record ConversationRecoveryResult(IReadOnlyList<Guid> InterruptedConversationIds);

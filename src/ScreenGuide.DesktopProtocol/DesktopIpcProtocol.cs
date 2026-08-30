@@ -8,9 +8,9 @@ namespace ScreenGuide.DesktopProtocol;
 
 public static class DesktopProtocolVersion
 {
-    public const int Current = 10;
+    public const int Current = 11;
 
-    public const int MinimumSupported = 10;
+    public const int MinimumSupported = 11;
 }
 
 public static class DesktopApiMethods
@@ -49,6 +49,8 @@ public static class DesktopApiMethods
     public const string ConfirmSessionTurn = "sessions.turn.confirm";
     public const string CancelSessionTurn = "sessions.turn.cancel";
     public const string WaitForSessionUpdate = "sessions.wait";
+    public const string GetSessionMessagesPage = "sessions.messages.page";
+    public const string GetSessionTurn = "sessions.turn.get";
     public const string GetAiSettings = "ai.settings.get";
     public const string SetChatRoute = "ai.chat-route.set";
     public const string SetProviderCredential = "ai.credentials.set";

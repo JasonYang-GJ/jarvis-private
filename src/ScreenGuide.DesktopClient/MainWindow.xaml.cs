@@ -38,6 +38,7 @@ public partial class MainWindow : Window
     private Guid? _selectedTaskId;
     private Guid? _selectedConversationId;
     private SessionSnapshotDto? _currentSession;
+    private readonly SessionProjectionCache _sessionProjectionCache = new();
     private Task? _sessionUpdateLoop;
     private bool _isRefreshing;
     private bool _isLoadingAiSettings;
@@ -311,10 +312,17 @@ public partial class MainWindow : Window
 
     private void RenderSession(SessionSnapshotDto? snapshot)
     {
-        if (!SessionUiPresenter.ShouldApply(_currentSession, snapshot))
+        if (snapshot is not null && !_sessionProjectionCache.Reset(snapshot))
         {
             return;
         }
+
+        if (snapshot is null && _currentSession is not null)
+        {
+            return;
+        }
+
+        snapshot = _sessionProjectionCache.Snapshot ?? snapshot;
 
         _currentSession = snapshot;
         _selectedConversationId = snapshot?.ConversationId;
@@ -410,13 +418,32 @@ public partial class MainWindow : Window
         {
             try
             {
-                var knownVersion = _currentSession?.ChangeVersion ?? -1;
-                var snapshot = await _api.WaitForSessionUpdateAsync(
-                    knownVersion,
-                    20_000,
+                var current = _currentSession;
+                if (current is null)
+                {
+                    await RefreshSessionAsync();
+                    await Task.Delay(TimeSpan.FromMilliseconds(100), _lifetime.Token);
+                    continue;
+                }
+
+                var update = await _api.WaitForSessionProjectionAsync(
+                    new SessionProjectionCursorDto(
+                        current.CoordinatorInstanceId,
+                        current.CoordinatorStartedAtUtc,
+                        current.SessionId,
+                        current.ChangeVersion,
+                        current.Messages.LastOrDefault()?.SequenceNumber ?? 0,
+                        20_000),
                     _lifetime.Token);
                 SetHostOnline(true);
-                RenderSession(snapshot);
+                if (string.Equals(update.Kind, "ResetRequired", StringComparison.Ordinal))
+                {
+                    await RefreshSessionAsync();
+                }
+                else if (_sessionProjectionCache.Apply(update))
+                {
+                    RenderSession(_sessionProjectionCache.Snapshot);
+                }
             }
             catch (OperationCanceledException) when (_lifetime.IsCancellationRequested)
             {
