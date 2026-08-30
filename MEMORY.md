@@ -4,7 +4,7 @@
 
 ## 当前状态
 
-- 当前正式发布基线仍为 V0.5.0 / V2 阶段 3；`v0.5.0-stage3` 指向 `d553e7e9d606037df87d98e99250de5498f5934a`。Stage 4 已获批准且只推进 S4-R1 Window Identity v2；S4-R2 尚未开始。
+- 当前正式发布基线仍为 V0.5.0 / V2 阶段 3；`v0.5.0-stage3` 指向 `d553e7e9d606037df87d98e99250de5498f5934a`。Stage 4 的 S4-R1 Window Identity v2 已集成；S4-R2 只完成独立本机评测 Runner 候选，仍需精确 SHA 的独立 QA 和用户可见真实麦克风/窗口批次。
 - V2 阶段 1“统一会话中枢”已经通过；363/363 自动化和实际 Release DesktopClient + DesktopHost 的真实桌面验收均通过。
 - V0.2.1 标签 `v0.2.1-baseline` 保留为上一版回滚点；回滚必须同时使用 pre-v7 备份或隔离数据目录。
 - V2 阶段 2“可替换 AI 大脑与模型路由”已通过：统一 Chat Model、Provider Registry、Model Router、Prompt Registry、DPAPI、安全停用的 Codex 普通聊天适配器、DeepSeek/千问普通聊天 Provider、设置 UI/IPC、语义建议和 schema v8 AI 调用审计。
@@ -24,6 +24,7 @@
 9. 正式版本只能在标签存在、干净源码构建和测试通过、安装验收通过、工作区干净后宣布冻结。
 10. 产品运行时长期记忆是独立状态真源，不得复用 Conversation、Session/Turn、编程 Task、Provider Thread 或 `ai_invocations`。本地预览不等于同意；S3-R3 只允许用户为单个普通聊天 Turn 查看完整出站快照后单次确认，不能授予任何权限，也不能自动发送。
 11. 单窗口授权的可信身份是 `{HWND, PID, ProcessStartTimeUtc, ProcessName, Title}`。schema v11 在 Session Turn 内持久化 PID 与启动时间，protocol 维持 v10；公开桌面操作 IPC 不接受客户端 HWND/标题作为窗口授权，Host 完整身份必须一直传到 UI Automation 并在控件读取、写入和提交前重验。确认、UIA、捕获后端/回退和分析前任一身份缺失或变化都必须清帧并重新确认，历史 v10 Turn 不得复用旧授权。
+12. S4-R2 的真实使用指标只能由独立、前台、人工启动的本机 Runner 产生：每项 1 次预热 + 至少 20 次正式尝试；失败率分母只含 success+failure，取消/阻塞单列，延迟使用 Stopwatch 与 nearest-rank。不得加入产品遥测、后台采样或任意正文证据，声音、转写、窗口图像和身份一律不持久化。
 
 ## 阶段 1 已确认决策
 
@@ -103,7 +104,7 @@
 - 每轮发送完整 Conversation 历史并设字符上限；没有 Token 精确预算、摘要和上下文裁剪。
 - DPAPI 不抵御同一 Windows 用户高权限恶意进程或运行时内存读取。
 - Session 快照仍随完整会话历史增长；`SessionCoordinator.cs`、`MainWindow.xaml.cs` 和部分 SQLite Store 较大。
-- 单窗口授权已比较句柄、进程名和标题，但尚未保存进程 ID / 启动时间；同程序同标题窗口的极端句柄复用风险留待后续加固。
+- S4-R2 候选尚未完成真实麦克风 1+20、Stop 场景、可见测试窗口 1+20 和身份变化人工验收；离线绿灯不能替代真实使用数据。
 - 安装包无数字签名；语音模型分发与许可证待定。
 - 阶段 3 的 S3-R1/R2/R3 已集成；自动/语义检索、画像或其他模型使用仍需新的独立批准。
 

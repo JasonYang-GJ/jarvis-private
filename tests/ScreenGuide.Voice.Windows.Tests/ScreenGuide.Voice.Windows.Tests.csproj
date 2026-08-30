@@ -14,5 +14,6 @@
   <ItemGroup><Using Include="Xunit" /></ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\ScreenGuide.Voice.Windows\ScreenGuide.Voice.Windows.csproj" />
+    <ProjectReference Include="..\..\tools\ScreenGuide.Stage4.RealUsageRunner\ScreenGuide.Stage4.RealUsageRunner.csproj" />
   </ItemGroup>
 </Project>

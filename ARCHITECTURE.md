@@ -232,6 +232,16 @@ Codex 普通聊天适配器由 `CodexChatModelProvider` 承载，但生产策略
 
 ## 11. 构建、测试与发布
 
+### Stage 4 本机真实使用评测边界
+
+`tools/ScreenGuide.Stage4.RealUsageRunner` 是独立人工验收工具，不是 DesktopClient/DesktopHost 的运行时组件。它没有 Session、数据库、Provider、网络或凭据依赖；命令行只接受评测模式和 exact SHA，也不提供任意输出文件参数。
+
+语音适配器直接订阅 `OfflineContinuousVoiceListener` 的 partial/final/fault 事件，但事件正文只进入单次内存比较器：固定版本规范化后仅保留匹配布尔值、final 次数、单调时间戳和稳定错误码。Stop、超时、fault 或批次结束都会解除事件订阅并停止监听，迟到事件不进入下一次尝试。
+
+视觉适配器创建一个可见的固定测试 HWND，经 `WindowsWindowCaptureTargetVerifier`、`WindowsSingleWindowCaptureService`、`WindowsGraphicsCaptureBackend` 和 `WindowsLocalWindowVisionProvider` 走真实本机路径。每一帧只在一次分析期间存在，`CapturedWindowFrame.Dispose` 清零字节；目标身份变化按取消终态结束，不回退到桌面捕获。
+
+公共指标聚合器固定四种终态 `Success/Failure/Cancelled/Blocked`，排除 warmup，使用 nearest-rank 计算 p50/p95，并分别保留 capture/analysis/end-to-end 汇总。安全报告采用封闭类型和稳定错误码 allowlist，无法携带自由文本诊断。
+
 - .NET SDK 由 `global.json` 固定到 10.0.400，允许同补丁线更新。
 - 普通依赖与 win-x64 发布依赖使用锁文件，发布脚本在 locked mode 下恢复。
 - `scripts/build-desktop-release.ps1` 是发布入口；阶段 3 版本号为 V0.5.0，安装产物身份记录在 `docs/baselines/V0.5.0_STAGE3.md`。

@@ -1,0 +1,261 @@
+using System.Diagnostics;
+using ScreenGuide.Vision.Abstractions;
+using ScreenGuide.Vision.Windows;
+using Windows.Graphics.Capture;
+using WinForms = System.Windows.Forms;
+
+namespace ScreenGuide.Stage4.RealUsageRunner;
+
+internal static class VisionEvaluationRunner
+{
+    private const string FormTitle = "元枢本机单窗口评测";
+    private const string ChangedFormTitle = "元枢本机单窗口评测（身份已变化）";
+    private const string FixedCanary = "这是无个人数据的本机单窗口评测标记";
+
+    public static async Task<EvaluationReport> RunAsync(
+        RunnerOptions options,
+        CancellationToken cancellationToken)
+    {
+        var attempts = new List<EvaluationAttempt>();
+        var supported = GraphicsCaptureSession.IsSupported();
+        var environment = EvaluationEnvironmentFactory.Create(
+            supported,
+            "not_applicable");
+        if (!supported)
+        {
+            attempts.Add(new EvaluationAttempt(
+                false,
+                EvaluationTerminalState.Blocked,
+                TimeSpan.Zero,
+                "vision.capture_unavailable"));
+            return Report("blocked", cleanup: true);
+        }
+
+        Console.WriteLine("S4-R2 本机单窗口评测：只读取 Runner 创建的可见测试窗口。 ");
+        Console.WriteLine("图像和识别文字只在内存中处理，不保存、不上传。输入 STOP 或按 Ctrl+C 可停止。 ");
+        Console.WriteLine("输入 YES 表示同意本批次读取这个测试窗口：");
+        if (!string.Equals(await Console.In.ReadLineAsync(cancellationToken), "YES", StringComparison.Ordinal))
+        {
+            attempts.Add(new EvaluationAttempt(
+                false,
+                EvaluationTerminalState.Blocked,
+                TimeSpan.Zero,
+                "evaluation.consent_missing"));
+            return Report("blocked", cleanup: true);
+        }
+
+        SyntheticEvaluationWindow? window = null;
+        var cleanupConfirmed = true;
+        var stage = "completed";
+        try
+        {
+            window = await SyntheticEvaluationWindow.StartAsync(
+                    FormTitle,
+                    FixedCanary,
+                    cancellationToken)
+                .ConfigureAwait(false);
+            using var process = Process.GetCurrentProcess();
+            var processStart = new DateTimeOffset(process.StartTime.ToUniversalTime());
+            var verifier = new WindowsWindowCaptureTargetVerifier();
+            var capture = new WindowsSingleWindowCaptureService(
+                new WindowsGraphicsCaptureBackend(verifier),
+                new WindowsSensitiveWindowPolicy(),
+                verifier);
+            var evaluator = new VisionAttemptEvaluator(
+                capture,
+                new WindowsLocalWindowVisionProvider(new WindowsLocalOcrTextExtractor()));
+
+            var attemptCount = options.Mode == "vision" ? 21 : 1;
+            for (var index = 0; index < attemptCount; index++)
+            {
+                var isWarmup = options.Mode == "vision" && index == 0;
+                Console.WriteLine(options.Mode == "vision-identity-change"
+                    ? "窗口身份变化场景：按 Enter 开始一次受控取消检查。"
+                    : isWarmup
+                        ? "预热：按 Enter 开始读取测试窗口。"
+                        : $"正式 {index}/20：按 Enter 开始读取测试窗口。");
+                var command = await Console.In.ReadLineAsync(cancellationToken).ConfigureAwait(false);
+                if (command is null
+                    || string.Equals(command, "STOP", StringComparison.OrdinalIgnoreCase))
+                {
+                    attempts.Add(new EvaluationAttempt(
+                        isWarmup,
+                        EvaluationTerminalState.Cancelled,
+                        TimeSpan.Zero,
+                        "evaluation.cancelled"));
+                    stage = "cancelled";
+                    break;
+                }
+
+                var target = new WindowCaptureTarget(
+                    window.Handle,
+                    FormTitle,
+                    process.ProcessName,
+                    process.Id,
+                    processStart,
+                    DateTimeOffset.UtcNow);
+                if (options.Mode == "vision-identity-change")
+                {
+                    await window.ChangeTitleAsync(ChangedFormTitle, cancellationToken)
+                        .ConfigureAwait(false);
+                }
+
+                var result = await evaluator.EvaluateAsync(
+                        target,
+                        FixedCanary,
+                        isWarmup,
+                        cancellationToken)
+                    .ConfigureAwait(false);
+                attempts.Add(result.Attempt);
+                cleanupConfirmed &= result.CleanupConfirmed;
+                Console.WriteLine($"本次终态：{result.Attempt.State}；窗口内容未保存。 ");
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            attempts.Add(new EvaluationAttempt(
+                false,
+                EvaluationTerminalState.Cancelled,
+                TimeSpan.Zero,
+                "evaluation.cancelled"));
+            stage = "cancelled";
+        }
+        catch
+        {
+            attempts.Add(new EvaluationAttempt(
+                false,
+                EvaluationTerminalState.Failure,
+                TimeSpan.Zero,
+                "vision.capture_failed"));
+            stage = "failed";
+        }
+        finally
+        {
+            if (window is not null)
+            {
+                await window.DisposeAsync().ConfigureAwait(false);
+                cleanupConfirmed &= window.IsStopped;
+            }
+        }
+
+        if (options.Mode == "vision-identity-change"
+            && attempts.Any(item => item.ErrorCode == "vision.identity_changed"))
+        {
+            stage = "cancelled";
+        }
+
+        return Report(stage, cleanupConfirmed);
+
+        EvaluationReport Report(string reportStage, bool cleanup) =>
+            EvaluationReport.Create(
+                options.Mode,
+                options.ExpectedSha,
+                reportStage,
+                EvaluationAggregator.Build(attempts),
+                environment,
+                cleanup);
+    }
+
+    private sealed class SyntheticEvaluationWindow : IAsyncDisposable
+    {
+        private readonly Thread _thread;
+        private readonly WinForms.Form _form;
+
+        private SyntheticEvaluationWindow(Thread thread, WinForms.Form form, long handle)
+        {
+            _thread = thread;
+            _form = form;
+            Handle = handle;
+        }
+
+        public long Handle { get; }
+
+        public bool IsStopped => !_thread.IsAlive;
+
+        public static async Task<SyntheticEvaluationWindow> StartAsync(
+            string title,
+            string canary,
+            CancellationToken cancellationToken)
+        {
+            var ready = new TaskCompletionSource<(WinForms.Form Form, long Handle)>(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+            var thread = new Thread(() =>
+            {
+                try
+                {
+                    var form = new WinForms.Form
+                    {
+                        Text = title,
+                        Width = 680,
+                        Height = 280,
+                        StartPosition = WinForms.FormStartPosition.CenterScreen,
+                        TopMost = true
+                    };
+                    form.Controls.Add(new WinForms.Label
+                    {
+                        Text = canary,
+                        AutoSize = true,
+                        Font = new System.Drawing.Font("Microsoft YaHei UI", 18),
+                        Left = 46,
+                        Top = 86
+                    });
+                    form.Shown += (_, _) =>
+                    {
+                        form.Activate();
+                        ready.TrySetResult((form, form.Handle.ToInt64()));
+                    };
+                    WinForms.Application.Run(form);
+                }
+                catch (Exception exception)
+                {
+                    ready.TrySetException(exception);
+                }
+            })
+            {
+                IsBackground = true,
+                Name = "Yuanshu-S4-R2-SyntheticWindow"
+            };
+            thread.SetApartmentState(ApartmentState.STA);
+            thread.Start();
+
+            var (form, handle) = await ready.Task.WaitAsync(
+                    TimeSpan.FromSeconds(5),
+                    cancellationToken)
+                .ConfigureAwait(false);
+            return new SyntheticEvaluationWindow(thread, form, handle);
+        }
+
+        public Task ChangeTitleAsync(string title, CancellationToken cancellationToken) =>
+            InvokeAsync(() => _form.Text = title, cancellationToken);
+
+        public async ValueTask DisposeAsync()
+        {
+            if (!_form.IsDisposed)
+            {
+                await InvokeAsync(_form.Close, CancellationToken.None).ConfigureAwait(false);
+            }
+
+            await Task.Run(() => _thread.Join(TimeSpan.FromSeconds(5))).ConfigureAwait(false);
+        }
+
+        private Task InvokeAsync(Action action, CancellationToken cancellationToken)
+        {
+            var completed = new TaskCompletionSource<bool>(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+            cancellationToken.ThrowIfCancellationRequested();
+            _form.BeginInvoke(() =>
+            {
+                try
+                {
+                    action();
+                    completed.TrySetResult(true);
+                }
+                catch (Exception exception)
+                {
+                    completed.TrySetException(exception);
+                }
+            });
+            return completed.Task.WaitAsync(cancellationToken);
+        }
+    }
+}

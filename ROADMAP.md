@@ -112,10 +112,10 @@ S3-R3 已完成范围：
 
 ## 阶段 4：体验与分发加固
 
-状态：进行中；仅 S4-R1 已获批准，S4-R2 及后续切片尚未开始。
+状态：进行中；S4-R1 已集成，S4-R2 离线候选实现等待独立 QA 与人工真实使用评测；后续切片尚未开始。
 
 - S4-R1 Window Identity v2：Host 可信 `{HWND, PID, ProcessStartTimeUtc, ProcessName, Title}`、schema v11/pre-v11、确认/UIA/捕获/回退/分析逐层 fail-closed；Desktop IPC 维持 v10。
-- S4-R2（未开始）：真实使用评测、语音/视觉失败率和延迟数据；
+- S4-R2（候选）：独立本机评测 Runner 以 1 次预热 + 20 次正式尝试统计语音/视觉失败率与 Stopwatch 延迟；必须用户可见同意和逐次主动启动，只输出脱敏汇总，不保存声音、识别正文或窗口图像；
 - 长会话快照、Host 内部任务状态同步和 SessionCoordinator 大文件的渐进优化；
 - 语音模型许可证与下载更新方案；
 - 安装包数字签名、升级/回滚和发布自动化；

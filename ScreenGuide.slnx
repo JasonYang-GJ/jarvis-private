@@ -37,6 +37,7 @@
   <Folder Name="/tools/">
     <Project Path="tools/ScreenGuide.CodexConnector.IntegrationRunner/ScreenGuide.CodexConnector.IntegrationRunner.csproj" />
     <Project Path="tools/ScreenGuide.DesktopV01.RealAcceptanceRunner/ScreenGuide.DesktopV01.RealAcceptanceRunner.csproj" />
+    <Project Path="tools/ScreenGuide.Stage4.RealUsageRunner/ScreenGuide.Stage4.RealUsageRunner.csproj" />
     <Project Path="tools/ScreenGuide.Stage1DatabaseCompatibilityRunner/ScreenGuide.Stage1DatabaseCompatibilityRunner.csproj" />
     <Project Path="tools/ScreenGuide.TaskEvidence.IntegrationRunner/ScreenGuide.TaskEvidence.IntegrationRunner.csproj" />
   </Folder>

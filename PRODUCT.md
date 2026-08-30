@@ -106,6 +106,15 @@
 - SQLite 候选合同为 schema v11，在 `session_turns` 保存 PID 和进程启动时间；v10→v11 先创建唯一 `pre-v11-from-v10` 备份并以单事务迁移。历史 v10 Turn 缺少新身份时失败关闭，不能复用旧窗口授权。
 - Desktop IPC 继续保持 protocol v10；PID 与进程启动时间不通过 IPC 暴露，也不新增权限、网络、Provider 或凭据路径。
 
+## 阶段 4 R2 候选评测能力
+
+- 新增独立的 `ScreenGuide.Stage4.RealUsageRunner`，不接入产品后台采样、遥测、Session、Provider 或凭据路径。它只在用户从可见终端手工启动并输入 `YES` 后工作。
+- 语音模式复用真实 `OfflineContinuousVoiceListener`，每次由用户按 Enter 主动开始，按固定非个人短句完成 1 次预热和 20 次正式尝试；15 秒内必须只有一个非空最终结果，并按固定规范化做精确匹配。
+- 视觉模式只创建并读取 Runner 自己的可见非个人测试窗口，通过真实单 HWND Graphics Capture 和 Windows 本机 OCR 完成 1 次预热和 20 次正式尝试；另有窗口身份变化的受控取消场景。
+- 计时只使用单调 `Stopwatch`，汇总 count/min/p50/p95/max；失败率只以 success+failure 为分母，cancelled/blocked 单列，预热不计入正式指标且不删除离群值。
+- 最终标准输出只包含 exact SHA、粗粒度环境、次数、终态、聚合耗时、稳定错误码、清理状态以及固定的 `NetworkRequests=0`/`ProviderRequests=0`。不输出或保存录音、波形、识别正文、固定短句、窗口标题/身份、图片、路径、异常正文或堆栈。
+- 当前只完成离线候选与定向测试；真实麦克风和可见窗口的 1+20 人工批次尚未执行，不能把候选写成真实使用 PASS。
+
 ## 尚未完成
 
 - 阶段 3 不包含自动记忆提取、后台/语义检索、RAG、向量数据库、用户画像或跨 Session 自动个性化；`intent.semantic` 永不接收记忆。
