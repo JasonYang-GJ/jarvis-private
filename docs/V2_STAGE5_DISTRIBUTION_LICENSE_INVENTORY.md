@@ -289,7 +289,7 @@
 | Sherpa C API asset | 本机 package cache 静态文件 | `614878147C05121AEB1514EC4FB3E48B89751591532ECA9208235B9AB868306A` | attribution evidence 已确认同一 SHA-256 存在于 C0 payload；不证明 package container identity 或 NOTICE 已闭合。 |
 | ONNX Runtime asset | 本机 package cache 静态文件 | `DAA77083A45BF525DA0DDE9E87F85D8EB146F58F9C9AA7124CA84545E1C0F148` | attribution evidence 已确认同一 SHA-256 存在于 C0 payload；不证明 package container identity 或 NOTICE 已闭合。 |
 | e_sqlite3 win-x64 asset | 本机 package cache 静态文件 | `B7385D722C83FB52142A00477A726723745916D22A555711EE89834C1111FB2E` | attribution evidence 已确认同一 SHA-256 存在于 C0 payload；native license 与 NOTICE 仍未闭合。 |
-| C0 payload attribution evidence | 539 个 frozen payload 文件来源映射 | `7BA590A929848BB45E9CF041433B207E40F9CADFD6D92A9206448BBB92022E93` | 539/539 mapped、0 unknown；只建立 file-level origin evidence，不代表 package container、许可或 NOTICE clearance。 |
+| C0 payload attribution evidence | 539 个 frozen payload 文件来源映射 | `C18B2D2F0356F6C8577FE4FD48F82937568F4D67FABF627D26F278F275742FAC` | 539/539 mapped、0 unknown；source manifest 绑定 Git blob `90b1667d9190c92c66982fbd6fa3b0eee091e5c2` 与 `UTF8_NO_BOM_LF_V1` canonical SHA-256，不依赖 checkout 换行；仍只建立 file-level origin evidence，不代表 package container、许可或 NOTICE clearance。 |
 
 ### 12.3 Frozen manifest 最小 schema
 

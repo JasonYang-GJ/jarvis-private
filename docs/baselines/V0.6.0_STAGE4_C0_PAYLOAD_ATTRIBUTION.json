@@ -3,7 +3,17 @@
   "evidenceId": "v0.6.0-stage4-c0-payload-attribution",
   "evidenceRecordedDate": "2026-08-31",
   "sourceManifest": "docs/baselines/V0.6.0_STAGE4_C0_STATIC_MANIFEST.json",
-  "sourceManifestSha256": "62EE4AFF88CBADA7630874DBEAE0C37E167BEA3FFF6BE056BA8274AFA030426D",
+  "sourceManifestGitBlob": "90b1667d9190c92c66982fbd6fa3b0eee091e5c2",
+  "sourceManifestGitBlobAlgorithm": "git-sha1",
+  "sourceManifestCanonicalUtf8LfSha256": "82773168DE99D518E3E75ABAD0C519F375EFB415FF23658882333C70CD3618FB",
+  "sourceManifestCanonicalization": {
+    "profile": "UTF8_NO_BOM_LF_V1",
+    "inputEncoding": "strict UTF-8",
+    "bomRule": "remove one leading UTF-8 BOM if present",
+    "lineEndingRule": "normalize CRLF and lone CR to LF",
+    "contentRule": "preserve all other text, whitespace, JSON property order, indentation, and final newline",
+    "outputEncoding": "UTF-8 without BOM"
+  },
   "frozenIdentity": {
     "tag": "v0.6.0-stage4",
     "tagTarget": "3a591a7b6af7da7d97e07093d4c33a3f44553b82",
