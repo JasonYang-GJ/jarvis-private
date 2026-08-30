@@ -99,7 +99,7 @@
 
 ### .NET self-contained 与 Windows SDK
 
-这些文件构成部分本地证据，但尚未与 V0.6.0 标签产物建立完整逐文件 attribution，因此总状态仍为 `UNKNOWN_BLOCKED_FOR_DISTRIBUTION`：
+这些文件构成部分本地许可/NOTICE 证据；新的 C0 payload attribution 已把实际冻结文件映射到对应 runtime/package，但适用许可选择、NOTICE placement 与分发条件尚未全部闭合，因此总状态仍为 `UNKNOWN_BLOCKED_FOR_DISTRIBUTION`：
 
 | Component | Normalized evidence | Size | SHA-256 | Result |
 |---|---|---:|---|---|
@@ -163,6 +163,8 @@
 - 当前仓库根的 ignored `artifacts` 是非权威、可变的构建输出，不是只读 `v0.6.0-stage4` tag artifact manifest。当前 `artifacts/publish` 有 539 个文件，Client/Host informational version 绑定 `693719d09cead42304d7c3334b98e9161128c623`，不是正式 C0 `3a591a7b6af7da7d97e07093d4c33a3f44553b82`，因此不能用于 attribution。
 - 当前 `artifacts/release` 含一个 V0.6.0 命名的 installer，QA 观察大小为 64,216,176 bytes；它不是正式冻结的 tag-source installer identity，同样不得用于 attribution。
 - Stage 4 构建当时没有产出逐文件 manifest；本轮仅从仍保留、且 installer size/SHA-256、tag target 与 publish file count 全部精确匹配的原始 C0 tag-source artifact 生成静态证据。该动作没有重建、修改或执行 artifact，也没有移动 tag。若未来使用 clean rebuild，只能作为“可重建参考”，不能替代本清单绑定的原始 C0 身份。
+- `docs/baselines/V0.6.0_STAGE4_C0_PAYLOAD_ATTRIBUTION.json` 对 539 个 `installedPayload` 文件完成离线归属对账：package 43、runtime 470、project-owned 20、build-derived 6、container-only 0、unknown 0；其中 517 条由具体源文件 SHA-256 相等证明，22 条由 exact C0 deps/project publish metadata 证明。42 个实际进入 payload 的普通 package 与 3 个 runtime pack 均有逐文件来源记录。
+- 43 个 C0 deps 普通 package contentHash 均与 C0 lock metadata 一致，但当前本机 cache 的 43 个 `.nupkg.sha512` 全部与历史 C0 值不同。因此本证据只把 cache 内**具体文件**的 SHA-256 相等作为 file-level attribution，不把当前 cache package container 冒充为 C0 原包容器，也不据此升级许可结论。
 
 ## 10. 相互独立的发布门禁
 
@@ -264,13 +266,13 @@
 | Component boundary | Source | Bundling | Attribution | Notice | 当前结论 |
 |---|---|---|---|---|---|
 | 仓库源码、文档与非 runtime 品牌材料 | `UNKNOWN` | `VERIFIED-EXCLUDED` | `VERIFIED-EXCLUDED` | `VERIFIED-EXCLUDED` | 不属于当前 installer 产品 payload；Owner 权利人/来源/允许分发形态仍须声明。 |
-| 由 C0 项目源码编译的自有 DesktopClient、DesktopHost 与项目 DLL | `PARTIAL` | `VERIFIED` | `PARTIAL` | `UNKNOWN` | exact C0 Git 与保留 publish 树中的相对路径/size/SHA-256 已绑定；逐文件 component/package、Owner 权利边界与 LICENSE/NOTICE 映射仍未闭合。 |
+| 由 C0 项目源码编译的自有 DesktopClient、DesktopHost 与项目 DLL | `PARTIAL` | `VERIFIED` | `PARTIAL` | `UNKNOWN` | 16 个项目 DLL 已由 exact C0 deps project entry 映射，6 个 apphost/deps/runtimeconfig 已标为 build-derived；这不是可复现 source-to-binary hash 证明，Owner 权利边界与 LICENSE/NOTICE 仍未闭合。 |
 | runtime Prompt、`.ico` 与删除脚本 | `UNKNOWN` | `PARTIAL` | `PARTIAL` | `UNKNOWN` | manifest 已绑定 publish 树中的 4 个 runtime Prompt；installer 未解包，因此嵌入图标、删除脚本与 container entry 仍未得到同等级逐项证明，Owner 权利边界也未全部闭合。 |
-| NAudio 2.2.1 / System.Speech 10.0.10 | `VERIFIED` | `PARTIAL` | `PARTIAL` | `UNKNOWN` | exact 官方许可证据已核；原 C0 文件映射与 NOTICE 布置仍缺。 |
-| Microsoft.Data.Sqlite / Microsoft.Extensions application packages | `PARTIAL` | `PARTIAL` | `PARTIAL` | `UNKNOWN` | package/family 证据不等于冻结文件映射。 |
-| .NET / WindowsDesktop runtime 10.0.11 | `PARTIAL` | `PARTIAL` | `PARTIAL` | `UNKNOWN` | 本地 LICENSE/NOTICE 哈希与官方材料存在，runtime-pack→C0 文件与 NOTICE placement 未闭合。 |
-| Sherpa / ONNX Runtime win-x64 | `PARTIAL` | `VERIFIED` | `PARTIAL` | `UNKNOWN` | exact source license、缓存静态哈希与 frozen publish 文件身份已分别存在，但 package/component 到每个文件及 NOTICE 的映射仍未闭合。 |
-| SQLite managed / native e_sqlite3 | `PARTIAL` | `PARTIAL` | `PARTIAL` | `UNKNOWN` | native 上游许可、C0 DLL 映射与 NOTICE placement 未闭合。 |
+| NAudio 2.2.1 / System.Speech 10.0.10 | `VERIFIED` | `VERIFIED` | `VERIFIED` | `UNKNOWN` | frozen file→exact package/version 的逐文件 SHA-256 归属已闭合，官方许可证据已核；NOTICE 布置仍缺。 |
+| Microsoft.Data.Sqlite / Microsoft.Extensions application packages | `PARTIAL` | `VERIFIED` | `VERIFIED` | `UNKNOWN` | frozen file→exact package/version 的逐文件 SHA-256 归属已闭合；package/family 许可证据与 NOTICE placement 仍是独立开放项。 |
+| .NET / WindowsDesktop runtime 10.0.11 | `PARTIAL` | `VERIFIED` | `VERIFIED` | `UNKNOWN` | 470 个 runtime 文件已按 exact runtime pack/version 与逐文件 SHA-256 映射；适用 LICENSE/NOTICE 选择和 placement 未闭合。 |
+| Sherpa / ONNX Runtime win-x64 | `PARTIAL` | `VERIFIED` | `VERIFIED` | `UNKNOWN` | frozen file→Sherpa/ONNX exact package/version 的逐文件 SHA-256 归属已闭合；适用 LICENSE/NOTICE placement 仍未闭合。 |
+| SQLite managed / native e_sqlite3 | `PARTIAL` | `VERIFIED` | `VERIFIED` | `UNKNOWN` | managed/native frozen files 已按 exact package/version 与逐文件 SHA-256 映射；native 上游许可与 NOTICE placement 未闭合。 |
 | Inno installer engine / ChineseSimplified.isl | `PARTIAL` | `VERIFIED` | `PARTIAL` | `UNKNOWN` | engine/translation 会进入 installer；compiler exact version 与 translation upstream exact provenance 未闭合。 |
 | 中文语音模型 | `UNKNOWN` | `VERIFIED-EXCLUDED` | `VERIFIED-EXCLUDED` | `VERIFIED-EXCLUDED` | 当前 installer 不含模型；未来捆绑/下载必须重新做许可 Gate。 |
 | Microsoft.Windows.SDK.NET.Ref 10.0.19041.57 / `Microsoft.Windows.SDK.NET.dll` | `VERIFIED` | `VERIFIED` | `VERIFIED` | `UNKNOWN` | frozen file 与锁定 exact package 的 SHA-256 绑定、官方 exact package page、REDIST listing 与 WinRT 用途适用性均已闭合；再分发仅为 `CONDITIONAL_SUPPORTED`，有效许可/接受与 NOTICE/终端用户条款实施仍 OPEN。 |
@@ -283,10 +285,11 @@
 | Evidence | Binding | SHA-256 | 边界 |
 |---|---|---|---|
 | C0 `ChineseSimplified.isl` | Git blob `30d997321197c7c96d8e111e9ddd6c0ca8da5f09` | `BF0751FA176569C6FAA2F6E17ED2734617BEF325D5CC06EAE030FDD0258EE778` | 仅本地 C0 文件绑定，不证明 upstream exact provenance。 |
-| Sherpa managed asset | 本机 package cache 静态文件 | `487B231CCA5B12CC7576E33486B18465DE8C2B2DF3BD04480E9AB0C938DE1FAE` | cache evidence，不证明 C0 bundling。 |
-| Sherpa C API asset | 本机 package cache 静态文件 | `614878147C05121AEB1514EC4FB3E48B89751591532ECA9208235B9AB868306A` | cache evidence，不证明 C0 bundling。 |
-| ONNX Runtime asset | 本机 package cache 静态文件 | `DAA77083A45BF525DA0DDE9E87F85D8EB146F58F9C9AA7124CA84545E1C0F148` | cache evidence，不证明 C0 bundling。 |
-| e_sqlite3 win-x64 asset | 本机 package cache 静态文件 | `B7385D722C83FB52142A00477A726723745916D22A555711EE89834C1111FB2E` | cache evidence，不证明 C0 bundling 或 native license。 |
+| Sherpa managed asset | 本机 package cache 静态文件 | `487B231CCA5B12CC7576E33486B18465DE8C2B2DF3BD04480E9AB0C938DE1FAE` | attribution evidence 已确认同一 SHA-256 存在于 C0 payload；不证明 package container identity 或 NOTICE 已闭合。 |
+| Sherpa C API asset | 本机 package cache 静态文件 | `614878147C05121AEB1514EC4FB3E48B89751591532ECA9208235B9AB868306A` | attribution evidence 已确认同一 SHA-256 存在于 C0 payload；不证明 package container identity 或 NOTICE 已闭合。 |
+| ONNX Runtime asset | 本机 package cache 静态文件 | `DAA77083A45BF525DA0DDE9E87F85D8EB146F58F9C9AA7124CA84545E1C0F148` | attribution evidence 已确认同一 SHA-256 存在于 C0 payload；不证明 package container identity 或 NOTICE 已闭合。 |
+| e_sqlite3 win-x64 asset | 本机 package cache 静态文件 | `B7385D722C83FB52142A00477A726723745916D22A555711EE89834C1111FB2E` | attribution evidence 已确认同一 SHA-256 存在于 C0 payload；native license 与 NOTICE 仍未闭合。 |
+| C0 payload attribution evidence | 539 个 frozen payload 文件来源映射 | `7BA590A929848BB45E9CF041433B207E40F9CADFD6D92A9206448BBB92022E93` | 539/539 mapped、0 unknown；只建立 file-level origin evidence，不代表 package container、许可或 NOTICE clearance。 |
 
 ### 12.3 Frozen manifest 最小 schema
 
@@ -349,11 +352,12 @@ Owner 已作出的事实声明与保守边界如下：
 
 - 图标仍有 `APPLICABLE_OPENAI_ACCOUNT_TERMS_NOT_BOUND=OPEN`、`OPENAI_OUTPUT_TERMS_CLEARANCE_NOT_ESTABLISHED=OPEN`、`AI_DISCLOSURE_REQUIRED=OPEN`、`THIRD_PARTY_RIGHTS_REVIEW_REQUIRED=OPEN`、`TRADEMARK_CLEARANCE_NOT_PERFORMED=OPEN` 与 `ICON_EXTERNAL_DISTRIBUTION_CLEARANCE_NOT_ESTABLISHED=OPEN`；copyrightability/uniqueness 亦未确定；
 - Owner 对 runtime Prompt、删除脚本及其他尚未由本次事实声明闭合资产的来源/允许分发形态补充；源码公开分发继续 `SOURCE_DISTRIBUTION_NOT_AUTHORIZED`；
-- installer container 的 embedded/derived entry、publish 树之外的安装文件、逐文件 component/package 来源映射、LICENSE/NOTICE placement 与 attribution；installer 本体及保留的 539 文件 publish 树的相对路径/size/SHA-256 身份已由静态 manifest 闭合；
+- installer container 的 embedded/derived entry、publish 树之外的安装文件、LICENSE/NOTICE 适用性与 placement；installer 本体及保留的 539 文件 publish 树身份已由静态 manifest 闭合，539 个 payload 文件的 package/runtime/project/build 来源映射已由 attribution evidence 闭合；
+- C0 deps/lock 记录的 43 个普通 package contentHash 与当前本机 cache `.nupkg.sha512` 全部不一致；这不推翻逐文件 SHA-256 归属，但当前 cache 不得作为原 C0 package container identity evidence，后续 package/NOTICE provenance 必须保持失败关闭；
 - NOTICE 文件与索引的实际 publish/installer 布置、安装后验证及新 release identity；
-- SQLite native `e_sqlite3` 的上游许可与冻结 DLL attribution；
+- SQLite native `e_sqlite3` 的上游许可与 NOTICE placement；冻结 DLL 的 exact package/version 逐文件归属已由 attribution evidence 闭合；
 - Inno compiler exact 小版本及 `ChineseSimplified.isl` 的本地 exact source commit/hash/provenance；
-- .NET、WindowsDesktop、Sherpa 与 ONNX Runtime 到冻结产物逐文件 LICENSE/NOTICE 的映射；
+- .NET、WindowsDesktop、Sherpa 与 ONNX Runtime 的适用 LICENSE/NOTICE 选择、索引和 publish placement；其 frozen file→component/package 归属已经闭合；
 - WinSDK 的 file-to-package binding、官方 REDIST listing 与 WinRT 用途适用性已关闭，但 `WINSDK_VALID_LICENSE_OR_ACCEPTANCE_EVIDENCE=OPEN`、`WINSDK_NOTICE/END_USER_TERMS_IMPLEMENTATION=OPEN`；七个非 win-x64 Sherpa runtime 的 container 不存在性仍待关闭。
 
 WinSDK 已由静态 manifest 证明被捆绑，且 exact file/package binding、官方 REDIST listing 与 WinRT 用途适用性已验证；当前结论固定为 `WINSDK_REDISTRIBUTION=CONDITIONAL_SUPPORTED`，不能写成 unknown、excluded、无条件许可或 release approval。只有有效许可/接受及 NOTICE/终端用户条款实施分别闭合后，WinSDK Gate 才可能放行。七个非 win-x64 Sherpa runtime 仍保持 `EXCLUDED-CONDITIONAL`：若未来 container evidence 发现其被捆绑，或计划捆绑，同样必须重新执行对应的 license/redistribution Gate。
