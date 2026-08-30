@@ -449,6 +449,49 @@ public sealed class SessionCoordinatorConflictTests
     }
 
     [Fact]
+    public async Task ConfirmedSearchCarriesHostFrozenIdentityToAutomation()
+    {
+        await using var environment = DesktopHostTestEnvironment.Create();
+        var expected = new ForegroundWindowSnapshot(
+            9551,
+            "可信搜索窗口",
+            "trusted-search-target",
+            95510,
+            new DateTimeOffset(2026, 8, 30, 1, 0, 0, TimeSpan.Zero),
+            DateTimeOffset.UtcNow);
+        var foreground = new MutableForegroundProvider(expected);
+        var automation = new RecordingDesktopAutomation();
+        using var host = environment.BuildHost(services =>
+        {
+            services.AddSingleton<IForegroundWindowContextProvider>(foreground);
+            services.AddSingleton<IReliableDesktopAutomation>(automation);
+        });
+        await host.StartAsync();
+        IDesktopApiClient client = new DesktopApiClient(environment.Options.PipeName);
+        var session = await client.StartNewSessionAsync("可信窗口搜索");
+        var submitted = await client.SubmitSessionInputAsync(new SessionInputRequestDto(
+            "在当前窗口搜索天气",
+            "Text",
+            "trusted-search-identity",
+            session.SessionId));
+        await WaitForTurnPhaseAsync(client, submitted.TurnId, "WaitingForConfirmation");
+
+        var completed = await client.ConfirmSessionTurnAsync(
+            session.SessionId,
+            submitted.TurnId,
+            confirmed: true);
+        await host.StopAsync();
+
+        Assert.Equal(
+            "Completed",
+            completed.Turns.Single(turn => turn.Id == submitted.TurnId).Phase);
+        Assert.Equal(1, automation.SearchCallCount);
+        Assert.Equal("天气", automation.LastQuery);
+        Assert.NotNull(automation.LastWindowIdentity);
+        Assert.True(WindowIdentityContract.Matches(expected, automation.LastWindowIdentity));
+    }
+
+    [Fact]
     public async Task SameVisibleWindowWithDifferentProcessIdentityRequiresNewConfirmation()
     {
         await using var environment = DesktopHostTestEnvironment.Create();
@@ -858,14 +901,17 @@ public sealed class SessionCoordinatorConflictTests
 
         public string? LastQuery { get; private set; }
 
-        public DesktopAutomationResult Search(long windowHandle, string query)
+        public ForegroundWindowSnapshot? LastWindowIdentity { get; private set; }
+
+        public DesktopAutomationResult Search(ForegroundWindowSnapshot expectedWindow, string query)
         {
             Interlocked.Increment(ref _searchCallCount);
             LastQuery = query;
+            LastWindowIdentity = expectedWindow;
             return new DesktopAutomationResult(true, "合成搜索已提交");
         }
 
-        public DesktopAutomationResult Describe(long windowHandle) =>
+        public DesktopAutomationResult Describe(ForegroundWindowSnapshot expectedWindow) =>
             new(true, "合成结构化窗口信息");
     }
 }

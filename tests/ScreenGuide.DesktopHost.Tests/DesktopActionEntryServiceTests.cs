@@ -103,6 +103,34 @@ public sealed class DesktopActionEntryServiceTests
         Assert.Contains("https://example.com/guide", command.PayloadJson, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData("SearchForeground", "测试内容")]
+    [InlineData("DescribeForeground", "9211")]
+    public async Task DirectIpcWindowActionCannotTreatClientHandleAsTrustedIdentity(
+        string actionKind,
+        string target)
+    {
+        await using var environment = DesktopHostTestEnvironment.Create();
+        var automation = new RecordingAutomation();
+        using var host = environment.BuildHost(services =>
+            services.AddSingleton<IReliableDesktopAutomation>(automation));
+        await host.StartAsync();
+        IDesktopApiClient client = new DesktopApiClient(environment.Options.PipeName);
+
+        var failure = await Assert.ThrowsAsync<DesktopApiException>(() =>
+            client.ExecuteDesktopActionAsync(new ExecuteDesktopActionRequestDto(
+                actionKind,
+                target,
+                true,
+                $"direct-ipc-{actionKind}",
+                9211,
+                "客户端声称的窗口")));
+        await host.StopAsync();
+
+        Assert.Equal(WindowIdentityErrorCodes.Missing, failure.Error.Code);
+        Assert.Equal(0, automation.CallCount);
+    }
+
     private sealed class RecordingLauncher : IDesktopProcessLauncher
     {
         public List<string> Targets { get; } = [];
@@ -125,6 +153,23 @@ public sealed class DesktopActionEntryServiceTests
         {
             Targets.Add(website.AbsoluteUri);
             return new VisibleDesktopLaunchResult(4242, 88, "测试浏览器");
+        }
+    }
+
+    private sealed class RecordingAutomation : IReliableDesktopAutomation
+    {
+        public int CallCount { get; private set; }
+
+        public DesktopAutomationResult Search(ForegroundWindowSnapshot expectedWindow, string query)
+        {
+            CallCount++;
+            return new DesktopAutomationResult(true, "不应执行");
+        }
+
+        public DesktopAutomationResult Describe(ForegroundWindowSnapshot expectedWindow)
+        {
+            CallCount++;
+            return new DesktopAutomationResult(true, "不应执行");
         }
     }
 }

@@ -74,9 +74,9 @@ public interface IForegroundWindowContextProvider
 
 public interface IReliableDesktopAutomation
 {
-    DesktopAutomationResult Search(long windowHandle, string query);
+    DesktopAutomationResult Search(ForegroundWindowSnapshot expectedWindow, string query);
 
-    DesktopAutomationResult Describe(long windowHandle);
+    DesktopAutomationResult Describe(ForegroundWindowSnapshot expectedWindow);
 }
 
 /// <summary>
@@ -221,27 +221,31 @@ public sealed class ForegroundWindowTracker : IForegroundWindowContextProvider, 
     private static extern int GetWindowTextLength(IntPtr hWnd);
 }
 
-public sealed class WindowsUiAutomationService : IReliableDesktopAutomation
+public sealed class WindowsUiAutomationService(
+    IForegroundWindowContextProvider foregroundWindows) : IReliableDesktopAutomation
 {
     private static readonly string[] SearchTerms =
     [
         "搜索", "查找", "搜索框", "地址", "网址", "search", "find", "address"
     ];
 
-    public DesktopAutomationResult Search(long windowHandle, string query)
+    public DesktopAutomationResult Search(ForegroundWindowSnapshot expectedWindow, string query)
     {
+        ArgumentNullException.ThrowIfNull(expectedWindow);
         query = (query ?? string.Empty).Trim();
         if (query.Length is < 1 or > 200)
         {
             throw new ArgumentException("搜索内容应为 1 到 200 个字符。", nameof(query));
         }
 
-        var handle = new IntPtr(windowHandle);
+        RequireCurrentIdentity(expectedWindow);
+        var handle = new IntPtr(expectedWindow.WindowHandle);
         if (handle == IntPtr.Zero || !IsWindow(handle))
         {
             throw new InvalidOperationException("目标窗口已经关闭，请重新切回目标软件后再试。 ");
         }
 
+        RequireCurrentIdentity(expectedWindow);
         var root = AutomationElement.FromHandle(handle)
             ?? throw new InvalidOperationException("Windows 无法读取这个窗口的控件结构。 ");
         var candidates = FindWritableSearchBoxes(root);
@@ -263,13 +267,16 @@ public sealed class WindowsUiAutomationService : IReliableDesktopAutomation
             throw new InvalidOperationException("无法把目标软件切到前台，因此没有输入任何内容。 ");
         }
 
+        RequireCurrentIdentity(expectedWindow);
         candidate.Element.SetFocus();
+        RequireCurrentIdentity(expectedWindow);
         candidate.Pattern.SetValue(query);
         if (!string.Equals(candidate.Pattern.Current.Value, query, StringComparison.Ordinal))
         {
             throw new InvalidOperationException("搜索内容没有被可靠写入，因此没有提交。 ");
         }
 
+        RequireCurrentIdentity(expectedWindow);
         SendKeys.SendWait("{ENTER}");
         return new DesktopAutomationResult(
             true,
@@ -277,14 +284,17 @@ public sealed class WindowsUiAutomationService : IReliableDesktopAutomation
             $"Control={candidate.Name}; AutomationId={candidate.AutomationId}");
     }
 
-    public DesktopAutomationResult Describe(long windowHandle)
+    public DesktopAutomationResult Describe(ForegroundWindowSnapshot expectedWindow)
     {
-        var handle = new IntPtr(windowHandle);
+        ArgumentNullException.ThrowIfNull(expectedWindow);
+        RequireCurrentIdentity(expectedWindow);
+        var handle = new IntPtr(expectedWindow.WindowHandle);
         if (handle == IntPtr.Zero || !IsWindow(handle))
         {
             throw new InvalidOperationException("目标窗口已经关闭，请重新切回目标软件后再试。 ");
         }
 
+        RequireCurrentIdentity(expectedWindow);
         var root = AutomationElement.FromHandle(handle)
             ?? throw new InvalidOperationException("Windows 无法读取这个窗口的控件结构。 ");
         var title = SafeCurrent(() => root.Current.Name);
@@ -304,6 +314,11 @@ public sealed class WindowsUiAutomationService : IReliableDesktopAutomation
             : $"当前窗口“{title}”包含：{string.Join("、", controls)}。";
         return new DesktopAutomationResult(true, summary);
     }
+
+    private void RequireCurrentIdentity(ForegroundWindowSnapshot expectedWindow) =>
+        WindowIdentityContract.RequireMatch(
+            expectedWindow,
+            foregroundWindows.ResolveWindow(expectedWindow.WindowHandle));
 
     private static List<SearchCandidate> FindWritableSearchBoxes(AutomationElement root)
     {

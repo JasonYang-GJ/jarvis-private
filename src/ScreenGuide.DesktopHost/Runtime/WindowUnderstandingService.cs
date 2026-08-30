@@ -56,7 +56,7 @@ public sealed class WindowUnderstandingService(
         string? structure = null;
         try
         {
-            structure = structuredInterface.Describe(foreground.WindowHandle).Summary;
+            structure = structuredInterface.Describe(foreground).Summary;
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {

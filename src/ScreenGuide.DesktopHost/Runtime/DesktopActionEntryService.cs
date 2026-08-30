@@ -24,7 +24,27 @@ public sealed class DesktopActionEntryService(
 
     public async Task<DesktopActionResultDto> ExecuteAsync(
         ExecuteDesktopActionRequestDto request,
+        CancellationToken cancellationToken = default) =>
+        await ExecuteCoreAsync(request, null, cancellationToken).ConfigureAwait(false);
+
+    internal async Task<DesktopActionResultDto> ExecuteTrustedWindowAsync(
+        ExecuteDesktopActionRequestDto request,
+        ForegroundWindowSnapshot trustedWindow,
         CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(trustedWindow);
+        if (request.ActionKind is not ("SearchForeground" or "DescribeForeground"))
+        {
+            throw new ArgumentException("可信窗口入口只接受窗口范围操作。", nameof(request));
+        }
+
+        return await ExecuteCoreAsync(request, trustedWindow, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<DesktopActionResultDto> ExecuteCoreAsync(
+        ExecuteDesktopActionRequestDto request,
+        ForegroundWindowSnapshot? trustedWindow,
+        CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
         if (!request.Confirmed)
@@ -33,7 +53,7 @@ public sealed class DesktopActionEntryService(
         }
 
         var device = RequireStartedHost().LocalDevice!;
-        var normalized = Normalize(request);
+        var normalized = Normalize(request, trustedWindow);
         var now = timeProvider.GetUtcNow();
         var command = new CommandRecord
         {
@@ -79,7 +99,8 @@ public sealed class DesktopActionEntryService(
                 normalized.ExecutionTarget,
                 normalized.WindowHandle,
                 normalized.WindowTitle,
-                normalized.Argument)),
+                normalized.Argument,
+                normalized.WindowIdentity)),
             [new SkillResourceScope(
                 normalized.ScopeType,
                 null,
@@ -205,7 +226,9 @@ public sealed class DesktopActionEntryService(
             ? "ExplicitVoice"
             : "VisibleConfirmation";
 
-    private NormalizedDesktopAction Normalize(ExecuteDesktopActionRequestDto request)
+    private NormalizedDesktopAction Normalize(
+        ExecuteDesktopActionRequestDto request,
+        ForegroundWindowSnapshot? trustedWindow)
     {
         if (string.Equals(request.ActionKind, "OpenApplication", StringComparison.Ordinal))
         {
@@ -278,41 +301,64 @@ public sealed class DesktopActionEntryService(
         if (string.Equals(request.ActionKind, "SearchForeground", StringComparison.Ordinal))
         {
             var query = request.Target.Trim();
-            if (query.Length is < 1 or > 200 || request.WindowHandle is null)
+            if (query.Length is < 1 or > 200)
             {
-                throw new ArgumentException("搜索操作缺少有效内容或明确的目标窗口。");
+                throw new ArgumentException("搜索操作缺少有效内容。", nameof(request));
             }
+
+            var identity = RequireTrustedWindow(request, trustedWindow);
 
             return new NormalizedDesktopAction(
                 request.ActionKind,
                 WindowsDesktopCapabilities.SearchForeground,
                 "Window",
                 query,
-                request.WindowHandle.Value.ToString(),
-                request.WindowTitle ?? "前台窗口",
-                request.WindowHandle,
-                request.WindowTitle);
+                identity.WindowHandle.ToString(),
+                identity.WindowTitle,
+                identity.WindowHandle,
+                identity.WindowTitle,
+                WindowIdentity: identity);
         }
 
         if (string.Equals(request.ActionKind, "DescribeForeground", StringComparison.Ordinal))
         {
-            if (request.WindowHandle is null)
-            {
-                throw new ArgumentException("窗口查看缺少明确的目标窗口。");
-            }
+            var identity = RequireTrustedWindow(request, trustedWindow);
 
             return new NormalizedDesktopAction(
                 request.ActionKind,
                 WindowsDesktopCapabilities.DescribeForeground,
                 "Window",
-                request.WindowHandle.Value.ToString(),
-                request.WindowHandle.Value.ToString(),
-                request.WindowTitle ?? "前台窗口",
-                request.WindowHandle,
-                request.WindowTitle);
+                identity.WindowHandle.ToString(),
+                identity.WindowHandle.ToString(),
+                identity.WindowTitle,
+                identity.WindowHandle,
+                identity.WindowTitle,
+                WindowIdentity: identity);
         }
 
         throw new UnauthorizedAccessException("这个桌面操作尚未开放。");
+    }
+
+    private static ForegroundWindowSnapshot RequireTrustedWindow(
+        ExecuteDesktopActionRequestDto request,
+        ForegroundWindowSnapshot? trustedWindow)
+    {
+        if (trustedWindow is null)
+        {
+            throw new WindowIdentityException(
+                WindowIdentityErrorCodes.Missing,
+                "窗口操作必须通过 Host 会话中的可信窗口身份执行。 ");
+        }
+
+        if (request.WindowHandle != trustedWindow.WindowHandle
+            || !string.Equals(request.WindowTitle, trustedWindow.WindowTitle, StringComparison.Ordinal))
+        {
+            throw new WindowIdentityException(
+                WindowIdentityErrorCodes.Changed,
+                "窗口操作请求与 Host 冻结的窗口身份不一致。 ");
+        }
+
+        return trustedWindow;
     }
 
     private Task AppendAuditAsync(
@@ -345,5 +391,6 @@ public sealed class DesktopActionEntryService(
         string AuditTarget,
         long? WindowHandle = null,
         string? WindowTitle = null,
-        string? Argument = null);
+        string? Argument = null,
+        ForegroundWindowSnapshot? WindowIdentity = null);
 }

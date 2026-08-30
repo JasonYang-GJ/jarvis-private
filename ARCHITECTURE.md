@@ -252,7 +252,7 @@ Codex 普通聊天适配器由 `CodexChatModelProvider` 承载，但生产策略
 - `SessionCoordinator.cs`、`MainWindow.xaml.cs`、`SqliteTaskStore.cs` 等文件较大；阶段 1 为稳定边界保留了集中实现，后续只能在测试保护下逐步拆分。
 - Session 快照随完整会话历史增长；ChangeVersion 是单 Host 进程内信号，实例 ID/启动时间只解决重启后的快照世代判断，不是跨进程持久事件日志。
 - 编程任务监视器仍在 Host 内部定时查询 Task 状态；这不等于 DesktopClient 的全量轮询，但仍可在后续改为更直接的任务事件。
-- 单窗口身份已绑定 HWND、PID、进程启动时间、进程名和标题；动态标题变化会保守地要求重新确认，这是防止 HWND/PID 复用和目标漂移的安全取舍。
+- 单窗口身份已绑定 HWND、PID、进程启动时间、进程名和标题；公开 `desktop.action.execute` 不把客户端 HWND/标题当作窗口授权，Session Host 冻结的完整身份会在 UI Automation 控件读取、写入和提交前重复核验。动态标题变化会保守地要求重新确认，这是防止 HWND/PID 复用和目标漂移的安全取舍。
 - DeepSeek/Qwen 真实验收是已冻结的精确 SHA 证据；日后修改 Provider 或模型合同时必须对新 SHA 重新获得最小真实请求授权，不得泛化旧结论。
 - Codex 普通聊天只保留 `codex-default` 描述并在生产策略下失败关闭，不提供真实普通聊天模型或 Usage；这不影响独立 Codex 编程 Agent。
 - Provider 切换会把同一 Conversation 的既有历史交给新的数据目的地；UI 已明确提示，但仍需真实用户体验验收。

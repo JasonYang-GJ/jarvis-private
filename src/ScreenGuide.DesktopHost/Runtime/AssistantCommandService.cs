@@ -312,18 +312,21 @@ public sealed class AssistantCommandService(
             throw new InvalidOperationException("目标窗口已经不可用，请重新切回目标软件。 ");
         }
 
-        var result = await desktopActions.ExecuteAsync(
-                new ExecuteDesktopActionRequestDto(
-                    actionKind,
-                    target,
-                    request.Confirmed,
-                    request.IdempotencyKey,
-                    foreground?.WindowHandle,
-                    foreground?.WindowTitle,
-                    applicationId,
-                    request.AuthorizationSource),
-                cancellationToken)
-            .ConfigureAwait(false);
+        var desktopRequest = new ExecuteDesktopActionRequestDto(
+            actionKind,
+            target,
+            request.Confirmed,
+            request.IdempotencyKey,
+            foreground?.WindowHandle,
+            foreground?.WindowTitle,
+            applicationId,
+            request.AuthorizationSource);
+        var result = foreground is null
+            ? await desktopActions.ExecuteAsync(desktopRequest, cancellationToken).ConfigureAwait(false)
+            : await desktopActions.ExecuteTrustedWindowAsync(
+                desktopRequest,
+                foreground,
+                cancellationToken).ConfigureAwait(false);
         var verification = actionKind is "OpenApplication" or "SearchForeground" or "DescribeForeground"
             or "OpenWebsite" or "OpenWebsiteInApplication"
             ? "ExecutionVerified"

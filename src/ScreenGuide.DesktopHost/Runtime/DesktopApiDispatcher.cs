@@ -8,6 +8,7 @@ using ScreenGuide.Core.Sessions;
 using ScreenGuide.Core.Memories;
 using ScreenGuide.DesktopHost.Configuration;
 using ScreenGuide.DesktopProtocol;
+using ScreenGuide.Skills.Windows;
 
 namespace ScreenGuide.DesktopHost.Runtime;
 
@@ -824,6 +825,8 @@ internal static class DesktopApiErrors
     {
         var (code, userMessage) = exception switch
         {
+            WindowIdentityException windowIdentityException =>
+                (windowIdentityException.Code, windowIdentityException.Message),
             MemoryServiceException memoryException =>
                 (memoryException.Code, memoryException.Message),
             MemoryValidationException =>

@@ -28,7 +28,8 @@ public sealed record WindowsDesktopActionInput(
     string Target,
     long? WindowHandle = null,
     string? WindowTitle = null,
-    string? Argument = null);
+    string? Argument = null,
+    ForegroundWindowSnapshot? WindowIdentity = null);
 
 public sealed record VisibleDesktopLaunchResult(
     int? ProcessId,
@@ -318,24 +319,28 @@ public sealed class WindowsDesktopSkillAdapter(
         if (string.Equals(capability, WindowsDesktopCapabilities.SearchForeground, StringComparison.Ordinal))
         {
             if (!string.Equals(input.ActionKind, "SearchForeground", StringComparison.Ordinal)
-                || input.WindowHandle is null)
+                || input.WindowIdentity is null)
             {
-                throw new UnauthorizedAccessException("搜索操作缺少明确的目标窗口。");
+                throw new WindowIdentityException(
+                    WindowIdentityErrorCodes.Missing,
+                    "搜索操作缺少可信的目标窗口身份。");
             }
 
-            var result = automation.Search(input.WindowHandle.Value, input.Target);
+            var result = automation.Search(input.WindowIdentity, input.Target);
             return (null, result.Summary);
         }
 
         if (string.Equals(capability, WindowsDesktopCapabilities.DescribeForeground, StringComparison.Ordinal))
         {
             if (!string.Equals(input.ActionKind, "DescribeForeground", StringComparison.Ordinal)
-                || input.WindowHandle is null)
+                || input.WindowIdentity is null)
             {
-                throw new UnauthorizedAccessException("窗口查看缺少明确的目标窗口。");
+                throw new WindowIdentityException(
+                    WindowIdentityErrorCodes.Missing,
+                    "窗口查看缺少可信的目标窗口身份。");
             }
 
-            var result = automation.Describe(input.WindowHandle.Value);
+            var result = automation.Describe(input.WindowIdentity);
             return (null, result.Summary);
         }
 

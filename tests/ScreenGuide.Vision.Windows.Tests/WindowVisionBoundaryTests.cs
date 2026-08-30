@@ -197,15 +197,15 @@ public sealed class WindowVisionBoundaryTests
 
     private sealed class FixedAutomation : IReliableDesktopAutomation
     {
-        public DesktopAutomationResult Search(long windowHandle, string query) => throw new NotSupportedException();
-        public DesktopAutomationResult Describe(long windowHandle) => new(true, "按钮“系统”");
+        public DesktopAutomationResult Search(ForegroundWindowSnapshot expectedWindow, string query) => throw new NotSupportedException();
+        public DesktopAutomationResult Describe(ForegroundWindowSnapshot expectedWindow) => new(true, "按钮“系统”");
     }
 
     private sealed class RecordingAutomation : IReliableDesktopAutomation
     {
         public int DescribeCalls { get; private set; }
-        public DesktopAutomationResult Search(long windowHandle, string query) => throw new NotSupportedException();
-        public DesktopAutomationResult Describe(long windowHandle)
+        public DesktopAutomationResult Search(ForegroundWindowSnapshot expectedWindow, string query) => throw new NotSupportedException();
+        public DesktopAutomationResult Describe(ForegroundWindowSnapshot expectedWindow)
         {
             DescribeCalls++;
             return new DesktopAutomationResult(true, "按钮“系统”");

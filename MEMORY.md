@@ -23,7 +23,7 @@
 8. 安装产物不提交 Git，以版本标签、哈希、测试记录和外部快照关联。
 9. 正式版本只能在标签存在、干净源码构建和测试通过、安装验收通过、工作区干净后宣布冻结。
 10. 产品运行时长期记忆是独立状态真源，不得复用 Conversation、Session/Turn、编程 Task、Provider Thread 或 `ai_invocations`。本地预览不等于同意；S3-R3 只允许用户为单个普通聊天 Turn 查看完整出站快照后单次确认，不能授予任何权限，也不能自动发送。
-11. 单窗口授权的可信身份是 `{HWND, PID, ProcessStartTimeUtc, ProcessName, Title}`。schema v11 在 Session Turn 内持久化 PID 与启动时间，protocol 维持 v10；确认、UIA、捕获后端/回退和分析前任一身份缺失或变化都必须清帧并重新确认，历史 v10 Turn 不得复用旧授权。
+11. 单窗口授权的可信身份是 `{HWND, PID, ProcessStartTimeUtc, ProcessName, Title}`。schema v11 在 Session Turn 内持久化 PID 与启动时间，protocol 维持 v10；公开桌面操作 IPC 不接受客户端 HWND/标题作为窗口授权，Host 完整身份必须一直传到 UI Automation 并在控件读取、写入和提交前重验。确认、UIA、捕获后端/回退和分析前任一身份缺失或变化都必须清帧并重新确认，历史 v10 Turn 不得复用旧授权。
 
 ## 阶段 1 已确认决策
 

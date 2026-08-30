@@ -102,7 +102,7 @@
 ## 阶段 4 R1 当前能力
 
 - 单窗口授权在 Host 内绑定 `{HWND, PID, ProcessStartTimeUtc, ProcessName, Title}`，身份只来自可信 Windows/Host 读取，不接受 Client、屏幕内容或模型提供的身份。
-- 身份在确认前、UI Automation 前、每个单窗口捕获后端入口、回退入口、捕获完成后和本机分析前重新核验；任何缺失、读取失败或变化都会清理已捕获画面并要求重新选择/确认，不会弱化为只比较 HWND、进程名或标题。
+- 身份在确认前、UI Automation 控件读取/写入/提交前、每个单窗口捕获后端入口、回退入口、捕获完成后和本机分析前重新核验；公开桌面操作 IPC 不接受客户端提供的 HWND/标题作为窗口授权。任何缺失、读取失败或变化都会清理已捕获画面并要求重新选择/确认，不会弱化为只比较 HWND、进程名或标题。
 - SQLite 候选合同为 schema v11，在 `session_turns` 保存 PID 和进程启动时间；v10→v11 先创建唯一 `pre-v11-from-v10` 备份并以单事务迁移。历史 v10 Turn 缺少新身份时失败关闭，不能复用旧窗口授权。
 - Desktop IPC 继续保持 protocol v10；PID 与进程启动时间不通过 IPC 暴露，也不新增权限、网络、Provider 或凭据路径。
 

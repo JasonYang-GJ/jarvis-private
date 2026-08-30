@@ -60,20 +60,33 @@ public sealed class WindowsDesktopSkillAdapterTests
     }
 
     [Fact]
-    public async Task SearchRequiresExplicitWindowHandleAndUsesAutomation()
+    public async Task SearchRequiresHostTrustedWindowIdentityAndUsesAutomation()
     {
         var automation = new RecordingAutomation();
         var adapter = CreateAdapter(new RecordingLauncher(), automation);
+        var identity = new ForegroundWindowSnapshot(
+            42,
+            "测试窗口",
+            "test-process",
+            420,
+            new DateTimeOffset(2026, 8, 30, 1, 0, 0, TimeSpan.Zero),
+            DateTimeOffset.UtcNow);
 
         await adapter.StartAsync(Request(
             WindowsDesktopCapabilities.SearchForeground,
-            new WindowsDesktopActionInput("SearchForeground", "测试内容", 42, "测试窗口")));
-        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => adapter.StartAsync(Request(
+            new WindowsDesktopActionInput(
+                "SearchForeground",
+                "测试内容",
+                42,
+                "测试窗口",
+                WindowIdentity: identity)));
+        var missingIdentity = await Assert.ThrowsAsync<WindowIdentityException>(() => adapter.StartAsync(Request(
             WindowsDesktopCapabilities.SearchForeground,
             new WindowsDesktopActionInput("SearchForeground", "不能执行"))));
 
-        Assert.Equal(42, automation.WindowHandle);
+        Assert.Equal(identity, automation.WindowIdentity);
         Assert.Equal("测试内容", automation.Query);
+        Assert.Equal(WindowIdentityErrorCodes.Missing, missingIdentity.Code);
     }
 
     [Fact]
@@ -164,18 +177,18 @@ public sealed class WindowsDesktopSkillAdapterTests
 
     private sealed class RecordingAutomation : IReliableDesktopAutomation
     {
-        public long WindowHandle { get; private set; }
+        public ForegroundWindowSnapshot? WindowIdentity { get; private set; }
 
         public string? Query { get; private set; }
 
-        public DesktopAutomationResult Search(long windowHandle, string query)
+        public DesktopAutomationResult Search(ForegroundWindowSnapshot expectedWindow, string query)
         {
-            WindowHandle = windowHandle;
+            WindowIdentity = expectedWindow;
             Query = query;
             return new DesktopAutomationResult(true, "已提交");
         }
 
-        public DesktopAutomationResult Describe(long windowHandle) =>
+        public DesktopAutomationResult Describe(ForegroundWindowSnapshot expectedWindow) =>
             new(true, "已读取");
     }
 }
