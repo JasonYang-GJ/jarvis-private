@@ -265,6 +265,97 @@ public sealed class SessionProjectionIntegrationTests
     }
 
     [Fact]
+    public async Task ProjectionDeltaResetsWhenLegalTurnAndMessageItemsCannotFitTogether()
+    {
+        await using var environment = DesktopHostTestEnvironment.Create();
+        using var host = environment.BuildHost();
+        await host.StartAsync();
+        IDesktopApiClient client = new DesktopApiClient(environment.Options.PipeName);
+        var bootstrap = await client.StartNewSessionAsync("投影聚合预算");
+        var sessionStore = host.Services.GetRequiredService<ISessionStore>();
+        var conversationStore = host.Services.GetRequiredService<IConversationStore>();
+        var projections = host.Services.GetRequiredService<SessionProjectionService>();
+        var now = environment.TimeProvider.GetUtcNow();
+        var largeTurnInput = new string('T', 180_000);
+        var largeMessage = new string('M', 180_000);
+
+        for (var index = 0; index < 2; index++)
+        {
+            var turn = (await sessionStore.StartTurnAsync(
+                bootstrap.SessionId,
+                largeTurnInput,
+                "Text",
+                $"projection-aggregate-budget-{index}",
+                ReadyRoute(now),
+                now)).Turn;
+            projections.RecordChange(bootstrap.SessionId, turn);
+        }
+
+        _ = await conversationStore.StartTurnAsync(
+            bootstrap.ConversationId,
+            Guid.NewGuid(),
+            largeMessage,
+            "projection-aggregate-budget-message",
+            now);
+
+        var update = await client.WaitForSessionProjectionAsync(new SessionProjectionCursorDto(
+            bootstrap.CoordinatorInstanceId,
+            bootstrap.CoordinatorStartedAtUtc,
+            bootstrap.SessionId,
+            bootstrap.ChangeVersion,
+            KnownMessageSequenceNumber: 0,
+            WaitMilliseconds: 0));
+        await host.StopAsync();
+
+        Assert.Equal("ResetRequired", update.Kind);
+        Assert.Equal("projection_budget", update.ResetReason);
+        Assert.Equal(bootstrap.SessionId, update.SessionId);
+        Assert.Empty(update.TurnUpserts);
+        Assert.Empty(update.MessageUpserts);
+        Assert.InRange(
+            JsonSerializer.SerializeToUtf8Bytes(update, DesktopProtocolJson.Options).Length,
+            1,
+            512 * 1024);
+    }
+
+    [Fact]
+    public async Task ProjectionDeltaRejectsAnIndividuallyOversizedTurnInsideAMultiTurnBatch()
+    {
+        await using var environment = DesktopHostTestEnvironment.Create();
+        using var host = environment.BuildHost();
+        await host.StartAsync();
+        IDesktopApiClient client = new DesktopApiClient(environment.Options.PipeName);
+        var bootstrap = await client.StartNewSessionAsync("投影单项预算");
+        var sessionStore = host.Services.GetRequiredService<ISessionStore>();
+        var projections = host.Services.GetRequiredService<SessionProjectionService>();
+        var now = environment.TimeProvider.GetUtcNow();
+
+        foreach (var input in new[] { new string('X', 600_000), "small-turn" })
+        {
+            var turn = (await sessionStore.StartTurnAsync(
+                bootstrap.SessionId,
+                input,
+                "Text",
+                $"projection-single-item-budget-{Guid.NewGuid():N}",
+                ReadyRoute(now),
+                now)).Turn;
+            projections.RecordChange(bootstrap.SessionId, turn);
+        }
+
+        var exception = await Assert.ThrowsAsync<DesktopApiException>(() =>
+            client.WaitForSessionProjectionAsync(new SessionProjectionCursorDto(
+                bootstrap.CoordinatorInstanceId,
+                bootstrap.CoordinatorStartedAtUtc,
+                bootstrap.SessionId,
+                bootstrap.ChangeVersion,
+                KnownMessageSequenceNumber: 0,
+                WaitMilliseconds: 0)));
+        await host.StopAsync();
+
+        Assert.Equal("session_projection_item_too_large", exception.Error.Code);
+    }
+
+    [Fact]
     public void DesktopProtocolIsVersionElevenWithoutChangingTheSchemaContract()
     {
         Assert.Equal(11, DesktopProtocolVersion.Current);

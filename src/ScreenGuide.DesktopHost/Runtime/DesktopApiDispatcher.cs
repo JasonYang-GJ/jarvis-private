@@ -725,6 +725,18 @@ public sealed class DesktopApiDispatcher(
             return response;
         }
 
+        if (response.TurnUpserts.Any(turn => !FitsProjectionBudget(response with
+            {
+                TurnUpserts = [turn],
+                MessageUpserts = [],
+                LastMessageSequenceNumber = 0
+            })))
+        {
+            throw new SessionProjectionException(
+                "session_projection_item_too_large",
+                "单条会话内容过大，无法安全显示。");
+        }
+
         if (response.MessageUpserts.Any(message => !FitsProjectionBudget(response with
             {
                 TurnUpserts = [],
@@ -751,20 +763,17 @@ public sealed class DesktopApiDispatcher(
             }
         }
 
-        if (response.MessageUpserts.Count == 0 && response.TurnUpserts.Count > 1)
+        var reset = response with
         {
-            var reset = response with
-            {
-                Kind = "ResetRequired",
-                TurnUpserts = [],
-                MessageUpserts = [],
-                LastMessageSequenceNumber = 0,
-                ResetReason = "projection_budget"
-            };
-            if (FitsProjectionBudget(reset))
-            {
-                return reset;
-            }
+            Kind = "ResetRequired",
+            TurnUpserts = [],
+            MessageUpserts = [],
+            LastMessageSequenceNumber = 0,
+            ResetReason = "projection_budget"
+        };
+        if (FitsProjectionBudget(reset))
+        {
+            return reset;
         }
 
         throw new SessionProjectionException(
