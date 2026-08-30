@@ -31,7 +31,16 @@ S4-R2 只回答两个问题：本机离线中文语音在真实麦克风下的�
 
 禁止：录音、波形、partial/final 转写、固定短句、图像、OCR/UIA 正文、窗口标题、HWND/PID/启动时间、用户名/机器名、路径、异常消息/堆栈、Prompt、Provider、凭据或内容哈希。
 
-默认只在标准输出生成一条 `YUANSHU_S4_R2_RESULT` JSON，不写文件。Runner 报告合同为 `s4-r2.usage-evaluation.v2`；在任何设备操作前还会把 `--expected-sha` 与自身 ProductVersion 中的源码 SHA 精确比较，不匹配时失败关闭。
+默认只在标准输出生成一条 `YUANSHU_S4_R2_RESULT` JSON，不写文件。Runner 报告合同为 `s4-r2.usage-evaluation.v3`；在任何设备操作前还会把 `--expected-sha` 与自身 ProductVersion 中的源码 SHA 精确比较，不匹配时失败关闭。v3 只增加脱敏视觉帧形态、固定候选距离和 OCR 是否检出的布尔证据，不返回像素、标记或 OCR 正文。
+
+## 已完成验收
+
+- 离线最终代码候选：`996da9acb9cf00537794668bfd81f65d1444cca8`；focused 3/3、Vision 35/35、Voice 43/43、Runner/DesktopHost Release build、独立 QA 和安全/架构门禁全部 PASS。
+- Voice：exact SHA `e1563ea8b5a5b2206814d398b40410f68e996cf2`，1 次预热 + 20 次正式尝试，18 Success / 2 Failure，失败率 10%；端到端延迟 min/p50/p95/max 为 2560/3840/5121/6080 ms。后续候选未修改真实语音监听器、短句合同或 attempt tracker。
+- Voice STOP：同一语音代码候选的独立场景以 `Cancelled` 结束，清理完成。
+- Vision：exact SHA `996da9acb9cf00537794668bfd81f65d1444cca8`，1 次预热 + 20 次正式尝试，20/20 Success；capture min/p50/p95/max 为 46/53/176/195 ms，analysis 为 12/15/29/31 ms，end-to-end 为 58/83/190/220 ms。
+- Vision identity change：同一 exact SHA 以 `Cancelled / vision.identity_changed` 结束，没有执行分析或保留帧。
+- 所有真实批次均为 `CleanupConfirmed=true`、`NetworkRequests=0`、`ProviderRequests=0`；诊断样本只用于定位并未计入正式成功率。
 
 ## 门禁顺序
 

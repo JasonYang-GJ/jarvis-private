@@ -240,7 +240,7 @@ Codex 普通聊天适配器由 `CodexChatModelProvider` 承载，但生产策略
 
 视觉适配器先创建并显示固定测试 HWND，再把同意绑定到该精确身份；之后经 `WindowsWindowCaptureTargetVerifier`、`WindowsSingleWindowCaptureService`、`WindowsGraphicsCaptureBackend` 和 `WindowsLocalWindowVisionProvider` 走真实本机路径。每一帧只在一次分析期间存在，`CapturedWindowFrame.Dispose` 清零字节；普通批次或专用场景只要目标身份变化就立即按取消终态结束，不回退到桌面捕获。
 
-公共指标聚合器固定四种终态 `Success/Failure/Cancelled/Blocked`，排除 warmup，使用 nearest-rank 计算 p50/p95，并分别保留 capture/analysis/end-to-end 汇总。安全报告采用封闭类型和稳定错误码 allowlist，无法携带自由文本诊断。
+公共指标聚合器固定四种终态 `Success/Failure/Cancelled/Blocked`，排除 warmup，使用 nearest-rank 计算 p50/p95，并分别保留 capture/analysis/end-to-end 汇总。安全报告合同当前为 `s4-r2.usage-evaluation.v3`，采用封闭类型和稳定错误码 allowlist，无法携带自由文本诊断；视觉 v3 只增加脱敏帧形态和 OCR 检出布尔值，不保存像素或 OCR 正文。
 
 - .NET SDK 由 `global.json` 固定到 10.0.400，允许同补丁线更新。
 - 普通依赖与 win-x64 发布依赖使用锁文件，发布脚本在 locked mode 下恢复。
@@ -250,6 +250,7 @@ Codex 普通聊天适配器由 `CodexChatModelProvider` 承载，但生产策略
 - 阶段 2 普通聊天发布目标是 DeepSeek + 千问。DeepSeek 既有真实证据已冻结；Qwen 真实 Health、Ordinary Chat 和 Cancellation 通过。Codex 普通聊天不属于发布目标，普通聊天选 Qwen 时的独立真实 Codex 编程 Task 回归已通过。
 - 阶段 3 离线 Release 定向门禁 90/90 通过；实际 Release WPF Client + DesktopHost 通过 Stage 2 路由回归和 Stage 3 记忆 CRUD、预览、完整出站确认、单次发送、输入变化失效与删除流程，Provider 为进程内 Fake，网络、真实凭据和真实 Provider 请求均为 0。
 - 阶段 3 标签 `v0.5.0-stage3` 指向 `d553e7e9d606037df87d98e99250de5498f5934a`，annotated tag object 为 `a67d2b24308edb2ce72db97676b837f5018617b8`。独立干净标签源码 locked restore、Client/Host Release publish 和安装包编译通过，发布目录 539 个文件；Client/Host ProductVersion 均为 `0.5.0+d553e7e9d606037df87d98e99250de5498f5934a`，FileVersion 均为 `0.5.0.0`。
+- Stage 4 S4-R2 最终代码候选 `996da9acb9cf00537794668bfd81f65d1444cca8` 通过 focused 3/3、Vision 35/35、Voice 43/43、Runner/DesktopHost Release 构建、独立 QA 和安全/架构门禁。真实语音为 18/20，另有 STOP 取消 PASS；真实视觉为 20/20，identity-change 按 `Cancelled / vision.identity_changed` 结束。各批次清理均完成，网络和 Provider 请求均为 0。
 - V0.5.0 安装包 `artifacts/release/元枢-V0.5.0-安装包.exe` 为 64,173,791 bytes，SHA-256 为 `4683E10CD6C5317EB537681978DB8A77E2DC15041838EF3DCE2DEE47C7C16F95`，未签名。标签后的仅文档证据提交不改变标签源码或二进制来源。
 - 阶段 2 标签 `v0.4.0-stage2` 指向 `33b5859dcaa697bacd5edc5036a58d162b723a0e`，annotated tag object 为 `47a2b3b70fc22904954e2291470e809e58303eca`。独立干净标签源码 locked restore 和 Release build 通过，发布目录 538 个文件；Client/Host ProductVersion 均为 `0.4.0+33b5859dcaa697bacd5edc5036a58d162b723a0e`，FileVersion 均为 `0.4.0.0`。
 - V0.4.0 安装包 `artifacts/release/元枢-V0.4.0-安装包.exe` 为 64,128,304 bytes，SHA-256 为 `222DC720E677202BBCAEC6D507F48ACFA8B2FCA31535FF7B03010DF80EE7DEE9`，未签名。标签后的仅文档证据提交不改变标签源码或二进制来源。

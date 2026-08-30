@@ -4,7 +4,7 @@
 
 ## 当前状态
 
-- 当前正式发布基线仍为 V0.5.0 / V2 阶段 3；`v0.5.0-stage3` 指向 `d553e7e9d606037df87d98e99250de5498f5934a`。Stage 4 的 S4-R1 Window Identity v2 已集成；S4-R2 只完成独立本机评测 Runner 候选，仍需精确 SHA 的独立 QA 和用户可见真实麦克风/窗口批次。
+- 当前正式发布基线仍为 V0.5.0 / V2 阶段 3；`v0.5.0-stage3` 指向 `d553e7e9d606037df87d98e99250de5498f5934a`。Stage 4 的 S4-R1 Window Identity v2 与 S4-R2 本机真实使用评测均已集成；S4-R2 真实语音 18/20、STOP 取消 PASS、真实视觉 20/20、窗口身份变化 fail-closed PASS，所有证据均为零网络/零 Provider 请求。
 - V2 阶段 1“统一会话中枢”已经通过；363/363 自动化和实际 Release DesktopClient + DesktopHost 的真实桌面验收均通过。
 - V0.2.1 标签 `v0.2.1-baseline` 保留为上一版回滚点；回滚必须同时使用 pre-v7 备份或隔离数据目录。
 - V2 阶段 2“可替换 AI 大脑与模型路由”已通过：统一 Chat Model、Provider Registry、Model Router、Prompt Registry、DPAPI、安全停用的 Codex 普通聊天适配器、DeepSeek/千问普通聊天 Provider、设置 UI/IPC、语义建议和 schema v8 AI 调用审计。
@@ -104,7 +104,7 @@
 - 每轮发送完整 Conversation 历史并设字符上限；没有 Token 精确预算、摘要和上下文裁剪。
 - DPAPI 不抵御同一 Windows 用户高权限恶意进程或运行时内存读取。
 - Session 快照仍随完整会话历史增长；`SessionCoordinator.cs`、`MainWindow.xaml.cs` 和部分 SQLite Store 较大。
-- S4-R2 候选尚未完成真实麦克风 1+20、Stop 场景、可见测试窗口 1+20 和身份变化人工验收；离线绿灯不能替代真实使用数据。
+- S4-R2 已完成真实麦克风 1+20、独立 STOP 场景、可见测试窗口 1+20 和身份变化人工验收；这些结果只证明当前本机与固定评测合同，不等于所有麦克风、口音、窗口内容或 Windows 设备上的普遍质量保证。
 - 安装包无数字签名；语音模型分发与许可证待定。
 - 阶段 3 的 S3-R1/R2/R3 已集成；自动/语义检索、画像或其他模型使用仍需新的独立批准。
 

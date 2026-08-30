@@ -2,6 +2,15 @@
   "version": 1,
   "dependencies": {
     "net10.0-windows10.0.19041": {
+      "screenguide.skills.abstractions": {
+        "type": "Project"
+      },
+      "screenguide.skills.windows": {
+        "type": "Project",
+        "dependencies": {
+          "ScreenGuide.Skills.Abstractions": "[0.5.0, )"
+        }
+      },
       "screenguide.vision.abstractions": {
         "type": "Project"
       }

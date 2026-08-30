@@ -1,6 +1,6 @@
-# 元枢产品事实（V0.5.0 / V2 阶段 3 正式冻结）
+# 元枢产品事实（V0.5.0 / V2 阶段 3 正式冻结；Stage 4 R1/R2 已集成）
 
-> 当前产品事实的唯一入口。更新时间：2026-08-30。S3-R1/R2/R3 已完成集成、离线 Release 门禁和标签源码产物核验；V0.5.0 / Stage 3 已正式冻结。
+> 当前产品事实的唯一入口。更新时间：2026-08-30。V0.5.0 / Stage 3 已正式冻结；Stage 4 的 S4-R1 Window Identity v2 与 S4-R2 本机真实使用评测已完成集成。
 
 ## 产品定位
 
@@ -12,6 +12,7 @@
 - **阶段 2 正式能力**：统一 Chat Model、Provider Registry、Model Router、Prompt Registry、DPAPI 凭据、安全停用的 Codex 普通聊天适配器、DeepSeek/千问 Provider、设置 UI/IPC、AI 调用审计和只建议不授权的语义意图边界。
 - **发布合同**：普通聊天发布目标是 DeepSeek + 千问；千问仅作手动备用，无自动 fallback、retry 或跨 Provider resend。Codex 普通聊天保持 `ProductionDisabled`/`PolicyDisabled`，独立 Codex 编程 Agent 不随聊天 Provider 改变。
 - **阶段 3 R1 / R2 / R3**：已有本机加密记忆账本和确定性预览；用户可为单个 Turn 选择记忆，并在查看完整 Provider、HTTPS 去向、项目绑定和正文后单次确认发送。默认仍为 0 条，不自动提取或后台发送。
+- **阶段 4 R1 / R2**：单窗口授权已升级为 Host 可信完整身份；独立人工 Runner 已完成真实麦克风、单窗口 OCR、停止和窗口身份变化验收，不加入产品遥测、网络或 Provider 路径。
 
 详细代码边界见 [阶段 2 AI 模型路由设计](docs/V2_STAGE2_AI_MODEL_ROUTING_DESIGN.md)。
 
@@ -106,7 +107,7 @@
 - SQLite 候选合同为 schema v11，在 `session_turns` 保存 PID 和进程启动时间；v10→v11 先创建唯一 `pre-v11-from-v10` 备份并以单事务迁移。历史 v10 Turn 缺少新身份时失败关闭，不能复用旧窗口授权。
 - Desktop IPC 继续保持 protocol v10；PID 与进程启动时间不通过 IPC 暴露，也不新增权限、网络、Provider 或凭据路径。
 
-## 阶段 4 R2 候选评测能力
+## 阶段 4 R2 已集成评测能力
 
 - 新增独立的 `ScreenGuide.Stage4.RealUsageRunner`，不接入产品后台采样、遥测、Session、Provider 或凭据路径。它只在用户从可见终端手工启动并输入 `YES` 后工作。
 - 语音模式复用真实 `OfflineContinuousVoiceListener`，每次由用户按 Enter 主动准备并使用独立 Start/Stop 监听周期；只有麦克风启动完成且 Runner 明确显示“监听已就绪”后用户才开始说话。按已经同一本地模型内存探针精确通过的常用中文非个人短句完成 1 次预热和 20 次正式尝试；15 秒内必须只有一个非空最终结果，并按固定规范化做精确匹配。活动尝试期间输入 STOP 会触发 CancellationToken，listener fault 或取消会立即结束批次。
@@ -115,7 +116,8 @@
 - 正式视觉批次持续出现无法解释的标记缺失时，可在重新取得可见同意后执行 1 个不计入正式指标的诊断样本；同一自建窗口显示 4 组固定非个人候选标记，结果只输出候选 ID、长度和编辑距离等脱敏形态，不输出或保存图像、OCR 正文或标记正文。
 - 计时只使用单调 `Stopwatch`，汇总 count/min/p50/p95/max；失败率只以 success+failure 为分母，cancelled/blocked 单列，预热不计入正式指标且不删除离群值。
 - 最终标准输出只包含 exact SHA、粗粒度环境、次数、终态、聚合耗时、稳定错误码、清理状态以及固定的 `NetworkRequests=0`/`ProviderRequests=0`。不输出或保存录音、波形、识别正文、固定短句、窗口标题/身份、图片、路径、异常正文或堆栈。
-- 当前只完成离线候选与定向测试；真实麦克风和可见窗口的 1+20 人工批次尚未执行，不能把候选写成真实使用 PASS。
+- 离线门禁在最终代码候选 `996da9acb9cf00537794668bfd81f65d1444cca8` 通过 focused 3/3、Vision 35/35、Voice 43/43，以及 Runner/DesktopHost Release 构建；独立 QA 与安全/架构审查均为 PASS。
+- 真实语音批次为 18/20（成功率 90%，达到首批观察线），另一次 STOP 场景正确取消；真实视觉批次在最终代码候选上为 20/20（成功率 100%），窗口身份变化场景正确以 `Cancelled / vision.identity_changed` 失败关闭。所有批次均确认清理完成，`NetworkRequests=0`、`ProviderRequests=0`。
 
 ## 尚未完成
 
