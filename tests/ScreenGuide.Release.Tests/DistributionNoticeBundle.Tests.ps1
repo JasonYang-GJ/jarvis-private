@@ -31,6 +31,7 @@ function Assert-Equal($expected, $actual, [string]$message) {
 function New-PassFixture([string]$root) {
     $bundleRoot = Join-Path $root 'bundle'
     $licensePath = Join-Path $bundleRoot 'files\alpha\LICENSE.txt'
+    $betaLicensePath = Join-Path $bundleRoot 'files\beta-installer\LICENSE.txt'
     $noticeIndexPath = Join-Path $bundleRoot 'notice-index.json'
     $manifestPath = Join-Path $bundleRoot 'bundle-manifest.json'
     $payloadPath = Join-Path $root 'payload-manifest.json'
@@ -38,6 +39,8 @@ function New-PassFixture([string]$root) {
 
     [IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($licensePath)) | Out-Null
     [IO.File]::WriteAllText($licensePath, "FAKE LICENSE FOR TESTS ONLY`n", [Text.UTF8Encoding]::new($false))
+    [IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($betaLicensePath)) | Out-Null
+    [IO.File]::WriteAllText($betaLicensePath, "FAKE BETA LICENSE FOR TESTS ONLY`n", [Text.UTF8Encoding]::new($false))
 
     $payload = [ordered]@{
         schemaVersion = 1
@@ -67,7 +70,7 @@ function New-PassFixture([string]$root) {
                 artifactScope = 'installerContainer'
                 componentId = 'beta-installer'
                 version = '2.0.0'
-                licenseNoticePaths = @('files/alpha/LICENSE.txt')
+                licenseNoticePaths = @('files/beta-installer/LICENSE.txt')
             }
         )
     }
@@ -130,9 +133,9 @@ function New-PassFixture([string]$root) {
                 licenseNoticeFiles = @(
                     [ordered]@{
                         kind = 'LICENSE'
-                        path = 'files/alpha/LICENSE.txt'
+                        path = 'files/beta-installer/LICENSE.txt'
                         hashProfile = 'UTF8_NO_BOM_LF_V1'
-                        sha256 = (Get-Sha256 $licensePath)
+                        sha256 = (Get-Sha256 $betaLicensePath)
                     }
                 )
             }
@@ -189,6 +192,7 @@ try {
     Assert-True ($include.Contains('bundle-manifest.json')) 'The include must collect the manifest.'
     Assert-True ($include.Contains('notice-index.json')) 'The include must collect the notice index.'
     Assert-True ($include.Contains('files\alpha\LICENSE.txt')) 'The include must collect the exact fake license.'
+    Assert-True ($include.Contains('files\beta-installer\LICENSE.txt')) 'The include must collect the exact fake container license.'
     Assert-True (-not $include.Contains('*')) 'The include must not use wildcards.'
     Assert-True (-not $include.Contains('skipifsourcedoesntexist')) 'The include must not make license files optional.'
 
@@ -218,6 +222,16 @@ try {
     Write-Utf8Json $unknown.ManifestPath $unknownManifest
     Assert-Failure $unknown 'distribution_notice_bundle_invalid' 'duplicate_unknown_or_unmapped_component'
 
+    $crossComponent = New-PassFixture (Join-Path $testRoot 'cross-component-mapping')
+    $crossComponentIndexPath = Join-Path $crossComponent.BundleRoot 'notice-index.json'
+    $crossComponentIndex = Read-Json $crossComponentIndexPath
+    $crossComponentIndex.records[0].licenseNoticePaths = @('files/beta-installer/LICENSE.txt')
+    Write-Utf8Json $crossComponentIndexPath $crossComponentIndex
+    $crossComponentManifest = Read-Json $crossComponent.ManifestPath
+    $crossComponentManifest.noticeIndex.sha256 = Get-Sha256 $crossComponentIndexPath
+    Write-Utf8Json $crossComponent.ManifestPath $crossComponentManifest
+    Assert-Failure $crossComponent 'distribution_notice_bundle_incomplete' 'cross_component_notice_mapping:alpha'
+
     $partial = New-PassFixture (Join-Path $testRoot 'partial-status')
     $partialManifest = Read-Json $partial.ManifestPath
     $partialManifest.components[0].status.notice = 'PARTIAL'
@@ -240,7 +254,7 @@ try {
     Write-Utf8Json $illegalPath.ManifestPath $illegalManifest
     Assert-Failure $illegalPath 'distribution_notice_bundle_invalid' 'invalid_license_notice_layout'
 
-    Write-Host 'FAIL-CLOSED fixtures: 7 passed'
+    Write-Host 'FAIL-CLOSED fixtures: 8 passed'
 
     $currentInclude = Join-Path $testRoot 'current-repository\distribution-notice-files.iss'
     $sentinelInstaller = Join-Path $testRoot 'current-repository\release-output.exe'
@@ -278,7 +292,7 @@ try {
 
     Write-Host 'CURRENT bundle: blocked before installer mutation'
     Write-Host 'RELEASE wiring: passed'
-    Write-Host 'TOTAL: 10 targeted cases passed'
+    Write-Host 'TOTAL: 11 targeted cases passed'
 }
 finally {
     $fullTestRoot = [IO.Path]::GetFullPath($testRoot)

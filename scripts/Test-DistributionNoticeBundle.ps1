@@ -148,13 +148,16 @@ try {
     }
 
     $componentById = @{}
-    $licensePaths = [Collections.Generic.List[string]]::new()
+    $licensePaths = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    $licensePathsByComponent = @{}
     foreach ($component in @($manifest.components)) {
         $componentId = [string]$component.componentId
         if ([string]::IsNullOrWhiteSpace($componentId) -or $componentById.ContainsKey($componentId)) {
             Write-ResultAndExit $false 'distribution_notice_bundle_invalid' @('duplicate_or_unknown_component') $payloadCount 1
         }
         $componentById[$componentId] = $component
+        $componentLicensePaths = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+        $licensePathsByComponent[$componentId] = $componentLicensePaths
 
         if ([string]$component.artifactScope -notin @('installedPayload', 'installerContainer')) {
             Write-ResultAndExit $false 'distribution_notice_bundle_invalid' @('invalid_artifact_scope') $payloadCount 1
@@ -198,7 +201,9 @@ try {
                 $licenseNoticeHash -ne ([string]$file.sha256).ToUpperInvariant()) {
                 $blockers.Add(('license_notice_hash_mismatch:' + $componentId))
             }
-            $licensePaths.Add($relativeLicensePath.Replace('/', '\'))
+            $normalizedLicensePath = $relativeLicensePath.Replace('/', '\')
+            $licensePaths.Add($normalizedLicensePath) | Out-Null
+            $componentLicensePaths.Add($normalizedLicensePath) | Out-Null
         }
     }
 
@@ -270,7 +275,11 @@ try {
             }
             foreach ($mappedLicensePath in @($record.licenseNoticePaths)) {
                 $normalizedMapped = ([string]$mappedLicensePath).Replace('/', '\')
-                if (-not $licensePaths.Contains($normalizedMapped)) {
+                $componentLicensePaths = $licensePathsByComponent[$componentId]
+                if (-not $componentLicensePaths.Contains($normalizedMapped) -and $licensePaths.Contains($normalizedMapped)) {
+                    $blockers.Add(('cross_component_notice_mapping:' + $componentId))
+                }
+                elseif (-not $componentLicensePaths.Contains($normalizedMapped)) {
                     $blockers.Add(('payload_notice_mapping_unknown:' + $mappingTarget))
                 }
             }
