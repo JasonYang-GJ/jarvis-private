@@ -2395,6 +2395,7 @@ public sealed class SessionCoordinator(
             var turns = await turnsTask.ConfigureAwait(false);
             var messages = await messagesTask.ConfigureAwait(false);
             var activeTurns = await activeTask.ConfigureAwait(false);
+            var projectedTurns = SessionTurnProjection.Select(turns.Items, activeTurns);
             var selectedName = latestSession.SelectedProjectId is { } selectedProjectId
                 ? (await projectsTask.ConfigureAwait(false))
                     .SingleOrDefault(project => project.Id == selectedProjectId)?.Name
@@ -2405,12 +2406,12 @@ public sealed class SessionCoordinator(
                 _coordinatorStartedAtUtc,
                 latestSession,
                 selectedName,
-                turns.Items,
-                activeTurns,
+                projectedTurns.Turns,
+                projectedTurns.AdditionalActiveTurns,
                 messages.Items,
                 _preparedMemoryConsents.Values
                     .Where(item => item.SessionId == session.Id
-                                   && activeTurns.Any(turn => turn.Id == item.TurnId
+                                   && projectedTurns.SelectedActiveTurns.Any(turn => turn.Id == item.TurnId
                                        && SessionTurnPhases.IsForegroundWork(turn.Phase)))
                     .OrderBy(item => item.PreparedAtUtc)
                     .ToArray());

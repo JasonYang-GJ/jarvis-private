@@ -1,6 +1,7 @@
 using ScreenGuide.DesktopProtocol;
 using ScreenGuide.Core.Sessions;
 using ScreenGuide.DesktopHost.Runtime;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace ScreenGuide.DesktopHost.Tests;
 
@@ -93,6 +94,59 @@ public sealed class SessionProjectionIntegrationTests
     }
 
     [Fact]
+    public async Task BootstrapUsesOneDeterministicThirtyTwoTurnViewAndExactTurnRemainsAuthoritative()
+    {
+        await using var environment = DesktopHostTestEnvironment.Create();
+        using var host = environment.BuildHost();
+        await host.StartAsync();
+        IDesktopApiClient client = new DesktopApiClient(environment.Options.PipeName);
+        var session = await client.StartNewSessionAsync("统一有界 Turn 视图");
+        var store = host.Services.GetRequiredService<ISessionStore>();
+        var now = environment.TimeProvider.GetUtcNow();
+        var created = new List<SessionTurnRecord>();
+        for (var sequence = 1; sequence <= 40; sequence++)
+        {
+            var registration = await store.StartTurnAsync(
+                session.SessionId,
+                $"turn-{sequence}",
+                "Text",
+                $"projection-bound-{sequence}",
+                ReadyRoute(now.AddSeconds(sequence)),
+                now.AddSeconds(sequence));
+            var turn = registration.Turn;
+            if (sequence > 1)
+            {
+                turn = await store.UpdateTurnAsync(
+                    turn with
+                    {
+                        WorkKind = SessionWorkKind.CodingTask,
+                        Phase = SessionTurnPhase.ProgrammingTask
+                    },
+                    turn.Version,
+                    now.AddSeconds(sequence).AddMilliseconds(1));
+            }
+
+            created.Add(turn);
+        }
+
+        var bootstrap = await client.GetCurrentSessionAsync();
+        var exactOmitted = await client.GetSessionTurnAsync(session.SessionId, created[1].Id);
+        await host.StopAsync();
+
+        Assert.NotNull(bootstrap);
+        var allProjected = bootstrap!.Turns.Concat(bootstrap.ActiveTurns).ToArray();
+        Assert.Equal(32, allProjected.Select(item => item.Id).Distinct().Count());
+        Assert.Empty(bootstrap.Turns.Select(item => item.Id).Intersect(
+            bootstrap.ActiveTurns.Select(item => item.Id)));
+        Assert.Equal(created[0].Id, bootstrap.ForegroundTurn?.Id);
+        Assert.Equal(
+            new[] { 1 }.Concat(Enumerable.Range(10, 31)),
+            allProjected.Select(item => item.SequenceNumber).Order());
+        Assert.Equal(created[1].Id, exactOmitted.Turn.Id);
+        Assert.Equal(2, exactOmitted.Turn.SequenceNumber);
+    }
+
+    [Fact]
     public void DesktopProtocolIsVersionElevenWithoutChangingTheSchemaContract()
     {
         Assert.Equal(11, DesktopProtocolVersion.Current);
@@ -131,5 +185,15 @@ public sealed class SessionProjectionIntegrationTests
         IdempotencyKey = $"key-{sequenceNumber}",
         CreatedAtUtc = DateTimeOffset.UtcNow,
         UpdatedAtUtc = DateTimeOffset.UtcNow
+    };
+
+    private static SessionTurnFrozenRoute ReadyRoute(DateTimeOffset frozenAtUtc) => new()
+    {
+        Status = SessionTurnRouteStatus.Ready,
+        ProviderId = "fake",
+        ModelId = "fake-model",
+        DataDestination = "https://example.invalid",
+        SendsDataOffDevice = false,
+        FrozenAtUtc = frozenAtUtc
     };
 }

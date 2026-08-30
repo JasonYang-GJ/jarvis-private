@@ -708,13 +708,22 @@ public sealed class DesktopApiDispatcher(
             return null;
         }
 
+        var projectedTurns = snapshot.Turns
+            .Concat(snapshot.ActiveTurns)
+            .GroupBy(turn => turn.Id)
+            .Select(group => group.OrderByDescending(turn => turn.Version).First())
+            .ToArray();
+        var activeProjectedTurns = projectedTurns
+            .Where(turn => !SessionTurnPhases.IsTerminal(turn.Phase))
+            .ToArray();
         var active = snapshot.ActiveTurns.Select(MapSessionTurn).ToArray();
-        var foreground = snapshot.ActiveTurns
+        var foreground = activeProjectedTurns
             .Where(turn => SessionTurnPhases.IsForegroundWork(turn.Phase))
             .OrderBy(turn => turn.SequenceNumber)
             .LastOrDefault();
         var status = foreground?.Phase.ToString()
-                     ?? snapshot.ActiveTurns.LastOrDefault()?.Phase.ToString()
+                     ?? activeProjectedTurns.OrderBy(turn => turn.SequenceNumber).LastOrDefault()?.Phase.ToString()
+                     ?? projectedTurns.OrderBy(turn => turn.SequenceNumber).LastOrDefault()?.Phase.ToString()
                      ?? "Ready";
         var response = new SessionSnapshotDto(
             snapshot.ChangeVersion,

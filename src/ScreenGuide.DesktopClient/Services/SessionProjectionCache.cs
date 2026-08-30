@@ -17,13 +17,15 @@ public sealed class SessionProjectionCache
             return false;
         }
 
+        var bounded = SelectTurns(
+            snapshot.Turns,
+            snapshot.ActiveTurns.Concat(
+                snapshot.ForegroundTurn is null ? [] : [snapshot.ForegroundTurn]));
         Snapshot = snapshot with
         {
-            Turns = snapshot.Turns
-                .OrderByDescending(item => item.SequenceNumber)
-                .Take(MaximumCachedTurns)
-                .OrderBy(item => item.SequenceNumber)
-                .ToArray(),
+            ForegroundTurn = bounded.ForegroundTurn,
+            ActiveTurns = bounded.AdditionalActiveTurns,
+            Turns = bounded.Turns,
             Messages = DeduplicateMessages(snapshot.Messages)
                 .OrderByDescending(item => item.SequenceNumber)
                 .Take(MaximumCachedMessages)
@@ -52,40 +54,81 @@ public sealed class SessionProjectionCache
         }
 
         var turns = current.Turns.ToDictionary(item => item.Id);
+        var additionalActive = current.ActiveTurns.ToDictionary(item => item.Id);
         foreach (var turn in update.TurnUpserts)
         {
             turns[turn.Id] = turn;
+            additionalActive.Remove(turn.Id);
         }
 
-        var boundedTurns = turns.Values
-            .OrderByDescending(item => item.SequenceNumber)
-            .Take(MaximumCachedTurns)
-            .OrderBy(item => item.SequenceNumber)
+        var bounded = SelectTurns(turns.Values, additionalActive.Values);
+        var activeTurns = bounded.Turns
+            .Concat(bounded.AdditionalActiveTurns)
+            .Where(item => !IsTerminal(item.Phase))
             .ToArray();
-        var activeTurns = boundedTurns.Where(item => !IsTerminal(item.Phase)).ToArray();
-        var foreground = activeTurns
-            .Where(item => IsForeground(item.Phase))
-            .OrderBy(item => item.SequenceNumber)
-            .LastOrDefault();
         var messages = DeduplicateMessages(current.Messages.Concat(update.MessageUpserts))
             .OrderByDescending(item => item.SequenceNumber)
             .Take(MaximumCachedMessages)
             .OrderBy(item => item.SequenceNumber)
             .ToArray();
-        var status = foreground?.Phase
-                     ?? activeTurns.LastOrDefault()?.Phase
-                     ?? boundedTurns.LastOrDefault()?.Phase
+        var status = bounded.ForegroundTurn?.Phase
+                     ?? activeTurns.OrderBy(item => item.SequenceNumber).ThenBy(item => item.Id).LastOrDefault()?.Phase
+                     ?? bounded.Turns.LastOrDefault()?.Phase
                      ?? "Ready";
         Snapshot = current with
         {
             ChangeVersion = update.ChangeVersion,
             Status = status,
-            ForegroundTurn = foreground,
-            ActiveTurns = activeTurns,
-            Turns = boundedTurns,
+            ForegroundTurn = bounded.ForegroundTurn,
+            ActiveTurns = bounded.AdditionalActiveTurns,
+            Turns = bounded.Turns,
             Messages = messages
         };
         return true;
+    }
+
+    private static BoundedTurnView SelectTurns(
+        IEnumerable<UnifiedSessionTurnDto> recentTurns,
+        IEnumerable<UnifiedSessionTurnDto> additionalActiveTurns)
+    {
+        var recent = recentTurns
+            .GroupBy(item => item.Id)
+            .Select(group => group.OrderByDescending(item => item.SequenceNumber).First())
+            .ToArray();
+        var recentIds = recent.Select(item => item.Id).ToHashSet();
+        var candidates = recent.ToDictionary(item => item.Id);
+        foreach (var turn in additionalActiveTurns)
+        {
+            if (!IsTerminal(turn.Phase))
+            {
+                candidates[turn.Id] = turn;
+            }
+        }
+
+        var foreground = candidates.Values
+            .Where(item => !IsTerminal(item.Phase) && IsForeground(item.Phase))
+            .OrderByDescending(item => item.SequenceNumber)
+            .ThenByDescending(item => item.UpdatedAtUtc)
+            .ThenBy(item => item.Id)
+            .FirstOrDefault();
+        var selected = candidates.Values
+            .OrderBy(item => item.Id == foreground?.Id ? 0 : !IsTerminal(item.Phase) ? 1 : 2)
+            .ThenByDescending(item => item.SequenceNumber)
+            .ThenByDescending(item => item.UpdatedAtUtc)
+            .ThenBy(item => item.Id)
+            .Take(MaximumCachedTurns)
+            .ToArray();
+        var turns = selected
+            .Where(item => recentIds.Contains(item.Id))
+            .OrderBy(item => item.SequenceNumber)
+            .ThenBy(item => item.Id)
+            .ToArray();
+        var active = selected
+            .Where(item => !IsTerminal(item.Phase) && !recentIds.Contains(item.Id))
+            .OrderBy(item => item.SequenceNumber)
+            .ThenBy(item => item.Id)
+            .ToArray();
+        return new BoundedTurnView(turns, active, foreground);
     }
 
     private static IReadOnlyList<ConversationMessageDto> DeduplicateMessages(
@@ -104,4 +147,9 @@ public sealed class SessionProjectionCache
         "Understanding" or "Responding" or "WaitingForProject" or "WaitingForFile"
         or "WaitingForWindow" or "WaitingForWindowConsent" or "WaitingForConfirmation"
         or "WaitingForMemoryOutboundConsent" or "Executing" or "ObservingWindow";
+
+    private sealed record BoundedTurnView(
+        IReadOnlyList<UnifiedSessionTurnDto> Turns,
+        IReadOnlyList<UnifiedSessionTurnDto> AdditionalActiveTurns,
+        UnifiedSessionTurnDto? ForegroundTurn);
 }

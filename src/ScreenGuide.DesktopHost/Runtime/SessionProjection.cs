@@ -38,6 +38,65 @@ public sealed class SessionProjectionException(string code, string message) : Ex
     public string Code { get; } = code;
 }
 
+internal sealed record BoundedSessionTurnProjection(
+    IReadOnlyList<SessionTurnRecord> Turns,
+    IReadOnlyList<SessionTurnRecord> AdditionalActiveTurns,
+    IReadOnlyList<SessionTurnRecord> SelectedActiveTurns);
+
+internal static class SessionTurnProjection
+{
+    public const int MaximumTurnViews = 32;
+
+    public static BoundedSessionTurnProjection Select(
+        IReadOnlyList<SessionTurnRecord> recentTurns,
+        IReadOnlyList<SessionTurnRecord> activeTurns)
+    {
+        var recentIds = recentTurns.Select(item => item.Id).ToHashSet();
+        var activeIds = activeTurns.Select(item => item.Id).ToHashSet();
+        var candidates = new Dictionary<Guid, SessionTurnRecord>();
+        foreach (var turn in recentTurns)
+        {
+            candidates[turn.Id] = turn;
+        }
+
+        foreach (var turn in activeTurns)
+        {
+            candidates[turn.Id] = turn;
+        }
+
+        var foreground = activeTurns
+            .Where(item => SessionTurnPhases.IsForegroundWork(item.Phase))
+            .OrderByDescending(item => item.SequenceNumber)
+            .ThenByDescending(item => item.UpdatedAtUtc)
+            .ThenBy(item => item.Id)
+            .FirstOrDefault();
+        var selected = candidates.Values
+            .OrderBy(item => item.Id == foreground?.Id ? 0 : activeIds.Contains(item.Id) ? 1 : 2)
+            .ThenByDescending(item => item.SequenceNumber)
+            .ThenByDescending(item => item.UpdatedAtUtc)
+            .ThenBy(item => item.Id)
+            .Take(MaximumTurnViews)
+            .ToArray();
+        var selectedIds = selected.Select(item => item.Id).ToHashSet();
+        var turns = selected
+            .Where(item => recentIds.Contains(item.Id))
+            .OrderBy(item => item.SequenceNumber)
+            .ThenBy(item => item.Id)
+            .ToArray();
+        var additionalActive = activeTurns
+            .Where(item => selectedIds.Contains(item.Id) && !recentIds.Contains(item.Id))
+            .OrderBy(item => item.SequenceNumber)
+            .ThenBy(item => item.Id)
+            .ToArray();
+        var selectedActive = activeTurns
+            .Where(item => selectedIds.Contains(item.Id))
+            .OrderBy(item => item.SequenceNumber)
+            .ThenBy(item => item.Id)
+            .ToArray();
+        return new BoundedSessionTurnProjection(turns, additionalActive, selectedActive);
+    }
+}
+
 internal sealed record SessionJournalReadResult(
     bool ResetRequired,
     string? ResetReason,

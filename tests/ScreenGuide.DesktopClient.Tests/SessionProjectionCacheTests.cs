@@ -68,6 +68,52 @@ public sealed class SessionProjectionCacheTests
         Assert.Equal("Interrupted", cache.Snapshot!.Turns.Single().Phase);
     }
 
+    [Fact]
+    public void ResetAndDeltaKeepOneBoundedDeterministicTurnViewWithTheForegroundReserved()
+    {
+        var sessionId = Guid.NewGuid();
+        var allTurns = Enumerable.Range(1, 40)
+            .Select(sequence => Turn(
+                sequence,
+                sequence == 1 ? "Understanding" : "ProgrammingTask"))
+            .ToArray();
+        var bootstrap = Snapshot(sessionId, 10, allTurns.Skip(8).ToArray(), []) with
+        {
+            ForegroundTurn = allTurns[0],
+            ActiveTurns = allTurns
+        };
+        var cache = new SessionProjectionCache();
+
+        Assert.True(cache.Reset(bootstrap));
+        AssertBounded(cache.Snapshot!, expectedSequences: [1, .. Enumerable.Range(10, 31)]);
+
+        var next = Turn(41, "ProgrammingTask");
+        var delta = new SessionProjectionUpdateDto(
+            "Delta",
+            11,
+            bootstrap.CoordinatorInstanceId,
+            bootstrap.CoordinatorStartedAtUtc,
+            sessionId,
+            [next],
+            [],
+            0);
+
+        Assert.True(cache.Apply(delta));
+        AssertBounded(cache.Snapshot!, expectedSequences: [1, .. Enumerable.Range(11, 31)]);
+    }
+
+    private static void AssertBounded(
+        SessionSnapshotDto snapshot,
+        IReadOnlyList<int> expectedSequences)
+    {
+        var allProjected = snapshot.Turns.Concat(snapshot.ActiveTurns).ToArray();
+        Assert.Equal(32, allProjected.Select(item => item.Id).Distinct().Count());
+        Assert.Empty(snapshot.Turns.Select(item => item.Id).Intersect(
+            snapshot.ActiveTurns.Select(item => item.Id)));
+        Assert.Equal(1, snapshot.ForegroundTurn?.SequenceNumber);
+        Assert.Equal(expectedSequences, allProjected.Select(item => item.SequenceNumber).Order());
+    }
+
     private static SessionSnapshotDto Snapshot(
         Guid sessionId,
         long changeVersion,
