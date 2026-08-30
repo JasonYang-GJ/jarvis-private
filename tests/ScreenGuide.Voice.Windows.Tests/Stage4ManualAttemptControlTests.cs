@@ -20,6 +20,11 @@ public sealed class Stage4ManualAttemptControlTests
                 order.Add("listener-starting");
                 return listenerReady.Task;
             },
+            () =>
+            {
+                order.Add("listener-stopped");
+                return Task.CompletedTask;
+            },
             () => order.Add("ready-announced"),
             _ =>
             {
@@ -34,8 +39,45 @@ public sealed class Stage4ManualAttemptControlTests
 
         Assert.False(controlled.StopRequested);
         Assert.Equal(
-            ["listener-starting", "ready-announced", "capture-started"],
+            ["listener-starting", "ready-announced", "capture-started", "listener-stopped"],
             order);
+    }
+
+    [Fact]
+    public async Task QueuedStopCancelsBeforeSynchronousVoiceStartupAndStillCleansUp()
+    {
+        var input = new ChannelLineInput();
+        await input.WriteAsync("STOP");
+        var listenerStarted = false;
+        var readyAnnounced = false;
+        var captureStarted = false;
+        var cleanupCompleted = false;
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => VoiceReadyAttemptControl.RunAsync(
+                input,
+                _ =>
+                {
+                    listenerStarted = true;
+                    return Task.CompletedTask;
+                },
+                () =>
+                {
+                    cleanupCompleted = true;
+                    return Task.CompletedTask;
+                },
+                () => readyAnnounced = true,
+                _ =>
+                {
+                    captureStarted = true;
+                    return Task.FromResult(Success());
+                },
+                CancellationToken.None));
+
+        Assert.False(listenerStarted);
+        Assert.False(readyAnnounced);
+        Assert.False(captureStarted);
+        Assert.True(cleanupCompleted);
     }
 
     [Fact]

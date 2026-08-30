@@ -85,6 +85,7 @@ internal static class VoiceEvaluationRunner
                     var controlled = await VoiceReadyAttemptControl.RunAsync(
                             input,
                             listener.StartAsync,
+                            listener.StopAsync,
                             () => Console.WriteLine("监听已就绪，现在请开始说。 "),
                             attemptCancellation => events.RunAttemptAsync(
                                 FixedPhrase,
@@ -117,10 +118,6 @@ internal static class VoiceEvaluationRunner
                         EvaluationTerminalState.Failure,
                         TimeSpan.Zero,
                         "voice.listener_faulted");
-                }
-                finally
-                {
-                    await listener.StopAsync().ConfigureAwait(false);
                 }
 
                 attempts.Add(attempt);

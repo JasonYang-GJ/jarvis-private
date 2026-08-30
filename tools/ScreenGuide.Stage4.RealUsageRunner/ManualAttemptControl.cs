@@ -22,19 +22,33 @@ public static class ManualAttemptControl
             cancellationToken);
         using var stopWaitCancellation = CancellationTokenSource.CreateLinkedTokenSource(
             cancellationToken);
-        var operationTask = operation(operationCancellation.Token);
         var stopTask = WaitForStopAsync(input, stopWaitCancellation.Token);
+        var cancelOperationOnStop = stopTask.ContinueWith(
+            static (completed, state) =>
+            {
+                if (completed.Status == TaskStatus.RanToCompletion)
+                {
+                    ((CancellationTokenSource)state!).Cancel();
+                }
+            },
+            operationCancellation,
+            CancellationToken.None,
+            TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
+        var operationTask = operation(operationCancellation.Token);
         var completed = await Task.WhenAny(operationTask, stopTask).ConfigureAwait(false);
         if (completed == operationTask && !stopTask.IsCompletedSuccessfully)
         {
             stopWaitCancellation.Cancel();
             await ObserveCancellationAsync(stopTask).ConfigureAwait(false);
+            await cancelOperationOnStop.ConfigureAwait(false);
             return new ControlledAttemptResult<T>(
                 await operationTask.ConfigureAwait(false),
                 StopRequested: false);
         }
 
         operationCancellation.Cancel();
+        await cancelOperationOnStop.ConfigureAwait(false);
         return new ControlledAttemptResult<T>(
             await operationTask.ConfigureAwait(false),
             StopRequested: true);
@@ -72,22 +86,32 @@ public static class VoiceReadyAttemptControl
     public static Task<ControlledAttemptResult<T>> RunAsync<T>(
         IManualLineInput input,
         Func<CancellationToken, Task> startListening,
+        Func<Task> stopListening,
         Action announceReady,
         Func<CancellationToken, Task<T>> capture,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(input);
         ArgumentNullException.ThrowIfNull(startListening);
+        ArgumentNullException.ThrowIfNull(stopListening);
         ArgumentNullException.ThrowIfNull(announceReady);
         ArgumentNullException.ThrowIfNull(capture);
         return ManualAttemptControl.RunAsync(
             input,
             async attemptCancellation =>
             {
-                await startListening(attemptCancellation).ConfigureAwait(false);
-                attemptCancellation.ThrowIfCancellationRequested();
-                announceReady();
-                return await capture(attemptCancellation).ConfigureAwait(false);
+                try
+                {
+                    attemptCancellation.ThrowIfCancellationRequested();
+                    await startListening(attemptCancellation).ConfigureAwait(false);
+                    attemptCancellation.ThrowIfCancellationRequested();
+                    announceReady();
+                    return await capture(attemptCancellation).ConfigureAwait(false);
+                }
+                finally
+                {
+                    await stopListening().ConfigureAwait(false);
+                }
             },
             cancellationToken);
     }
