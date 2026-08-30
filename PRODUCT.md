@@ -109,8 +109,8 @@
 ## 阶段 4 R2 候选评测能力
 
 - 新增独立的 `ScreenGuide.Stage4.RealUsageRunner`，不接入产品后台采样、遥测、Session、Provider 或凭据路径。它只在用户从可见终端手工启动并输入 `YES` 后工作。
-- 语音模式复用真实 `OfflineContinuousVoiceListener`，每次由用户按 Enter 主动开始，按固定非个人短句完成 1 次预热和 20 次正式尝试；15 秒内必须只有一个非空最终结果，并按固定规范化做精确匹配。
-- 视觉模式只创建并读取 Runner 自己的可见非个人测试窗口，通过真实单 HWND Graphics Capture 和 Windows 本机 OCR 完成 1 次预热和 20 次正式尝试；另有窗口身份变化的受控取消场景。
+- 语音模式复用真实 `OfflineContinuousVoiceListener`，每次由用户按 Enter 主动开始并使用独立 Start/Stop 监听周期，按固定非个人短句完成 1 次预热和 20 次正式尝试；15 秒内必须只有一个非空最终结果，并按固定规范化做精确匹配。活动尝试期间输入 STOP 会触发 CancellationToken，listener fault 或取消会立即结束批次。
+- 视觉模式先显示 Runner 自己的可见非个人测试窗口，再把批次同意绑定到该精确窗口；通过真实单 HWND Graphics Capture 和 Windows 本机 OCR 完成 1 次预热和 20 次正式尝试。普通批次或专用场景一旦窗口身份变化都立即取消。
 - 计时只使用单调 `Stopwatch`，汇总 count/min/p50/p95/max；失败率只以 success+failure 为分母，cancelled/blocked 单列，预热不计入正式指标且不删除离群值。
 - 最终标准输出只包含 exact SHA、粗粒度环境、次数、终态、聚合耗时、稳定错误码、清理状态以及固定的 `NetworkRequests=0`/`ProviderRequests=0`。不输出或保存录音、波形、识别正文、固定短句、窗口标题/身份、图片、路径、异常正文或堆栈。
 - 当前只完成离线候选与定向测试；真实麦克风和可见窗口的 1+20 人工批次尚未执行，不能把候选写成真实使用 PASS。

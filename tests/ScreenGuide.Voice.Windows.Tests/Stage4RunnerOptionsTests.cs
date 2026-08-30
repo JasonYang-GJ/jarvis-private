@@ -25,4 +25,14 @@ public sealed class Stage4RunnerOptionsTests
     {
         Assert.Throws<ArgumentException>(() => RunnerOptions.Parse(args));
     }
+
+    [Fact]
+    public void BuildIdentityMustContainTheExactExpectedSha()
+    {
+        const string sha = "941c2d8635939bd1329daa81f34b6829bd447750";
+
+        Assert.True(BuildIdentityVerifier.Matches("0.5.0+" + sha, sha));
+        Assert.False(BuildIdentityVerifier.Matches("0.5.0+ca724dfc558808a88063ba817e093a9703f38b71", sha));
+        Assert.False(BuildIdentityVerifier.Matches("0.5.0", sha));
+    }
 }

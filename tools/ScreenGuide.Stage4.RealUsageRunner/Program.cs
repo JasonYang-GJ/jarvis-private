@@ -19,6 +19,26 @@ public static class Program
             return 2;
         }
 
+        if (!BuildIdentityVerifier.MatchesCurrentExecutable(options.ExpectedSha))
+        {
+            var blocked = EvaluationReport.Create(
+                options.Mode,
+                options.ExpectedSha,
+                "blocked",
+                EvaluationAggregator.Build(
+                [
+                    new EvaluationAttempt(
+                        false,
+                        EvaluationTerminalState.Blocked,
+                        TimeSpan.Zero,
+                        "evaluation.build_identity_mismatch")
+                ]),
+                EvaluationEnvironmentFactory.Create(false, "unknown"),
+                cleanupConfirmed: true);
+            Console.WriteLine(ResultPrefix + SafeEvaluationReportWriter.Serialize(blocked));
+            return 1;
+        }
+
         using var cancellation = new CancellationTokenSource();
         ConsoleCancelEventHandler handler = (_, eventArgs) =>
         {

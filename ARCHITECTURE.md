@@ -236,9 +236,9 @@ Codex 普通聊天适配器由 `CodexChatModelProvider` 承载，但生产策略
 
 `tools/ScreenGuide.Stage4.RealUsageRunner` 是独立人工验收工具，不是 DesktopClient/DesktopHost 的运行时组件。它没有 Session、数据库、Provider、网络或凭据依赖；命令行只接受评测模式和 exact SHA，也不提供任意输出文件参数。
 
-语音适配器直接订阅 `OfflineContinuousVoiceListener` 的 partial/final/fault 事件，但事件正文只进入单次内存比较器：固定版本规范化后仅保留匹配布尔值、final 次数、单调时间戳和稳定错误码。Stop、超时、fault 或批次结束都会解除事件订阅并停止监听，迟到事件不进入下一次尝试。
+语音适配器直接订阅 `OfflineContinuousVoiceListener` 的 partial/final/fault 事件，但事件正文只进入单次内存比较器：固定版本规范化后仅保留匹配布尔值、final 次数、单调时间戳和稳定错误码。每次尝试独立 Start/Stop 监听器；Stop、超时或 fault 会结束当前尝试，fault/取消同时结束批次，因此迟到事件不会跨入下一次监听周期。
 
-视觉适配器创建一个可见的固定测试 HWND，经 `WindowsWindowCaptureTargetVerifier`、`WindowsSingleWindowCaptureService`、`WindowsGraphicsCaptureBackend` 和 `WindowsLocalWindowVisionProvider` 走真实本机路径。每一帧只在一次分析期间存在，`CapturedWindowFrame.Dispose` 清零字节；目标身份变化按取消终态结束，不回退到桌面捕获。
+视觉适配器先创建并显示固定测试 HWND，再把同意绑定到该精确身份；之后经 `WindowsWindowCaptureTargetVerifier`、`WindowsSingleWindowCaptureService`、`WindowsGraphicsCaptureBackend` 和 `WindowsLocalWindowVisionProvider` 走真实本机路径。每一帧只在一次分析期间存在，`CapturedWindowFrame.Dispose` 清零字节；普通批次或专用场景只要目标身份变化就立即按取消终态结束，不回退到桌面捕获。
 
 公共指标聚合器固定四种终态 `Success/Failure/Cancelled/Blocked`，排除 warmup，使用 nearest-rank 计算 p50/p95，并分别保留 capture/analysis/end-to-end 汇总。安全报告采用封闭类型和稳定错误码 allowlist，无法携带自由文本诊断。
 

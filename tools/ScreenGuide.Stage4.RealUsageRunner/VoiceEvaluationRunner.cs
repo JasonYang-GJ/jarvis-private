@@ -14,6 +14,7 @@ internal static class VoiceEvaluationRunner
         CancellationToken cancellationToken)
     {
         var attempts = new List<EvaluationAttempt>();
+        using var input = new ConsoleLineInput();
         var listener = new OfflineContinuousVoiceListener();
         var capability = listener.GetCapabilityReport();
         var microphoneBucket = capability.MicrophoneCount switch
@@ -41,7 +42,7 @@ internal static class VoiceEvaluationRunner
         Console.WriteLine("S4-R2 本机语音评测：音频只在内存中离线识别，不保存录音或识别文字。 ");
         Console.WriteLine("将执行 1 次预热和 20 次正式尝试；输入 STOP 或按 Ctrl+C 可随时停止。 ");
         Console.WriteLine("输入 YES 表示同意本批次使用麦克风：");
-        if (!string.Equals(await Console.In.ReadLineAsync(cancellationToken), "YES", StringComparison.Ordinal))
+        if (!string.Equals(await input.ReadLineAsync(cancellationToken), "YES", StringComparison.Ordinal))
         {
             attempts.Add(Blocked("evaluation.consent_missing"));
             await listener.DisposeAsync().ConfigureAwait(false);
@@ -53,14 +54,13 @@ internal static class VoiceEvaluationRunner
         var stage = "completed";
         try
         {
-            await listener.StartAsync(cancellationToken).ConfigureAwait(false);
             for (var index = 0; index < 21; index++)
             {
                 var isWarmup = index == 0;
                 Console.WriteLine(isWarmup
                     ? $"预热：按 Enter 后清楚说出“{FixedPhrase}”。"
                     : $"正式 {index}/20：按 Enter 后清楚说出“{FixedPhrase}”。");
-                var command = await Console.In.ReadLineAsync(cancellationToken).ConfigureAwait(false);
+                var command = await input.ReadLineAsync(cancellationToken).ConfigureAwait(false);
                 if (command is null
                     || string.Equals(command, "STOP", StringComparison.OrdinalIgnoreCase))
                 {
@@ -73,15 +73,60 @@ internal static class VoiceEvaluationRunner
                     break;
                 }
 
-                var attempt = await events.RunAttemptAsync(
-                        FixedPhrase,
+                EvaluationAttempt attempt;
+                try
+                {
+                    await listener.StartAsync(cancellationToken).ConfigureAwait(false);
+                    var controlled = await ManualAttemptControl.RunAsync(
+                            input,
+                            attemptCancellation => events.RunAttemptAsync(
+                                FixedPhrase,
+                                isWarmup,
+                                AttemptTimeout,
+                                MultipleFinalGrace,
+                                attemptCancellation),
+                            cancellationToken)
+                        .ConfigureAwait(false);
+                    attempt = controlled.StopRequested
+                        ? new EvaluationAttempt(
+                            isWarmup,
+                            EvaluationTerminalState.Cancelled,
+                            controlled.Value.EndToEndElapsed,
+                            "evaluation.cancelled")
+                        : controlled.Value;
+                }
+                catch (OperationCanceledException)
+                {
+                    attempt = new EvaluationAttempt(
                         isWarmup,
-                        AttemptTimeout,
-                        MultipleFinalGrace,
-                        cancellationToken)
-                    .ConfigureAwait(false);
+                        EvaluationTerminalState.Cancelled,
+                        TimeSpan.Zero,
+                        "evaluation.cancelled");
+                }
+                catch
+                {
+                    attempt = new EvaluationAttempt(
+                        isWarmup,
+                        EvaluationTerminalState.Failure,
+                        TimeSpan.Zero,
+                        "voice.listener_faulted");
+                }
+                finally
+                {
+                    await listener.StopAsync().ConfigureAwait(false);
+                }
+
                 attempts.Add(attempt);
                 Console.WriteLine($"本次终态：{attempt.State}；正文未保存。 ");
+                if (BatchTerminationPolicy.ShouldEndBatch(attempt))
+                {
+                    stage = attempt.State == EvaluationTerminalState.Blocked
+                        ? "blocked"
+                        : attempt.State == EvaluationTerminalState.Cancelled
+                            ? "cancelled"
+                            : "failed";
+                    break;
+                }
             }
         }
         catch (OperationCanceledException)
@@ -170,10 +215,16 @@ internal static class VoiceEvaluationRunner
             using var timeoutSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             var timeoutTask = Task.Delay(timeout, timeoutSource.Token);
             var completed = await Task.WhenAny(firstFinal, faulted, timeoutTask).ConfigureAwait(false);
-            var timedOut = completed == timeoutTask;
+            var timedOut = completed == timeoutTask && !cancellationToken.IsCancellationRequested;
             if (completed == firstFinal)
             {
-                await Task.Delay(multipleFinalGrace, cancellationToken).ConfigureAwait(false);
+                try
+                {
+                    await Task.Delay(multipleFinalGrace, cancellationToken).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                }
             }
 
             timeoutSource.Cancel();

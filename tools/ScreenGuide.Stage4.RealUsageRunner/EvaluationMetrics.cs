@@ -111,6 +111,7 @@ public static class StableEvaluationErrors
     private static readonly HashSet<string> Allowed = new(StringComparer.Ordinal)
     {
         "evaluation.cancelled",
+        "evaluation.build_identity_mismatch",
         "evaluation.consent_missing",
         "evaluation.unexpected",
         "voice.listener_faulted",

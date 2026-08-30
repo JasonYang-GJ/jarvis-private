@@ -17,6 +17,7 @@ internal static class VisionEvaluationRunner
         CancellationToken cancellationToken)
     {
         var attempts = new List<EvaluationAttempt>();
+        using var input = new ConsoleLineInput();
         var supported = GraphicsCaptureSession.IsSupported();
         var environment = EvaluationEnvironmentFactory.Create(
             supported,
@@ -28,19 +29,6 @@ internal static class VisionEvaluationRunner
                 EvaluationTerminalState.Blocked,
                 TimeSpan.Zero,
                 "vision.capture_unavailable"));
-            return Report("blocked", cleanup: true);
-        }
-
-        Console.WriteLine("S4-R2 本机单窗口评测：只读取 Runner 创建的可见测试窗口。 ");
-        Console.WriteLine("图像和识别文字只在内存中处理，不保存、不上传。输入 STOP 或按 Ctrl+C 可停止。 ");
-        Console.WriteLine("输入 YES 表示同意本批次读取这个测试窗口：");
-        if (!string.Equals(await Console.In.ReadLineAsync(cancellationToken), "YES", StringComparison.Ordinal))
-        {
-            attempts.Add(new EvaluationAttempt(
-                false,
-                EvaluationTerminalState.Blocked,
-                TimeSpan.Zero,
-                "evaluation.consent_missing"));
             return Report("blocked", cleanup: true);
         }
 
@@ -56,59 +44,104 @@ internal static class VisionEvaluationRunner
                 .ConfigureAwait(false);
             using var process = Process.GetCurrentProcess();
             var processStart = new DateTimeOffset(process.StartTime.ToUniversalTime());
-            var verifier = new WindowsWindowCaptureTargetVerifier();
-            var capture = new WindowsSingleWindowCaptureService(
-                new WindowsGraphicsCaptureBackend(verifier),
-                new WindowsSensitiveWindowPolicy(),
-                verifier);
-            var evaluator = new VisionAttemptEvaluator(
-                capture,
-                new WindowsLocalWindowVisionProvider(new WindowsLocalOcrTextExtractor()));
-
-            var attemptCount = options.Mode == "vision" ? 21 : 1;
-            for (var index = 0; index < attemptCount; index++)
+            var consentedTarget = new WindowCaptureTarget(
+                window.Handle,
+                FormTitle,
+                process.ProcessName,
+                process.Id,
+                processStart,
+                DateTimeOffset.UtcNow);
+            Console.WriteLine("S4-R2 本机单窗口评测：只读取现在已经显示的 Runner 测试窗口。 ");
+            Console.WriteLine("图像和识别文字只在内存中处理，不保存、不上传。输入 STOP 或按 Ctrl+C 可停止。 ");
+            Console.WriteLine("输入 YES 表示同意本批次读取这个精确测试窗口：");
+            if (!string.Equals(
+                    await input.ReadLineAsync(cancellationToken),
+                    "YES",
+                    StringComparison.Ordinal))
             {
-                var isWarmup = options.Mode == "vision" && index == 0;
-                Console.WriteLine(options.Mode == "vision-identity-change"
-                    ? "窗口身份变化场景：按 Enter 开始一次受控取消检查。"
-                    : isWarmup
-                        ? "预热：按 Enter 开始读取测试窗口。"
-                        : $"正式 {index}/20：按 Enter 开始读取测试窗口。");
-                var command = await Console.In.ReadLineAsync(cancellationToken).ConfigureAwait(false);
-                if (command is null
-                    || string.Equals(command, "STOP", StringComparison.OrdinalIgnoreCase))
-                {
-                    attempts.Add(new EvaluationAttempt(
-                        isWarmup,
-                        EvaluationTerminalState.Cancelled,
-                        TimeSpan.Zero,
-                        "evaluation.cancelled"));
-                    stage = "cancelled";
-                    break;
-                }
+                attempts.Add(new EvaluationAttempt(
+                    false,
+                    EvaluationTerminalState.Blocked,
+                    TimeSpan.Zero,
+                    "evaluation.consent_missing"));
+                stage = "blocked";
+            }
+            else
+            {
+                var verifier = new WindowsWindowCaptureTargetVerifier();
+                var capture = new WindowsSingleWindowCaptureService(
+                    new WindowsGraphicsCaptureBackend(verifier),
+                    new WindowsSensitiveWindowPolicy(),
+                    verifier);
+                var evaluator = new VisionAttemptEvaluator(
+                    capture,
+                    new WindowsLocalWindowVisionProvider(new WindowsLocalOcrTextExtractor()));
 
-                var target = new WindowCaptureTarget(
-                    window.Handle,
-                    FormTitle,
-                    process.ProcessName,
-                    process.Id,
-                    processStart,
-                    DateTimeOffset.UtcNow);
-                if (options.Mode == "vision-identity-change")
+                var attemptCount = options.Mode == "vision" ? 21 : 1;
+                for (var index = 0; index < attemptCount; index++)
                 {
-                    await window.ChangeTitleAsync(ChangedFormTitle, cancellationToken)
+                    var isWarmup = options.Mode == "vision" && index == 0;
+                    Console.WriteLine(options.Mode == "vision-identity-change"
+                        ? "窗口身份变化场景：按 Enter 开始一次受控取消检查。"
+                        : isWarmup
+                            ? "预热：按 Enter 开始读取测试窗口。"
+                            : $"正式 {index}/20：按 Enter 开始读取测试窗口。");
+                    var command = await input.ReadLineAsync(cancellationToken).ConfigureAwait(false);
+                    if (command is null
+                        || string.Equals(command, "STOP", StringComparison.OrdinalIgnoreCase))
+                    {
+                        attempts.Add(new EvaluationAttempt(
+                            isWarmup,
+                            EvaluationTerminalState.Cancelled,
+                            TimeSpan.Zero,
+                            "evaluation.cancelled"));
+                        stage = "cancelled";
+                        break;
+                    }
+
+                    var controlled = await ManualAttemptControl.RunAsync(
+                            input,
+                            async attemptCancellation =>
+                            {
+                                if (options.Mode == "vision-identity-change")
+                                {
+                                    await window.ChangeTitleAsync(
+                                            ChangedFormTitle,
+                                            attemptCancellation)
+                                        .ConfigureAwait(false);
+                                }
+
+                                return await evaluator.EvaluateAsync(
+                                        consentedTarget,
+                                        FixedCanary,
+                                        isWarmup,
+                                        attemptCancellation)
+                                    .ConfigureAwait(false);
+                            },
+                            cancellationToken)
                         .ConfigureAwait(false);
+                    var result = controlled.StopRequested
+                        ? new VisionAttemptResult(
+                            new EvaluationAttempt(
+                                isWarmup,
+                                EvaluationTerminalState.Cancelled,
+                                controlled.Value.Attempt.EndToEndElapsed,
+                                "evaluation.cancelled",
+                                controlled.Value.Attempt.CaptureElapsed,
+                                controlled.Value.Attempt.AnalysisElapsed),
+                            controlled.Value.CleanupConfirmed)
+                        : controlled.Value;
+                    attempts.Add(result.Attempt);
+                    cleanupConfirmed &= result.CleanupConfirmed;
+                    Console.WriteLine($"本次终态：{result.Attempt.State}；窗口内容未保存。 ");
+                    if (BatchTerminationPolicy.ShouldEndBatch(result.Attempt))
+                    {
+                        stage = result.Attempt.State == EvaluationTerminalState.Blocked
+                            ? "blocked"
+                            : "cancelled";
+                        break;
+                    }
                 }
-
-                var result = await evaluator.EvaluateAsync(
-                        target,
-                        FixedCanary,
-                        isWarmup,
-                        cancellationToken)
-                    .ConfigureAwait(false);
-                attempts.Add(result.Attempt);
-                cleanupConfirmed &= result.CleanupConfirmed;
-                Console.WriteLine($"本次终态：{result.Attempt.State}；窗口内容未保存。 ");
             }
         }
         catch (OperationCanceledException)
