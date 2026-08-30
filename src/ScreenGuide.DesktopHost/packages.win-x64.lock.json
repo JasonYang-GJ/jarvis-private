@@ -332,10 +332,10 @@
       "screenguide.agent.codex": {
         "type": "Project",
         "dependencies": {
-          "ScreenGuide.AI.Core": "[0.4.0, )",
-          "ScreenGuide.Agent.Abstractions": "[0.4.0, )",
-          "ScreenGuide.Core": "[0.4.0, )",
-          "ScreenGuide.Skills.Abstractions": "[0.4.0, )"
+          "ScreenGuide.AI.Core": "[0.6.0, )",
+          "ScreenGuide.Agent.Abstractions": "[0.6.0, )",
+          "ScreenGuide.Core": "[0.6.0, )",
+          "ScreenGuide.Skills.Abstractions": "[0.6.0, )"
         }
       },
       "screenguide.ai.core": {
@@ -344,19 +344,19 @@
       "screenguide.ai.deepseek": {
         "type": "Project",
         "dependencies": {
-          "ScreenGuide.AI.Core": "[0.4.0, )"
+          "ScreenGuide.AI.Core": "[0.6.0, )"
         }
       },
       "screenguide.ai.qwen": {
         "type": "Project",
         "dependencies": {
-          "ScreenGuide.AI.Core": "[0.4.0, )"
+          "ScreenGuide.AI.Core": "[0.6.0, )"
         }
       },
       "screenguide.core": {
         "type": "Project",
         "dependencies": {
-          "ScreenGuide.Skills.Abstractions": "[0.4.0, )"
+          "ScreenGuide.Skills.Abstractions": "[0.6.0, )"
         }
       },
       "screenguide.desktopprotocol": {
@@ -365,14 +365,14 @@
       "screenguide.evidence": {
         "type": "Project",
         "dependencies": {
-          "ScreenGuide.Core": "[0.4.0, )"
+          "ScreenGuide.Core": "[0.6.0, )"
         }
       },
       "screenguide.persistence": {
         "type": "Project",
         "dependencies": {
           "Microsoft.Data.Sqlite": "[10.0.11, )",
-          "ScreenGuide.Core": "[0.4.0, )"
+          "ScreenGuide.Core": "[0.6.0, )"
         }
       },
       "screenguide.skills.abstractions": {
@@ -381,7 +381,7 @@
       "screenguide.skills.windows": {
         "type": "Project",
         "dependencies": {
-          "ScreenGuide.Skills.Abstractions": "[0.4.0, )"
+          "ScreenGuide.Skills.Abstractions": "[0.6.0, )"
         }
       },
       "screenguide.vision.abstractions": {
@@ -390,7 +390,8 @@
       "screenguide.vision.windows": {
         "type": "Project",
         "dependencies": {
-          "ScreenGuide.Vision.Abstractions": "[0.4.0, )"
+          "ScreenGuide.Skills.Windows": "[0.6.0, )",
+          "ScreenGuide.Vision.Abstractions": "[0.6.0, )"
         }
       }
     },

@@ -4,7 +4,7 @@
 
 ## 当前状态
 
-- 当前正式发布基线仍为 V0.5.0 / V2 阶段 3；`v0.5.0-stage3` 指向 `d553e7e9d606037df87d98e99250de5498f5934a`。Stage 4 的 S4-R1/R2/R3/R4 均已 `INTEGRATED_PASS`。Stage 4 Final Freeze 尚未批准或执行，本状态不代表发布冻结，也不开始 S4-R5 或 Stage 5。
+- 当前正式发布基线仍为 V0.5.0 / V2 阶段 3；`v0.5.0-stage3` 指向 `d553e7e9d606037df87d98e99250de5498f5934a`。Stage 4 的 S4-R1/R2/R3/R4 均已 `INTEGRATED_PASS`，当前正在形成 V0.6.0 / Stage 4 Final Freeze C0 候选；标签、独立标签源码构建和 C1 证据尚未产生，本状态不代表正式冻结或对外发布，也不开始 S4-R5 或 Stage 5。
 - V2 阶段 1“统一会话中枢”已经通过；363/363 自动化和实际 Release DesktopClient + DesktopHost 的真实桌面验收均通过。
 - V0.2.1 标签 `v0.2.1-baseline` 保留为上一版回滚点；回滚必须同时使用 pre-v7 备份或隔离数据目录。
 - V2 阶段 2“可替换 AI 大脑与模型路由”已通过：统一 Chat Model、Provider Registry、Model Router、Prompt Registry、DPAPI、安全停用的 Codex 普通聊天适配器、DeepSeek/千问普通聊天 Provider、设置 UI/IPC、语义建议和 schema v8 AI 调用审计。
@@ -97,6 +97,8 @@
 
 ## 尚未解决
 
+- V0.6.0 仍是 Stage 4 C0 预冻结候选；正式 `v0.6.0-stage4`、独立标签源码的安装包哈希/大小/文件数和后续仅文档 C1 证据均待实际产生。同 AppId 生命周期、数字签名和语音模型许可/分发未放行。
+- 回滚到 V0.5.0 必须让 Host 与 Client 成对回滚，保留 schema v11 主库，并只在隔离目录使用匹配的 `pre-v11-from-v10`；没有匹配备份时失败关闭。
 - 阶段 3 只有显式本机预览与逐 Turn 完整确认后的单次发送；没有自动提取、自动模型注入、后台/语义检索、RAG、向量数据库或跨 Session 自动个性化。
 - 固定 Prompt 评测集已建立，但真实模型质量、Token/成本对比和长期回归趋势尚未形成发布证据。
 - Codex 普通聊天只保留 `codex-default` 描述并在生产策略下失败关闭，不提供真实普通聊天模型或 Usage；独立 Codex 编程 Agent 继续保留。

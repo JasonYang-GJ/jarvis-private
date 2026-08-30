@@ -1,6 +1,6 @@
-# 元枢产品事实（V0.5.0 / V2 阶段 3 正式冻结；Stage 4 R1/R2/R3/R4 已集成）
+# 元枢产品事实（V0.6.0 / Stage 4 Final Freeze C0 候选）
 
-> 当前产品事实的唯一入口。更新时间：2026-08-30。V0.5.0 / Stage 3 已正式冻结；Stage 4 的 S4-R1 Window Identity v2、S4-R2 本机真实使用评测、S4-R3 有界 Session 投影与 S4-R4 runtime gate 有界化均已 `INTEGRATED_PASS`。Stage 4 Final Freeze 尚未批准或执行，本状态不代表发布冻结，也不开始 S4-R5 或 Stage 5。
+> 当前产品事实的唯一入口。更新时间：2026-08-30。V0.5.0 / Stage 3 仍是当前正式发布基线；Stage 4 的 S4-R1 Window Identity v2、S4-R2 本机真实使用评测、S4-R3 有界 Session 投影与 S4-R4 runtime gate 有界化均已 `INTEGRATED_PASS`。当前源码正在形成 V0.6.0 / Stage 4 Final Freeze 的 C0 候选；真实标签、独立标签源码构建和 C1 证据提交均尚未产生，本状态不代表已冻结或可对外分发，也不开始 S4-R5 或 Stage 5。
 
 ## 产品定位
 
@@ -143,6 +143,7 @@
 
 ## 版本与安装状态
 
+- 阶段 4 C0 候选版本为 V0.6.0，计划标签为 `v0.6.0-stage4`；C0 提交、annotated tag object、独立标签源码产物大小/哈希/文件数均必须在对应 Git 与构建事实产生后记录，当前不预填。S4-R1/R2/R3/R4 已 `INTEGRATED_PASS`，但 Stage 4 尚未正式冻结。
 - 阶段 3 版本为 V0.5.0；正式标签 `v0.5.0-stage3` 指向 `d553e7e9d606037df87d98e99250de5498f5934a`，annotated tag object 为 `a67d2b24308edb2ce72db97676b837f5018617b8`。90/90 离线 Release 定向测试、实际 Release Client+Host 本机 Fake Provider 桌面流程和独立干净标签源码构建均已通过；安装包为 64,173,791 bytes，SHA-256 `4683E10CD6C5317EB537681978DB8A77E2DC15041838EF3DCE2DEE47C7C16F95`，未签名。
 - 阶段 2 版本为 V0.4.0，正式标签 `v0.4.0-stage2` 指向 `33b5859dcaa697bacd5edc5036a58d162b723a0e`，annotated tag object 为 `47a2b3b70fc22904954e2291470e809e58303eca`。干净标签源码产出的安装包为 64,128,304 bytes，SHA-256 `222DC720E677202BBCAEC6D507F48ACFA8B2FCA31535FF7B03010DF80EE7DEE9`，未签名。
 - 阶段 2 最终集成功能 SHA 为 `f7506a6013d83318572c63865607d78861e669bc`；最终标签还包含 V0.4.0 版本和冻结文档。
@@ -150,5 +151,6 @@
 - V0.2.1 标签 `v0.2.1-baseline` 保留为上一版回滚点；回滚数据必须使用 pre-v7 备份或隔离数据目录。
 - 阶段 2 候选代码把 SQLite 升到 schema v8 并在升级前建立 `pre-v8` 备份。V0.3.0 不能直接打开 schema v8；回滚到阶段 1 时必须使用 pre-v8 备份或隔离数据目录，不能覆盖正式数据库。
 - V0.5.0 使用 schema v10。直接从 V0.4.0 schema v8 升级只建立 `pre-v10-from-v8`，不会自动建立中间 pre-v9；从 v9 升级建立 `pre-v10-from-v9`。V0.4.0 不能直接打开 v9/v10；回滚时必须保留新主库，并使用匹配来源的 pre-v10、既有 v8 备份或隔离数据目录。
-- 阶段 4 当前使用 schema v11、protocol v11；S4-R3/S4-R4 没有新增 schema 迁移。v10→v11 schema 仍建立 `pre-v11-from-v10`；从更早版本直接升级时只按打开时的原始版本建立一个 `pre-v11-from-vN`。回滚到 V0.5.0 必须保留 v11 主库，并在隔离目录使用匹配的 pre-v11 备份。
+- 阶段 4 当前使用 schema v11、protocol v11；S4-R3/S4-R4 没有新增 schema 迁移。回滚到 V0.5.0 时 Host 与 Client 必须成对回滚，保留 v11 主库，只能在隔离数据目录使用与来源匹配的 `pre-v11-from-v10`；没有匹配备份时必须失败关闭，不能覆盖或原地降级正式主库。
 - 为保护本机同 AppId 的现有 V0.2.0 安装、卸载登记和用户数据，本阶段没有在该机器重复完整安装—卸载—重装；该发布生命周期仍应在干净机执行。
+- V0.6.0 C0 候选安装包仍未获得数字签名、语音模型许可/分发和同 AppId 干净环境生命周期放行，因此不得声称可对外分发。

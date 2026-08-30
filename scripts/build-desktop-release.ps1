@@ -10,6 +10,8 @@ $clientStage = Join-Path $artifactsRoot 'staging\client'
 $hostStage = Join-Path $artifactsRoot 'staging\host'
 $releaseRoot = Join-Path $artifactsRoot 'release'
 $solution = Join-Path $repoRoot 'ScreenGuide.slnx'
+$clientProject = Join-Path $repoRoot 'src\ScreenGuide.DesktopClient\ScreenGuide.DesktopClient.csproj'
+$hostProject = Join-Path $repoRoot 'src\ScreenGuide.DesktopHost\ScreenGuide.DesktopHost.csproj'
 
 function Reset-BuildDirectory([string]$path) {
     $fullPath = [System.IO.Path]::GetFullPath($path)
@@ -25,7 +27,8 @@ function Reset-BuildDirectory([string]$path) {
     New-Item -ItemType Directory -Path $fullPath -Force | Out-Null
 }
 
-dotnet restore $solution --locked-mode --disable-parallel
+dotnet restore $solution --locked-mode --disable-parallel --nologo `
+    -p:NuGetAudit=false --ignore-failed-sources
 if ($LASTEXITCODE -ne 0) { throw 'Locked release restore failed.' }
 
 if (-not $SkipTests) {
@@ -40,13 +43,21 @@ Reset-BuildDirectory $hostStage
 Reset-BuildDirectory $publishRoot
 New-Item -ItemType Directory -Path $releaseRoot -Force | Out-Null
 
-dotnet publish (Join-Path $repoRoot 'src\ScreenGuide.DesktopClient\ScreenGuide.DesktopClient.csproj') `
-    --configuration Release --runtime win-x64 --self-contained true `
+dotnet restore $clientProject --locked-mode --disable-parallel --nologo `
+    -p:RuntimeIdentifier=win-x64 -p:SelfContained=true -p:NuGetAudit=false --ignore-failed-sources
+if ($LASTEXITCODE -ne 0) { throw 'DesktopClient win-x64 locked restore failed.' }
+
+dotnet restore $hostProject --locked-mode --disable-parallel --nologo `
+    -p:RuntimeIdentifier=win-x64 -p:SelfContained=true -p:NuGetAudit=false --ignore-failed-sources
+if ($LASTEXITCODE -ne 0) { throw 'DesktopHost win-x64 locked restore failed.' }
+
+dotnet publish $clientProject `
+    --configuration Release --runtime win-x64 --self-contained true --no-restore `
     -p:RestoreLockedMode=true -p:PublishSingleFile=false -p:DebugType=None -p:DebugSymbols=false --output $clientStage
 if ($LASTEXITCODE -ne 0) { throw 'DesktopClient publish failed.' }
 
-dotnet publish (Join-Path $repoRoot 'src\ScreenGuide.DesktopHost\ScreenGuide.DesktopHost.csproj') `
-    --configuration Release --runtime win-x64 --self-contained true `
+dotnet publish $hostProject `
+    --configuration Release --runtime win-x64 --self-contained true --no-restore `
     -p:RestoreLockedMode=true -p:PublishSingleFile=false -p:DebugType=None -p:DebugSymbols=false --output $hostStage
 if ($LASTEXITCODE -ne 0) { throw 'DesktopHost publish failed.' }
 
@@ -68,7 +79,7 @@ if (-not $iscc) {
 & $iscc (Join-Path $repoRoot 'installer\ScreenGuideDesktop.iss')
 if ($LASTEXITCODE -ne 0) { throw 'Installer compilation failed.' }
 
-$installer = Join-Path $releaseRoot '元枢-V0.5.0-安装包.exe'
+$installer = Join-Path $releaseRoot '元枢-V0.6.0-安装包.exe'
 if (-not (Test-Path -LiteralPath $installer)) { throw 'Installer was not produced.' }
 Get-FileHash -Algorithm SHA256 -LiteralPath $installer
 Write-Host "Release installer: $installer"

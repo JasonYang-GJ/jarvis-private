@@ -2,6 +2,18 @@
 
 本项目从 V0.2.1 起采用可追溯版本记录。更早内容以历史报告和 Git 历史为准。
 
+## 0.6.0 - PRE-FREEZE CANDIDATE（V2 阶段 4）
+
+> S4-R1/R2/R3/R4 均已 `INTEGRATED_PASS`。本条目只记录 Stage 4 Final Freeze C0 候选；计划标签 `v0.6.0-stage4`、独立标签源码构建、安装包哈希/大小/文件数和仅文档 C1 证据均尚未产生，不代表正式冻结或对外发布。
+
+- S4-R1 将单窗口授权绑定到 `{HWND, PID, ProcessStartTimeUtc, ProcessName, Title}`，schema 升至 v11；身份缺失或变化逐层失败关闭。
+- S4-R2 以独立本机 Runner 完成固定合同的真实语音/视觉评测：真实语音 18/20，STOP 取消通过；真实视觉 20/20，身份变化失败关闭；不保存声音、转写正文或窗口像素。
+- S4-R3 将 Desktop IPC 升至 v11，增加有界 Session bootstrap/delta/reset、消息 keyset 分页、精确 Turn 查询、Client 有界缓存和持久化提交后的 Task 状态唤醒；SQLite 仍是状态真源。
+- S4-R4 把 Session/Turn 临时操作门闩抽取到 Host 内部单例注册表，并在 holder/waiter 全部释放后移除 key；不改变 SessionCoordinator 状态所有权、权限或事件合同。
+- C0 把 Version/AssemblyVersion/FileVersion/InformationalVersion 与安装包名统一到 V0.6.0；protocol/schema 均保持 v11，AppId、安装行为、Provider、Prompt、凭据和权限合同不变。
+- 回滚到 V0.5.0 必须让 Host 与 Client 成对回滚，保留 v11 主库，只在隔离目录使用匹配的 `pre-v11-from-v10`；没有匹配备份时失败关闭。
+- 同 AppId 安装—卸载—重装生命周期、数字签名和语音模型许可/分发尚未放行；本候选不得声称可对外分发，也不开始 S4-R5 或 Stage 5。
+
 ## 0.5.0 - 2026-08-30（V2 阶段 3：通过）
 
 > S3-R1/R2/R3、离线 Release 门禁、实际 Release 本机流程和独立干净标签源码构建均已通过。正式标签 `v0.5.0-stage3` 指向 `d553e7e9d606037df87d98e99250de5498f5934a`；安装包身份见 `docs/baselines/V0.5.0_STAGE3.md`。
