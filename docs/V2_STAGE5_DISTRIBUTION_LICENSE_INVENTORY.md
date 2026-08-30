@@ -110,9 +110,14 @@
 
 ## 5. 项目自有内容与资产
 
-- 项目源码、文档、runtime prompts、品牌和图标：`UNKNOWN_BLOCKED_FOR_DISTRIBUTION`。
-- 仓库根没有 LICENSE、NOTICE、THIRD_PARTY 或 Owner ownership/source declaration。
-- `.ico` 会嵌入 DesktopClient，runtime prompts 会复制到 DesktopHost publish；二者都必须有可追溯的所有权/来源声明。
+- Owner 事实声明已记录为 `OWNER_DECLARATION_RECORDED`；它是 Owner 自述，不是仓库独立验证、法律结论或外部分发放行。
+- Owner 声明：产品想法来自在抖音看到相似语音功能概念后的启发；没有从该创作者、GitHub 或其他网站下载或复制源码。本文只记录该自述，不把“概念启发”表述为已核验的实现来源。
+- Owner 声明：没有其他个人或公司贡献代码、设计或文件；项目材料由 Owner 在 Codex/AI 协助下制作。本文不据此判断 AI 辅助输出的法律权属。
+- Owner 声明：“元枢”品牌名称由 Owner 创建；当前图标由 Codex 按 Owner 指示生成。品牌和图标暂按 Owner 保留处理，但这只是保守边界，不是已选择的根许可证或已核验的商业使用授权。
+- 图标保持 `ICON_TERMS_EVIDENCE_REQUIRED`：外部分发前必须补齐生成服务、适用条款与商业使用证据，或由 Owner 明确选择替换/排除；当前不能宣称图标商业使用条款已验证。
+- Owner 声明未来可能付费销售编译产品和/或提供付费服务；状态仅为 `COMPILED_COMMERCIAL_INTENT_DECLARED`，不构成分发许可。源码公开分发当前为 `SOURCE_DISTRIBUTION_NOT_AUTHORIZED` / undecided。
+- 仓库根仍没有 LICENSE、NOTICE 或 THIRD_PARTY；Owner 声明不替代第三方 package 许可证，也不解除现有归属、NOTICE、签名和安装生命周期门禁。
+- `.ico` 会嵌入 DesktopClient，runtime prompts 会复制到 DesktopHost publish；图标仍受上述条款证据门禁，runtime Prompt 与其他自有材料仍需随 frozen manifest 和 NOTICE 实施闭合归属。
 - 没有发现随发布项目捆绑的字体、声音或录音；`yuanshu-icon.png` 不被 publish 项目引用，`.ico` 被捆绑。
 - 不记录 Prompt 正文、模型内容或原始二进制内容。
 
@@ -275,20 +280,21 @@
 
 ### 12.5 Owner Decision Gate
 
-Owner 必须可见决定并声明：
+Owner 已作出的事实声明与保守边界如下：
 
-- 项目源码、文档、runtime Prompt、品牌、图标与删除脚本的权利人和来源；
-- 允许的分发形态与限制；
-- 品牌授权和代码授权的边界；
-- 不明资产选择补证、替换或排除。
+- `OWNER_DECLARATION_RECORDED`：记录第 5 节所述概念启发、无源码复制、无其他已知个人/公司贡献、AI 辅助制作、“元枢”品牌来源和图标生成来源自述；这些内容不冒充仓库验证或法律结论。
+- `COMPILED_COMMERCIAL_INTENT_DECLARED`：未来可能销售编译产品和/或提供付费服务，但当前仍是意向，不是分发 clearance。
+- `SOURCE_DISTRIBUTION_NOT_AUTHORIZED`：不授权公开分发源码；是否以及如何分发源码仍未决定。
+- 品牌名称和图标默认由 Owner 保留；这只是保守临时边界，不等同于选择根许可证，也不改变第三方组件的许可证义务。
+- `ICON_TERMS_EVIDENCE_REQUIRED`：图标的 exact 生成服务/适用条款/商业使用证据尚未闭合；外部分发前必须补证，或由 Owner 可见决定替换/排除。
 
-本文不得推荐或替 Owner 选择根许可证。
+因此 Owner Decision Gate 只完成了事实声明记录；图标条款证据、其他资产归属与现有 S5-R1 blocks 未关闭，不能标为完整 PASS。本文不得推荐或替 Owner 选择根许可证。
 
 ### 12.6 新授权门禁
 
 以下动作各自需要新的、可见的 Owner 授权，不能相互替代：
 
-1. Owner 权属/分发形态确认；
+1. Owner 对图标条款证据及其他尚未闭合资产的补证、替换或排除决定；
 2. 原始 C0 artifact 的只读静态 manifest 生成；
 3. clean rebuild 及其可重建参考 manifest；
 4. NOTICE publish/installer 修改、安装后验证与新 release identity；
@@ -299,7 +305,8 @@ Owner 必须可见决定并声明：
 
 `S5-R1_CONTRACT_PASS` 后仍缺少以下相互独立的证据或实施；本轮不执行：
 
-- Owner 对项目源码、文档、Prompt、品牌与 `.ico` 的 ownership/source/distribution declaration；
+- `ICON_TERMS_EVIDENCE_REQUIRED`：当前 `.ico` 的 exact 生成服务/条款/商业使用证据，或 Owner 可见的替换/排除决定；
+- Owner 对 runtime Prompt、删除脚本及其他尚未由本次事实声明闭合资产的来源/允许分发形态补充；源码公开分发继续 `SOURCE_DISTRIBUTION_NOT_AUTHORIZED`；
 - 只读 `v0.6.0-stage4` artifact 的完整 per-file manifest、逐文件 hash、来源映射、LICENSE/NOTICE placement 与 attribution；
 - NOTICE 文件与索引的实际 publish/installer 布置、安装后验证及新 release identity；
 - SQLite native `e_sqlite3` 的上游许可与冻结 DLL attribution；
