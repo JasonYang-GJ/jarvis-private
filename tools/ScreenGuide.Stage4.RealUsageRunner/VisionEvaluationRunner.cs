@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Drawing;
+using System.Runtime.InteropServices;
 using ScreenGuide.Vision.Abstractions;
 using ScreenGuide.Vision.Windows;
 using Windows.Graphics.Capture;
@@ -111,14 +112,15 @@ internal static class VisionEvaluationRunner
                                 input,
                                 async attemptCancellation =>
                                 {
-                                    await window.PrepareForCaptureAsync(
-                                            VisionEvaluationContract.DiagnosticWindowWidth,
-                                            VisionEvaluationContract.DiagnosticWindowHeight,
-                                            attemptCancellation)
-                                        .ConfigureAwait(false);
-                                    return await diagnosticEvaluator.EvaluateAsync(
-                                            consentedTarget,
-                                            VisionEvaluationContract.DiagnosticCandidates,
+                                    return await VisionEvaluationAttemptPipeline.PrepareAndCaptureAsync(
+                                            prepare: token => window.PrepareForCaptureAsync(
+                                                VisionEvaluationContract.DiagnosticWindowWidth,
+                                                VisionEvaluationContract.DiagnosticWindowHeight,
+                                                token),
+                                            capture: token => diagnosticEvaluator.EvaluateAsync(
+                                                consentedTarget,
+                                                VisionEvaluationContract.DiagnosticCandidates,
+                                                token),
                                             attemptCancellation)
                                         .ConfigureAwait(false);
                                 },
@@ -160,23 +162,24 @@ internal static class VisionEvaluationRunner
                             input,
                             async attemptCancellation =>
                             {
-                                await window.PrepareForCaptureAsync(
-                                        680,
-                                        280,
-                                        attemptCancellation)
-                                    .ConfigureAwait(false);
-                                if (options.Mode == "vision-identity-change")
-                                {
-                                    await window.ChangeTitleAsync(
-                                            VisionEvaluationContract.ChangedFormTitle,
-                                            attemptCancellation)
-                                        .ConfigureAwait(false);
-                                }
-
-                                return await evaluator.EvaluateAsync(
-                                        consentedTarget,
-                                        VisionEvaluationContract.FormalCanary,
-                                        isWarmup,
+                                return await VisionEvaluationAttemptPipeline.PrepareAndCaptureAsync(
+                                        prepare: async token =>
+                                        {
+                                            await window.PrepareForCaptureAsync(680, 280, token)
+                                                .ConfigureAwait(false);
+                                            if (options.Mode == "vision-identity-change")
+                                            {
+                                                await window.ChangeTitleAsync(
+                                                        VisionEvaluationContract.ChangedFormTitle,
+                                                        token)
+                                                    .ConfigureAwait(false);
+                                            }
+                                        },
+                                        capture: token => evaluator.EvaluateAsync(
+                                            consentedTarget,
+                                            VisionEvaluationContract.FormalCanary,
+                                            isWarmup,
+                                            token),
                                         attemptCancellation)
                                     .ConfigureAwait(false);
                             },
@@ -254,6 +257,10 @@ internal static class VisionEvaluationRunner
 
     internal sealed class SyntheticEvaluationWindow : IAsyncDisposable
     {
+        private const uint SwpNoMove = 0x0002;
+        private const uint SwpNoZOrder = 0x0004;
+        private const uint SwpNoActivate = 0x0010;
+        private const uint SwpShowWindow = 0x0040;
         private readonly Thread _thread;
         private readonly WinForms.Form _form;
 
@@ -290,7 +297,6 @@ internal static class VisionEvaluationRunner
                         highContrast);
                     form.Shown += (_, _) =>
                     {
-                        form.Activate();
                         form.Refresh();
                         ready.TrySetResult((form, form.Handle.ToInt64()));
                     };
@@ -339,19 +345,35 @@ internal static class VisionEvaluationRunner
                                 "测试窗口身份已经变化，因此没有读取画面。 ");
                         }
 
-                        _form.WindowState = WinForms.FormWindowState.Normal;
-                        _form.Size = new Size(expectedWidth, expectedHeight);
-                        _form.Show();
-                        // Keep the console focused so the user's next Enter/STOP remains
-                        // available; TopMost keeps this synthetic window visible.
+                        var handle = new IntPtr(Handle);
+                        if (IsIconic(handle))
+                        {
+                            throw new InvalidOperationException(
+                                "测试窗口已最小化，因此没有读取标题栏或其他不完整画面。 ");
+                        }
+
+                        if (!SetWindowPos(
+                                handle,
+                                IntPtr.Zero,
+                                0,
+                                0,
+                                expectedWidth,
+                                expectedHeight,
+                                SwpNoMove | SwpNoZOrder | SwpNoActivate | SwpShowWindow))
+                        {
+                            throw new InvalidOperationException(
+                                "测试窗口没有恢复到已批准的可见尺寸，因此没有读取画面。 ");
+                        }
+
                         _form.Refresh();
                         _form.Update();
 
                         if (_form.Handle.ToInt64() != Handle
-                            || !_form.Visible
-                            || _form.WindowState != WinForms.FormWindowState.Normal
-                            || _form.Width != expectedWidth
-                            || _form.Height != expectedHeight)
+                            || !IsWindowVisible(handle)
+                            || IsIconic(handle)
+                            || !GetWindowRect(handle, out var bounds)
+                            || (long)bounds.Right - bounds.Left != expectedWidth
+                            || (long)bounds.Bottom - bounds.Top != expectedHeight)
                         {
                             throw new InvalidOperationException(
                                 "测试窗口没有恢复到已批准的可见尺寸，因此没有读取画面。 ");
@@ -390,11 +412,62 @@ internal static class VisionEvaluationRunner
             });
             return completed.Task.WaitAsync(cancellationToken);
         }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct Rect
+        {
+            public int Left;
+            public int Top;
+            public int Right;
+            public int Bottom;
+        }
+
+        [DllImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool SetWindowPos(
+            IntPtr hWnd,
+            IntPtr hWndInsertAfter,
+            int x,
+            int y,
+            int cx,
+            int cy,
+            uint flags);
+
+        [DllImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool GetWindowRect(IntPtr hWnd, out Rect rect);
+
+        [DllImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool IsIconic(IntPtr hWnd);
+
+        [DllImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool IsWindowVisible(IntPtr hWnd);
+    }
+}
+
+internal static class VisionEvaluationAttemptPipeline
+{
+    public static async Task<T> PrepareAndCaptureAsync<T>(
+        Func<CancellationToken, Task> prepare,
+        Func<CancellationToken, Task<T>> capture,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(prepare);
+        ArgumentNullException.ThrowIfNull(capture);
+        cancellationToken.ThrowIfCancellationRequested();
+        await prepare(cancellationToken).ConfigureAwait(false);
+        cancellationToken.ThrowIfCancellationRequested();
+        return await capture(cancellationToken).ConfigureAwait(false);
     }
 }
 
 internal sealed class SyntheticEvaluationForm : WinForms.Form
 {
+    private const int WmSysCommand = 0x0112;
+    private const int ScMinimize = 0xF020;
+    private const int WsExNoActivate = 0x08000000;
     private readonly string[] _diagnosticLines;
     private readonly Font? _diagnosticFont;
 
@@ -410,6 +483,7 @@ internal sealed class SyntheticEvaluationForm : WinForms.Form
         Height = height;
         StartPosition = WinForms.FormStartPosition.CenterScreen;
         TopMost = true;
+        MinimizeBox = false;
         AutoScaleMode = WinForms.AutoScaleMode.None;
         BackColor = highContrast ? Color.White : SystemColors.Control;
 
@@ -475,6 +549,29 @@ internal sealed class SyntheticEvaluationForm : WinForms.Form
                 Color.White,
                 flags);
         }
+    }
+
+    protected override bool ShowWithoutActivation => true;
+
+    protected override WinForms.CreateParams CreateParams
+    {
+        get
+        {
+            var parameters = base.CreateParams;
+            parameters.ExStyle |= WsExNoActivate;
+            return parameters;
+        }
+    }
+
+    protected override void WndProc(ref WinForms.Message message)
+    {
+        if (message.Msg == WmSysCommand
+            && (message.WParam.ToInt64() & 0xFFF0) == ScMinimize)
+        {
+            return;
+        }
+
+        base.WndProc(ref message);
     }
 
     protected override void Dispose(bool disposing)
