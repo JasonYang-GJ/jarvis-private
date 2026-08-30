@@ -1,6 +1,6 @@
-# 元枢当前架构（V0.6.0 / Stage 4 Final Freeze C0 候选 As-Built）
+# 元枢当前架构（V0.6.0 / Stage 4 Final Freeze As-Built）
 
-> 本文描述截至 Stage 4 S4-R1/R2/R3/R4 `INTEGRATED_PASS` 的当前结构。V0.5.0 / Stage 3 仍是正式发布基线；V0.6.0 / Stage 4 正在形成 Final Freeze C0 候选，尚无标签、独立标签源码产物或 C1 最终证据。更新时间：2026-08-30。
+> 本文描述 V0.6.0 / Stage 4 Final Freeze 的当前结构；S4-R1/R2/R3/R4 均为 `INTEGRATED_PASS`，正式标签、独立标签源码产物与 C1 证据均已形成。该冻结状态不等于已获对外分发批准。更新时间：2026-08-30。
 
 ## 1. 运行结构
 
@@ -246,14 +246,15 @@ Codex 普通聊天适配器由 `CodexChatModelProvider` 承载，但生产策略
 
 - .NET SDK 由 `global.json` 固定到 10.0.400，允许同补丁线更新。
 - 普通依赖与 win-x64 发布依赖使用锁文件，发布脚本在 locked mode 下恢复。
-- `scripts/build-desktop-release.ps1` 是发布入口；Stage 4 C0 候选版本为 V0.6.0，预标签安装包名固定为 `元枢-V0.6.0-安装包.exe`。正式产物身份只能在 `v0.6.0-stage4` 创建后由独立干净标签源码构建产生，并由后续仅文档 C1 证据提交回填。
+- `scripts/build-desktop-release.ps1` 是发布入口；Stage 4 冻结版本为 V0.6.0，安装包名固定为 `元枢-V0.6.0-安装包.exe`。正式产物身份来自 `v0.6.0-stage4` 的独立干净标签源码构建；后续仅文档 C1 只回填证据，不改变标签源码或二进制来源。
 - V0.3.0 冻结证据保持不变：全量自动化 363/363；实际 Release DesktopClient + DesktopHost + 真实 Codex Provider + 真实 Windows Notepad 已完成阶段 1 的 10 轮连续对话、3 次真取消和项目/文件/单窗口场景，证据目录为 `%LOCALAPPDATA%\ScreenGuide\Experiments\DesktopV01\20260823-184833`。
 - 阶段 2 离线 Release 定向 QA 173/173 通过；集成后 Qwen 56/56、R4 Runner 61/61、设置/无 fallback/工作负载隔离 3/3 通过。R1/R2/R3 已通过证据被复用，没有机械重跑全矩阵。
 - 阶段 2 普通聊天发布目标是 DeepSeek + 千问。DeepSeek 既有真实证据已冻结；Qwen 真实 Health、Ordinary Chat 和 Cancellation 通过。Codex 普通聊天不属于发布目标，普通聊天选 Qwen 时的独立真实 Codex 编程 Task 回归已通过。
 - 阶段 3 离线 Release 定向门禁 90/90 通过；实际 Release WPF Client + DesktopHost 通过 Stage 2 路由回归和 Stage 3 记忆 CRUD、预览、完整出站确认、单次发送、输入变化失效与删除流程，Provider 为进程内 Fake，网络、真实凭据和真实 Provider 请求均为 0。
 - 阶段 3 标签 `v0.5.0-stage3` 指向 `d553e7e9d606037df87d98e99250de5498f5934a`，annotated tag object 为 `a67d2b24308edb2ce72db97676b837f5018617b8`。独立干净标签源码 locked restore、Client/Host Release publish 和安装包编译通过，发布目录 539 个文件；Client/Host ProductVersion 均为 `0.5.0+d553e7e9d606037df87d98e99250de5498f5934a`，FileVersion 均为 `0.5.0.0`。
-- Stage 4 的 S4-R1/R2/R3/R4 均已 `INTEGRATED_PASS`；S4-R4 只把 Session/Turn 临时操作门闩有界化，不改变 SessionCoordinator 状态所有权、权限或事件合同。当前处于 V0.6.0 Final Freeze C0 候选阶段；标签、标签源码构建与 C1 证据尚未产生，本状态不代表正式冻结，也不开始 S4-R5 或 Stage 5。
+- Stage 4 的 S4-R1/R2/R3/R4 均已 `INTEGRATED_PASS`，V0.6.0 已完成 Final Freeze；S4-R4 只把 Session/Turn 临时操作门闩有界化，不改变 SessionCoordinator 状态所有权、权限或事件合同。正式标签 `v0.6.0-stage4` 指向 C0 `3a591a7b6af7da7d97e07093d4c33a3f44553b82`，annotated tag object 为 `20045c7960c182a052a5e0b2552ce0ed14a3863f`；本 C1 不改变标签或二进制，也不开始 S4-R5 或 Stage 5。
 - Stage 4 S4-R2 最终代码候选 `996da9acb9cf00537794668bfd81f65d1444cca8` 通过 focused 3/3、Vision 35/35、Voice 43/43、Runner/DesktopHost Release 构建、独立 QA 和安全/架构门禁。真实语音为 18/20，另有 STOP 取消 PASS；真实视觉为 20/20，identity-change 按 `Cancelled / vision.identity_changed` 结束。各批次清理均完成，网络和 Provider 请求均为 0。
+- Stage 4 独立干净标签源码的离线 locked restore、`build-desktop-release.ps1 -SkipTests` Client/Host publish 和安装包编译通过，发布目录 539 个文件；Client/Host ProductVersion 均为 `0.6.0+3a591a7b6af7da7d97e07093d4c33a3f44553b82`，FileVersion 均为 `0.6.0.0`。安装包 `元枢-V0.6.0-安装包.exe` 为 64,203,075 bytes，SHA-256 为 `5F912F94960E1E90A1EF918139C46751FCA8377A4055B5E68BA060A9BF4E56D7`，未签名。
 - V0.5.0 安装包 `artifacts/release/元枢-V0.5.0-安装包.exe` 为 64,173,791 bytes，SHA-256 为 `4683E10CD6C5317EB537681978DB8A77E2DC15041838EF3DCE2DEE47C7C16F95`，未签名。标签后的仅文档证据提交不改变标签源码或二进制来源。
 - 阶段 2 标签 `v0.4.0-stage2` 指向 `33b5859dcaa697bacd5edc5036a58d162b723a0e`，annotated tag object 为 `47a2b3b70fc22904954e2291470e809e58303eca`。独立干净标签源码 locked restore 和 Release build 通过，发布目录 538 个文件；Client/Host ProductVersion 均为 `0.4.0+33b5859dcaa697bacd5edc5036a58d162b723a0e`，FileVersion 均为 `0.4.0.0`。
 - V0.4.0 安装包 `artifacts/release/元枢-V0.4.0-安装包.exe` 为 64,128,304 bytes，SHA-256 为 `222DC720E677202BBCAEC6D507F48ACFA8B2FCA31535FF7B03010DF80EE7DEE9`，未签名。标签后的仅文档证据提交不改变标签源码或二进制来源。
@@ -275,4 +276,4 @@ Codex 普通聊天适配器由 `CodexChatModelProvider` 承载，但生产策略
 - 语义意图只覆盖有限候选句式，保守回退是有意安全选择；不能把它宣传为完整自然语言操作理解。
 - 阶段 3 只支持逐 Turn 明确选择、完整可见确认和单次普通聊天发送；没有自动注入、RAG、向量库、后台检索或跨 Session 自动个性化。Conversation 历史和 `ai_invocations` 仍不是长期记忆。
 - schema v11 对 V0.5.0 schema v10 向前不兼容；回滚必须让 Host 与 Client 成对回到 V0.5.0，保留 v11 主库，并只在隔离目录使用匹配的 `pre-v11-from-v10`。没有匹配备份时失败关闭；更早回滚继续管理 pre-v10/pre-v8 备份。
-- 安装包未签名，语音模型许可与分发方案未放行，同 AppId 安装—卸载—重装生命周期也未在隔离干净环境完成；V0.6.0 C0 候选不能作为对外分发版本。
+- 安装包未签名，语音模型许可与分发方案未放行，同 AppId 安装—卸载—重装生命周期也未在隔离干净环境完成；V0.6.0 Final Freeze 不能据此视为已获对外分发批准。

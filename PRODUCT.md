@@ -1,6 +1,6 @@
-# 元枢产品事实（V0.6.0 / Stage 4 Final Freeze C0 候选）
+# 元枢产品事实（V0.6.0 / Stage 4 Final Freeze）
 
-> 当前产品事实的唯一入口。更新时间：2026-08-30。V0.5.0 / Stage 3 仍是当前正式发布基线；Stage 4 的 S4-R1 Window Identity v2、S4-R2 本机真实使用评测、S4-R3 有界 Session 投影与 S4-R4 runtime gate 有界化均已 `INTEGRATED_PASS`。当前源码正在形成 V0.6.0 / Stage 4 Final Freeze 的 C0 候选；真实标签、独立标签源码构建和 C1 证据提交均尚未产生，本状态不代表已冻结或可对外分发，也不开始 S4-R5 或 Stage 5。
+> 当前产品事实的唯一入口。更新时间：2026-08-30。V0.6.0 / Stage 4 已完成 Final Freeze，S4-R1 Window Identity v2、S4-R2 本机真实使用评测、S4-R3 有界 Session 投影与 S4-R4 runtime gate 有界化均为 `INTEGRATED_PASS`。正式标签 `v0.6.0-stage4` 指向 C0 源码提交 `3a591a7b6af7da7d97e07093d4c33a3f44553b82`；本 C1 只记录标签源码构建与产物证据，不改变标签或二进制身份。安装包仍未获对外分发放行，也不开始 S4-R5 或 Stage 5。
 
 ## 产品定位
 
@@ -123,7 +123,7 @@
 ## 尚未完成
 
 - 阶段 3 不包含自动记忆提取、后台/语义检索、RAG、向量数据库、用户画像或跨 Session 自动个性化；`intent.semantic` 永不接收记忆。
-- 同 AppId 的安装—卸载—重装生命周期尚未在干净 Windows 环境执行；当前标签是可追溯的 Stage 3 正式源码基线，但不等于已放行对外分发。
+- 同 AppId 的安装—卸载—重装生命周期尚未在干净 Windows 环境执行；V0.6.0 标签是可追溯的 Stage 4 冻结源码基线，但不等于已放行对外分发。
 - Prompt 已有版本、哈希和固定小型评测集，但真实模型质量评测、成本/Token 对比和长期回归趋势仍未形成发布证据。
 - Provider 路由当前只支持用户明确默认选择，不做自动成本/速度路由或自动降级；这是阶段 2 的有意范围，不是缺陷。
 - 每轮会把当前 Conversation 历史交给所选 Provider，并有字符上限；尚未做 Token 精确预算、摘要或上下文裁剪。
@@ -143,7 +143,7 @@
 
 ## 版本与安装状态
 
-- 阶段 4 C0 候选版本为 V0.6.0，计划标签为 `v0.6.0-stage4`；C0 提交、annotated tag object、独立标签源码产物大小/哈希/文件数均必须在对应 Git 与构建事实产生后记录，当前不预填。S4-R1/R2/R3/R4 已 `INTEGRATED_PASS`，但 Stage 4 尚未正式冻结。
+- 阶段 4 版本为 V0.6.0，已完成 Final Freeze / `INTEGRATED_PASS`。正式标签 `v0.6.0-stage4` 指向 C0 `3a591a7b6af7da7d97e07093d4c33a3f44553b82`，annotated tag object 为 `20045c7960c182a052a5e0b2552ce0ed14a3863f`。独立干净标签源码的离线 locked restore、`build-desktop-release.ps1 -SkipTests` Client/Host publish 与安装包编译通过；发布目录 539 个文件，Client/Host ProductVersion 均为 `0.6.0+3a591a7b6af7da7d97e07093d4c33a3f44553b82`，FileVersion 均为 `0.6.0.0`。安装包 `元枢-V0.6.0-安装包.exe` 为 64,203,075 bytes，SHA-256 `5F912F94960E1E90A1EF918139C46751FCA8377A4055B5E68BA060A9BF4E56D7`，未签名。
 - 阶段 3 版本为 V0.5.0；正式标签 `v0.5.0-stage3` 指向 `d553e7e9d606037df87d98e99250de5498f5934a`，annotated tag object 为 `a67d2b24308edb2ce72db97676b837f5018617b8`。90/90 离线 Release 定向测试、实际 Release Client+Host 本机 Fake Provider 桌面流程和独立干净标签源码构建均已通过；安装包为 64,173,791 bytes，SHA-256 `4683E10CD6C5317EB537681978DB8A77E2DC15041838EF3DCE2DEE47C7C16F95`，未签名。
 - 阶段 2 版本为 V0.4.0，正式标签 `v0.4.0-stage2` 指向 `33b5859dcaa697bacd5edc5036a58d162b723a0e`，annotated tag object 为 `47a2b3b70fc22904954e2291470e809e58303eca`。干净标签源码产出的安装包为 64,128,304 bytes，SHA-256 `222DC720E677202BBCAEC6D507F48ACFA8B2FCA31535FF7B03010DF80EE7DEE9`，未签名。
 - 阶段 2 最终集成功能 SHA 为 `f7506a6013d83318572c63865607d78861e669bc`；最终标签还包含 V0.4.0 版本和冻结文档。
@@ -153,4 +153,4 @@
 - V0.5.0 使用 schema v10。直接从 V0.4.0 schema v8 升级只建立 `pre-v10-from-v8`，不会自动建立中间 pre-v9；从 v9 升级建立 `pre-v10-from-v9`。V0.4.0 不能直接打开 v9/v10；回滚时必须保留新主库，并使用匹配来源的 pre-v10、既有 v8 备份或隔离数据目录。
 - 阶段 4 当前使用 schema v11、protocol v11；S4-R3/S4-R4 没有新增 schema 迁移。回滚到 V0.5.0 时 Host 与 Client 必须成对回滚，保留 v11 主库，只能在隔离数据目录使用与来源匹配的 `pre-v11-from-v10`；没有匹配备份时必须失败关闭，不能覆盖或原地降级正式主库。
 - 为保护本机同 AppId 的现有 V0.2.0 安装、卸载登记和用户数据，本阶段没有在该机器重复完整安装—卸载—重装；该发布生命周期仍应在干净机执行。
-- V0.6.0 C0 候选安装包仍未获得数字签名、语音模型许可/分发和同 AppId 干净环境生命周期放行，因此不得声称可对外分发。
+- V0.6.0 冻结安装包仍未获得数字签名、语音模型许可/分发和同 AppId 干净环境生命周期放行，因此 Final Freeze 只证明源码与产物身份，不得声称已获对外分发批准。

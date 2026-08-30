@@ -2,9 +2,9 @@
 
 本项目从 V0.2.1 起采用可追溯版本记录。更早内容以历史报告和 Git 历史为准。
 
-## 0.6.0 - PRE-FREEZE CANDIDATE（V2 阶段 4）
+## 0.6.0 - 2026-08-30（V2 阶段 4：Final Freeze）
 
-> S4-R1/R2/R3/R4 均已 `INTEGRATED_PASS`。本条目只记录 Stage 4 Final Freeze C0 候选；计划标签 `v0.6.0-stage4`、独立标签源码构建、安装包哈希/大小/文件数和仅文档 C1 证据均尚未产生，不代表正式冻结或对外发布。
+> S4-R1/R2/R3/R4 均已 `INTEGRATED_PASS`，V0.6.0 / Stage 4 已完成 Final Freeze。正式标签 `v0.6.0-stage4` 指向 C0 `3a591a7b6af7da7d97e07093d4c33a3f44553b82`，annotated tag object 为 `20045c7960c182a052a5e0b2552ce0ed14a3863f`；本 C1 只记录冻结证据，不改变标签或二进制身份，也不代表已获对外分发批准。
 
 - S4-R1 将单窗口授权绑定到 `{HWND, PID, ProcessStartTimeUtc, ProcessName, Title}`，schema 升至 v11；身份缺失或变化逐层失败关闭。
 - S4-R2 以独立本机 Runner 完成固定合同的真实语音/视觉评测：真实语音 18/20，STOP 取消通过；真实视觉 20/20，身份变化失败关闭；不保存声音、转写正文或窗口像素。
@@ -12,7 +12,8 @@
 - S4-R4 把 Session/Turn 临时操作门闩抽取到 Host 内部单例注册表，并在 holder/waiter 全部释放后移除 key；不改变 SessionCoordinator 状态所有权、权限或事件合同。
 - C0 把 Version/AssemblyVersion/FileVersion/InformationalVersion 与安装包名统一到 V0.6.0；protocol/schema 均保持 v11，AppId、安装行为、Provider、Prompt、凭据和权限合同不变。
 - 回滚到 V0.5.0 必须让 Host 与 Client 成对回滚，保留 v11 主库，只在隔离目录使用匹配的 `pre-v11-from-v10`；没有匹配备份时失败关闭。
-- 同 AppId 安装—卸载—重装生命周期、数字签名和语音模型许可/分发尚未放行；本候选不得声称可对外分发，也不开始 S4-R5 或 Stage 5。
+- 同 AppId 安装—卸载—重装生命周期、数字签名和语音模型许可/分发尚未放行；本冻结版本不得声称已获对外分发批准，也不开始 S4-R5 或 Stage 5。
+- 独立干净标签源码的离线 locked restore、`build-desktop-release.ps1 -SkipTests` Client/Host publish 与安装包编译通过；发布目录 539 个文件，Client/Host ProductVersion 均为 `0.6.0+3a591a7b6af7da7d97e07093d4c33a3f44553b82`，FileVersion 均为 `0.6.0.0`。安装包 `元枢-V0.6.0-安装包.exe` 为 64,203,075 bytes，SHA-256 `5F912F94960E1E90A1EF918139C46751FCA8377A4055B5E68BA060A9BF4E56D7`，`NotSigned`。
 
 ## 0.5.0 - 2026-08-30（V2 阶段 3：通过）
 
