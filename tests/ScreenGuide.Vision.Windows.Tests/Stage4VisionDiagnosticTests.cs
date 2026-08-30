@@ -22,9 +22,10 @@ public sealed class Stage4VisionDiagnosticTests
                 item.Text,
                 VisionEvaluationContract.FormTitle,
                 StringComparison.Ordinal));
-        Assert.True(VisionEvaluationContract.DiagnosticWindowWidth >= 900);
-        Assert.True(VisionEvaluationContract.DiagnosticWindowHeight >= 560);
-        Assert.True(VisionEvaluationContract.DiagnosticFontSize >= 32);
+        Assert.True(VisionEvaluationContract.DiagnosticWindowWidth >= 1100);
+        Assert.True(VisionEvaluationContract.DiagnosticWindowHeight >= 700);
+        Assert.True(VisionEvaluationContract.DiagnosticFontSize >= 54);
+        Assert.DoesNotContain("1.", VisionEvaluationContract.DiagnosticWindowText, StringComparison.Ordinal);
     }
 
     [Fact]

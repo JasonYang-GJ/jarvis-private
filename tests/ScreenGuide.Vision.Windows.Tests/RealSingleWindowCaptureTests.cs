@@ -80,32 +80,16 @@ public sealed class RealSingleWindowCaptureTests
             TaskCreationOptions.RunContinuationsAsynchronously);
         var thread = new Thread(() =>
         {
-            var form = new WinForms.Form
-            {
-                Text = VisionEvaluationContract.FormTitle,
-                Width = VisionEvaluationContract.DiagnosticWindowWidth,
-                Height = VisionEvaluationContract.DiagnosticWindowHeight,
-                StartPosition = WinForms.FormStartPosition.CenterScreen,
-                TopMost = true,
-                BackColor = System.Drawing.Color.White
-            };
-            form.Controls.Add(new WinForms.Label
-            {
-                Text = VisionEvaluationContract.DiagnosticWindowText,
-                AutoSize = true,
-                Font = new System.Drawing.Font(
-                    "Microsoft YaHei UI",
-                    VisionEvaluationContract.DiagnosticFontSize,
-                    System.Drawing.FontStyle.Bold),
-                ForeColor = System.Drawing.Color.Black,
-                BackColor = System.Drawing.Color.White,
-                UseCompatibleTextRendering = false,
-                Left = 36,
-                Top = 54
-            });
+            var form = new SyntheticEvaluationForm(
+                VisionEvaluationContract.FormTitle,
+                VisionEvaluationContract.DiagnosticWindowText,
+                VisionEvaluationContract.DiagnosticWindowWidth,
+                VisionEvaluationContract.DiagnosticWindowHeight,
+                highContrast: true);
             form.Shown += (_, _) =>
             {
                 form.Activate();
+                form.Refresh();
                 ready.TrySetResult((form, form.Handle.ToInt64()));
             };
             WinForms.Application.Run(form);
@@ -116,6 +100,7 @@ public sealed class RealSingleWindowCaptureTests
         var (form, handle) = await ready.Task.WaitAsync(TimeSpan.FromSeconds(5));
         try
         {
+            Assert.Empty(form.Controls);
             using var process = Process.GetCurrentProcess();
             var target = new WindowCaptureTarget(
                 handle,

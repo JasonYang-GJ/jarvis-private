@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Drawing;
 using ScreenGuide.Vision.Abstractions;
 using ScreenGuide.Vision.Windows;
 using Windows.Graphics.Capture;
@@ -267,38 +268,16 @@ internal static class VisionEvaluationRunner
             {
                 try
                 {
-                    var form = new WinForms.Form
-                    {
-                        Text = title,
-                        Width = width,
-                        Height = height,
-                        StartPosition = WinForms.FormStartPosition.CenterScreen,
-                        TopMost = true,
-                        BackColor = highContrast
-                            ? System.Drawing.Color.White
-                            : System.Drawing.SystemColors.Control
-                    };
-                    form.Controls.Add(new WinForms.Label
-                    {
-                        Text = canary,
-                        AutoSize = true,
-                        Font = new System.Drawing.Font(
-                            "Microsoft YaHei UI",
-                            highContrast ? VisionEvaluationContract.DiagnosticFontSize : 18,
-                            highContrast
-                                ? System.Drawing.FontStyle.Bold
-                                : System.Drawing.FontStyle.Regular),
-                        ForeColor = System.Drawing.Color.Black,
-                        BackColor = highContrast
-                            ? System.Drawing.Color.White
-                            : System.Drawing.Color.Transparent,
-                        UseCompatibleTextRendering = false,
-                        Left = highContrast ? 36 : 46,
-                        Top = highContrast ? 54 : 86
-                    });
+                    var form = new SyntheticEvaluationForm(
+                        title,
+                        canary,
+                        width,
+                        height,
+                        highContrast);
                     form.Shown += (_, _) =>
                     {
                         form.Activate();
+                        form.Refresh();
                         ready.TrySetResult((form, form.Handle.ToInt64()));
                     };
                     WinForms.Application.Run(form);
@@ -354,6 +333,101 @@ internal static class VisionEvaluationRunner
             });
             return completed.Task.WaitAsync(cancellationToken);
         }
+    }
+}
+
+internal sealed class SyntheticEvaluationForm : WinForms.Form
+{
+    private readonly string[] _diagnosticLines;
+    private readonly Font? _diagnosticFont;
+
+    public SyntheticEvaluationForm(
+        string title,
+        string canary,
+        int width,
+        int height,
+        bool highContrast)
+    {
+        Text = title;
+        Width = width;
+        Height = height;
+        StartPosition = WinForms.FormStartPosition.CenterScreen;
+        TopMost = true;
+        AutoScaleMode = WinForms.AutoScaleMode.None;
+        BackColor = highContrast ? Color.White : SystemColors.Control;
+
+        if (highContrast)
+        {
+            _diagnosticLines = canary.Split(
+                ["\r\n", "\n"],
+                StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            _diagnosticFont = new Font(
+                "Microsoft YaHei UI",
+                VisionEvaluationContract.DiagnosticFontSize,
+                FontStyle.Bold,
+                GraphicsUnit.Point);
+            SetStyle(
+                WinForms.ControlStyles.UserPaint
+                | WinForms.ControlStyles.AllPaintingInWmPaint
+                | WinForms.ControlStyles.Opaque
+                | WinForms.ControlStyles.ResizeRedraw,
+                true);
+            return;
+        }
+
+        _diagnosticLines = [];
+        Controls.Add(new WinForms.Label
+        {
+            Text = canary,
+            AutoSize = true,
+            Font = new Font("Microsoft YaHei UI", 18),
+            Left = 46,
+            Top = 86
+        });
+    }
+
+    protected override void OnPaint(WinForms.PaintEventArgs e)
+    {
+        base.OnPaint(e);
+        if (_diagnosticFont is null || _diagnosticLines.Length == 0)
+        {
+            return;
+        }
+
+        e.Graphics.Clear(Color.White);
+        var content = ClientRectangle;
+        content.Inflate(-48, -32);
+        var lineHeight = Math.Max(1, content.Height / _diagnosticLines.Length);
+        var flags = WinForms.TextFormatFlags.HorizontalCenter
+            | WinForms.TextFormatFlags.VerticalCenter
+            | WinForms.TextFormatFlags.SingleLine
+            | WinForms.TextFormatFlags.NoPrefix;
+        for (var index = 0; index < _diagnosticLines.Length; index++)
+        {
+            var bounds = new Rectangle(
+                content.Left,
+                content.Top + (index * lineHeight),
+                content.Width,
+                lineHeight);
+            WinForms.TextRenderer.DrawText(
+                e.Graphics,
+                _diagnosticLines[index],
+                _diagnosticFont,
+                bounds,
+                Color.Black,
+                Color.White,
+                flags);
+        }
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            _diagnosticFont?.Dispose();
+        }
+
+        base.Dispose(disposing);
     }
 }
 
