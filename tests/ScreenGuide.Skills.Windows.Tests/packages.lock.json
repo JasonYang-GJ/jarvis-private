@@ -102,7 +102,7 @@
       "screenguide.skills.windows": {
         "type": "Project",
         "dependencies": {
-          "ScreenGuide.Skills.Abstractions": "[0.3.0, )"
+          "ScreenGuide.Skills.Abstractions": "[0.5.0, )"
         }
       }
     }

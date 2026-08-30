@@ -99,7 +99,7 @@
       "screenguide.ai.deepseek": {
         "type": "Project",
         "dependencies": {
-          "ScreenGuide.AI.Core": "[0.3.0, )"
+          "ScreenGuide.AI.Core": "[0.5.0, )"
         }
       }
     }
