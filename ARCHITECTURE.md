@@ -172,7 +172,7 @@ V0.4.0 Stage 2 正式源码由下面这些内容共同组成：
 - `sessions.current` 返回最多 32 个最新 Turn、全部非终态 Turn 和 50 条最新消息的有界 bootstrap；`sessions.messages.page` 使用 `(sequence_number < cursor)` keyset 分页，每页最多 50 条；`sessions.turn.get` 读取精确权威 Turn。
 - `sessions.wait` 使用最长 30 秒的本机长轮询，返回 `NoChange`、最多 32 个 Turn/50 条消息 upsert 的 `Delta`，或 `ResetRequired`。Host journal 只是有界唤醒/投影状态；SQLite Store 仍是事实真源，不建立持久 delta 表。
 - Host 重启、Session 切换、旧 Coordinator 世代、journal gap/overflow 或响应倒退均要求 reset。Coordinator 实例 ID、启动时间、Session ID 和 ChangeVersion 共同绑定响应；DesktopClient 只维护有界显示缓存，按消息 ID+序号去重，不能用缓存授予确认或动作权限。
-- Session/Turn 的临时操作串行由 Host 内部单例 `SessionOperationGateRegistry` 负责。引用计数覆盖 holder 与 waiter，取消、异常和释放后归零的 key 会被移除；它不持久化状态、不发布事件，也不参与 `_currentSessionGate`、记忆同意、任务或权限判断。
+- Session/Turn 的临时操作串行由 Host 内部单例 `SessionOperationGateRegistry` 负责。引用计数覆盖 holder 与 waiter，取消、异常和释放后归零的 key 会被移除；它可以参与记忆同意发布/确认、Turn 取消等操作的串行化，但不持久化状态、不发布事件，不拥有或决定记忆同意、任务状态或权限，也不替代 `_currentSessionGate`。
 - IPC 服务将并发连接限制为 64，另保留 8 个忙碌响应槽；未发送首个请求的连接 1 秒释放，监听临时错误会退避重试。
 - 无效长度、无效 JSON 等坏请求帧只记录并关闭该连接，不会让 Host 接受循环或关停流程失败。
 - 单次投影软上限为 512 KiB，Named Pipe 仍保留 4 MiB 硬帧上限；单条内容导致超限时稳定失败关闭，不截断内容。
