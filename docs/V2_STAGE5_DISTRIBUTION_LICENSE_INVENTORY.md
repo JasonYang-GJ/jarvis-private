@@ -166,13 +166,14 @@
 | Sherpa ONNX 1.13.4（9 包） | `PARTIAL` | exact release/tag 与 Apache-2.0 LICENSE 已核；release 映射 ONNX Runtime 1.27.0，其 exact LICENSE 与 ThirdPartyNotices 已核。实际 DLL 到冻结产物及 NOTICE 布置仍未核，非 win-x64 lock entries 仍不代表已分发。 |
 | .NET / WindowsDesktop runtime 10.0.11 | `PARTIAL` | 官方 .NET library license/release 与第 4 节本地哈希相互支持；runtime-pack 到冻结产物的逐文件 NOTICE 映射缺失。 |
 | Microsoft.Windows.SDK.NET.Ref 10.0.19041.57 | `PARTIAL` | exact NuGet metadata 已核；通用 SDK license 不能精确绑定该包。 |
-| Inno Setup 6 / ChineseSimplified.isl | `PARTIAL` | JR Software 官方许可已核，但实际 compiler 小版本未固定；`ChineseSimplified.isl` 只确认默认分支材料，缺本地文件 exact source commit/hash，不把未经本地 provenance 证明的第三方仓库当作来源。 |
+| Inno Setup 6 / ChineseSimplified.isl | `PARTIAL` | JR Software `issrc` 默认分支官方许可已核，但实际 compiler 小版本未固定。第三方 `kira-96` 仓库默认分支 MIT 材料与 JR 官方默认分支 `ChineseSimplified.isl` 文件存在性参考均已核；两者都没有证明本地 `ChineseSimplified.isl` 的 exact source commit/hash/provenance，也不能单独建立本地文件的 license binding。 |
 | sherpa-onnx-streaming-zipformer-zh-int8-2025-06-30 | `UNKNOWN` | 官方模型说明可核；权重、tokens 与训练数据的明确许可绑定不足，且模型当前不在安装包内。 |
 
 ### 官方 URL（只记录，不在本提交访问）
 
 - <https://www.nuget.org/packages/Microsoft.Data.Sqlite/10.0.11>
 - <https://www.nuget.org/packages/Microsoft.Extensions.Hosting/10.0.11>
+- <https://github.com/dotnet/core/blob/main/license-information.md>
 - <https://www.nuget.org/packages/System.Speech/10.0.10>
 - <https://github.com/dotnet/runtime/blob/v10.0.10/LICENSE.TXT>
 - <https://github.com/dotnet/runtime/blob/v10.0.10/THIRD-PARTY-NOTICES.TXT>
@@ -186,14 +187,14 @@
 - <https://dotnet.microsoft.com/en-us/dotnet_library_license.htm>
 - <https://github.com/dotnet/core/blob/main/release-notes/10.0/10.0.11/10.0.11.md>
 - <https://www.nuget.org/packages/Microsoft.Windows.SDK.NET.Ref/10.0.19041.57>
-- <https://jrsoftware.org/files/is/license.txt>
+- <https://github.com/jrsoftware/issrc/blob/main/license.txt>
+- <https://github.com/kira-96/Inno-Setup-Chinese-Simplified-Translation/blob/main/LICENSE>
 - <https://github.com/jrsoftware/issrc/blob/main/Files/Languages/ChineseSimplified.isl>
 - <https://k2-fsa.github.io/sherpa/onnx/pretrained_models/online-transducer/zipformer-transducer-models.html>
 
 ### 已关闭的请求审计
 
-- Architect/Security：仅白名单 GET；客户端无法准确给出 GET 总数；nonGET=0、downloads=0、ProviderRequests=0、CredentialReads=0。
-- QA：31 URL attempts，26 成功、5 安全失败；nonGET=0、downloads=0、ProviderRequests=0、CredentialReads=0。
+- Architect/Security 与 QA：均为白名单 GET-only；nonGET=0、downloads=0、ProviderRequests=0、CredentialReads=0。客户端总 GET 数不作为权威字段。
 - 网络证据阶段现已关闭；任何后续在线补证都需要新的 exact-SHA Owner 授权。
 
 ## 12. 最小未来证据
