@@ -115,11 +115,13 @@
 - Owner 声明：没有其他个人或公司贡献代码、设计或文件；项目材料由 Owner 在 Codex/AI 协助下制作。本文不据此判断 AI 辅助输出的法律权属。
 - Owner 声明：“元枢”品牌名称由 Owner 创建；当前图标由 Codex 按 Owner 指示生成。品牌和图标暂按 Owner 保留处理，但这只是保守边界，不是已选择的根许可证、独立 provenance 证明或外部分发许可。
 - 本地图标身份：`assets/branding/yuanshu-icon.ico` SHA-256=`AA29199DC0F383CFF10DECFC6A88F917A2B83A5677AC7AABCBE851638007AD7E`；`assets/branding/yuanshu-icon.png` SHA-256=`4D0AB22213D9F3EC2CD1BE5171FEAEB0F625A616167CC4D9FC7353243AC5AE48`；两者首次加入 Git 的提交为 `23b0760cac636ffbdd81dfa71a9b97ba593b33c1`（2026-08-19T02:23:57+08:00）。`.ico` 嵌入 DesktopClient，`.png` 未被 publish 项目引用。
-- 图标证据拆分如下；OpenAI 条款轴关闭不等于商业使用、权属、唯一性、不侵权、商标或外部分发已获确认：
+- 图标证据拆分如下；找到公开 OpenAI 条款变体不等于已经绑定 Owner/账户适用协议，也不等于商业使用、权属、唯一性、不侵权、商标或外部分发已获确认：
 
 | State | Status | 边界 |
 |---|---|---|
-| `OPENAI_OUTPUT_TERMS_VERIFIED` | `CLOSED` | 仅表示 2026-08-31 已核对适用于个人 OpenAI 服务输出的官方合同条款；不等于 artifact provenance 或分发 clearance。 |
+| `OPENAI_PUBLIC_OUTPUT_TERMS_FOUND` | `YES` | 两次获授权检索均观察到含 output allocation 条款的公开 OpenAI Terms 变体；只证明公开文本存在，不证明哪一变体适用于 Owner/账户。 |
+| `APPLICABLE_OPENAI_ACCOUNT_TERMS_NOT_BOUND` | `OPEN` | 未读取或推断 Owner/账户所在地、账户协议或适用辖区，不能选择任一公开变体作为 governing agreement。 |
+| `OPENAI_OUTPUT_TERMS_CLEARANCE_NOT_ESTABLISHED` | `OPEN` | 因适用账户条款未绑定，不能关闭 OpenAI 输出条款 clearance，也不能从公开变体推出 artifact provenance 或分发许可。 |
 | `OWNER_PROVENANCE_DECLARED` | `RECORDED_NOT_INDEPENDENTLY_PROVEN` | Owner 声明图标由 Codex 按其指示生成；仓库只能绑定本地文件身份和首次提交，不能独立证明生成会话。 |
 | `AI_DISCLOSURE_REQUIRED` | `OPEN` | 对外使用时必须保留适当 AI 生成披露，不能把 AI 输出误称为纯人工生成。 |
 | `COPYRIGHTABILITY_AND_UNIQUENESS_NOT_DETERMINED` | — | 条款说明输出可能不唯一；本文不判断图标是否可受版权保护或具有唯一性。 |
@@ -214,16 +216,17 @@
 - <https://github.com/jrsoftware/issrc/blob/main/Files/Languages/ChineseSimplified.isl>
 - <https://k2-fsa.github.io/sherpa/onnx/pretrained_models/online-transducer/zipformer-transducer-models.html>
 
-### OpenAI 图标条款证据（访问日期 2026-08-31）
+### OpenAI 图标条款证据（两次获授权检索；记录日期 2026-08-31）
 
 本段只离线记录已获授权且经独立审阅的官方 GET 结果；不在本提交重新访问来源，不复制长条款正文：
 
-- <https://openai.com/policies/terms-of-use/>（发布/生效 2026-01-01）：范围覆盖个人 OpenAI 服务；在用户与 OpenAI 之间、法律允许范围内，用户拥有 Output，OpenAI 转让其可能拥有的权利。用户仍负责所需权利与合规，输出可能不唯一，第三方输出不在该转让内，使用前需审查，也不得把 AI 输出误称为纯人工生成。
+- <https://openai.com/policies/terms-of-use/> 返回存在辖区/重定向差异：Coordinator 检索观察到 non-EEA/general English-US Terms 变体（发布/生效 2026-01-01）；QA 独立直接 GET 观察到 Europe Terms 变体（更新 2026-01-16），范围为 EEA、Switzerland、UK，并引导其他地区使用另一条款入口。两份公开变体均含 output allocation 条款，同时保留用户权利/合规责任、输出可能不唯一、第三方输出排除、使用前审查及不得把 AI 输出误称为纯人工生成等边界；但本文不判断任一变体适用于 Owner、账户或图标。
+- Owner/账户所在地、账户协议与 governing jurisdiction 均未读取或推断；上述检索不选择“正确”变体，也不将任何日期写成适用协议日期。
 - <https://openai.com/policies/service-terms/>（更新 2026-06-12）：Codex/code 输出可能受第三方许可约束，但不能自动把该代码条款映射到本图标；视觉输出仍需人物肖像和第三方权利审查，且贸易/商业场景中的商标保护不受保证。
 - <https://help.openai.com/en/articles/5008634-will-openai-claim-copyright-over-what-outputs-i-generate-with-the-api>（更新 2026-08-30）：这是 API 补充说明，不证明本地图标 artifact 的生成来源。
 - <https://openai.com/policies/sharing-publication-policy/>（更新 2022-11-14）：只作为较早的披露指引，不覆盖或替代 2026 年条款。
 
-因此仅 `OPENAI_OUTPUT_TERMS_VERIFIED=CLOSED`；其余 provenance、披露、copyrightability/uniqueness、第三方权利、商标和外部分发状态仍按第 5 节失败关闭。
+因此只记录 `OPENAI_PUBLIC_OUTPUT_TERMS_FOUND=YES`；`APPLICABLE_OPENAI_ACCOUNT_TERMS_NOT_BOUND=OPEN` 与 `OPENAI_OUTPUT_TERMS_CLEARANCE_NOT_ESTABLISHED=OPEN` 继续失败关闭，其他 provenance、披露、copyrightability/uniqueness、第三方权利、商标和外部分发状态亦不变。
 
 ### 已关闭的请求审计
 
@@ -309,10 +312,11 @@ Owner 已作出的事实声明与保守边界如下：
 - `COMPILED_COMMERCIAL_INTENT_DECLARED`：未来可能销售编译产品和/或提供付费服务，但当前仍是意向，不是分发 clearance。
 - `SOURCE_DISTRIBUTION_NOT_AUTHORIZED`：不授权公开分发源码；是否以及如何分发源码仍未决定。
 - 品牌名称和图标默认由 Owner 保留；这只是保守临时边界，不等同于选择根许可证，也不改变第三方组件的许可证义务。
-- 图标的 OpenAI 合同输出条款轴为 `OPENAI_OUTPUT_TERMS_VERIFIED=CLOSED`；Owner 来源自述为 `OWNER_PROVENANCE_DECLARED=RECORDED_NOT_INDEPENDENTLY_PROVEN`。
+- 图标只达到 `OPENAI_PUBLIC_OUTPUT_TERMS_FOUND=YES`；由于辖区/重定向检索得到不同公开变体且没有读取或推断 Owner/账户适用协议，`APPLICABLE_OPENAI_ACCOUNT_TERMS_NOT_BOUND=OPEN`、`OPENAI_OUTPUT_TERMS_CLEARANCE_NOT_ESTABLISHED=OPEN`。
+- Owner 来源自述为 `OWNER_PROVENANCE_DECLARED=RECORDED_NOT_INDEPENDENTLY_PROVEN`。
 - `AI_DISCLOSURE_REQUIRED=OPEN`、`COPYRIGHTABILITY_AND_UNIQUENESS_NOT_DETERMINED`、`THIRD_PARTY_RIGHTS_REVIEW_REQUIRED=OPEN`、`TRADEMARK_CLEARANCE_NOT_PERFORMED=OPEN`、`ICON_EXTERNAL_DISTRIBUTION_CLEARANCE_NOT_ESTABLISHED=OPEN` 均继续失败关闭。
 
-因此 Owner Decision Gate 只完成了事实声明记录和 OpenAI 合同输出条款轴核验；图标及其他资产的开放状态与现有 S5-R1 blocks 未关闭，不能标为完整 PASS。本文不得推荐或替 Owner 选择根许可证。
+因此 Owner Decision Gate 只完成了事实声明记录和公开条款变体证据记录；适用 OpenAI 账户条款、图标其他开放状态与现有 S5-R1 blocks 未关闭，不能标为完整 PASS。本文不得推荐或替 Owner 选择根许可证。
 
 ### 12.6 新授权门禁
 
@@ -329,7 +333,7 @@ Owner 已作出的事实声明与保守边界如下：
 
 `S5-R1_CONTRACT_PASS` 后仍缺少以下相互独立的证据或实施；本轮不执行：
 
-- 图标仍有 `AI_DISCLOSURE_REQUIRED=OPEN`、`THIRD_PARTY_RIGHTS_REVIEW_REQUIRED=OPEN`、`TRADEMARK_CLEARANCE_NOT_PERFORMED=OPEN` 与 `ICON_EXTERNAL_DISTRIBUTION_CLEARANCE_NOT_ESTABLISHED=OPEN`；copyrightability/uniqueness 亦未确定；
+- 图标仍有 `APPLICABLE_OPENAI_ACCOUNT_TERMS_NOT_BOUND=OPEN`、`OPENAI_OUTPUT_TERMS_CLEARANCE_NOT_ESTABLISHED=OPEN`、`AI_DISCLOSURE_REQUIRED=OPEN`、`THIRD_PARTY_RIGHTS_REVIEW_REQUIRED=OPEN`、`TRADEMARK_CLEARANCE_NOT_PERFORMED=OPEN` 与 `ICON_EXTERNAL_DISTRIBUTION_CLEARANCE_NOT_ESTABLISHED=OPEN`；copyrightability/uniqueness 亦未确定；
 - Owner 对 runtime Prompt、删除脚本及其他尚未由本次事实声明闭合资产的来源/允许分发形态补充；源码公开分发继续 `SOURCE_DISTRIBUTION_NOT_AUTHORIZED`；
 - 只读 `v0.6.0-stage4` artifact 的完整 per-file manifest、逐文件 hash、来源映射、LICENSE/NOTICE placement 与 attribution；
 - NOTICE 文件与索引的实际 publish/installer 布置、安装后验证及新 release identity；
