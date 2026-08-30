@@ -6,7 +6,9 @@ public static class VisionEvaluationContract
 {
     public const string FormTitle = "元枢本机单窗口评测";
     public const string ChangedFormTitle = "元枢本机单窗口评测（身份已变化）";
-    public const string FormalCanary = "这是无个人数据的本机单窗口评测标记";
+    public const string FormalCanary = "元枢4827";
+    public const int FormalWindowWidth = 1120;
+    public const int FormalWindowHeight = 720;
     public const int DiagnosticWindowWidth = 1120;
     public const int DiagnosticWindowHeight = 720;
     public const float DiagnosticFontSize = 56;

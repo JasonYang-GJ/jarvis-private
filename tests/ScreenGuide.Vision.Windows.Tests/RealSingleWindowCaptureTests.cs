@@ -24,29 +24,23 @@ public sealed class RealSingleWindowCaptureTests
     [Fact]
     public async Task CapturesAndRecognizesExactStage4RunnerWindowWithoutWritingImageToDisk()
     {
-        const string title = "元枢本机单窗口评测";
-        const string canary = "这是无个人数据的本机单窗口评测标记";
+        const string title = VisionEvaluationContract.FormTitle;
+        const string canary = VisionEvaluationContract.FormalCanary;
         var ready = new TaskCompletionSource<(WinForms.Form Form, long Handle)>(
             TaskCreationOptions.RunContinuationsAsynchronously);
         var thread = new Thread(() =>
         {
-            var form = new WinForms.Form
+            var form = new SyntheticEvaluationForm(
+                title,
+                canary,
+                VisionEvaluationContract.FormalWindowWidth,
+                VisionEvaluationContract.FormalWindowHeight,
+                highContrast: true);
+            form.Shown += (_, _) =>
             {
-                Text = title,
-                Width = 680,
-                Height = 280,
-                StartPosition = WinForms.FormStartPosition.CenterScreen,
-                TopMost = true
+                form.Refresh();
+                ready.TrySetResult((form, form.Handle.ToInt64()));
             };
-            form.Controls.Add(new WinForms.Label
-            {
-                Text = canary,
-                AutoSize = true,
-                Font = new System.Drawing.Font("Microsoft YaHei UI", 18),
-                Left = 46,
-                Top = 86
-            });
-            form.Shown += (_, _) => ready.TrySetResult((form, form.Handle.ToInt64()));
             WinForms.Application.Run(form);
         });
         thread.SetApartmentState(ApartmentState.STA);
@@ -69,8 +63,8 @@ public sealed class RealSingleWindowCaptureTests
             await using var frame = new CapturedWindowFrame(
                 raw.PngBytes, raw.PixelWidth, raw.PixelHeight, raw.Technology);
 
-            Assert.True(frame.PixelWidth >= 600);
-            Assert.True(frame.PixelHeight >= 200);
+            Assert.True(frame.PixelWidth >= VisionEvaluationContract.FormalWindowWidth * 0.8);
+            Assert.True(frame.PixelHeight >= VisionEvaluationContract.FormalWindowHeight * 0.8);
             Assert.Equal("Windows.GraphicsCapture.SingleHwnd", frame.CaptureTechnology);
             Assert.Equal(new byte[] { 137, 80, 78, 71 }, frame.PngBytes.Span[..4].ToArray());
 

@@ -42,9 +42,13 @@ internal static class VisionEvaluationRunner
                     diagnosticMode
                         ? VisionEvaluationContract.DiagnosticWindowText
                         : VisionEvaluationContract.FormalCanary,
-                    diagnosticMode ? VisionEvaluationContract.DiagnosticWindowWidth : 680,
-                    diagnosticMode ? VisionEvaluationContract.DiagnosticWindowHeight : 280,
-                    diagnosticMode,
+                    diagnosticMode
+                        ? VisionEvaluationContract.DiagnosticWindowWidth
+                        : VisionEvaluationContract.FormalWindowWidth,
+                    diagnosticMode
+                        ? VisionEvaluationContract.DiagnosticWindowHeight
+                        : VisionEvaluationContract.FormalWindowHeight,
+                    highContrast: true,
                     cancellationToken)
                 .ConfigureAwait(false);
             using var process = Process.GetCurrentProcess();
@@ -165,7 +169,10 @@ internal static class VisionEvaluationRunner
                                 return await VisionEvaluationAttemptPipeline.PrepareAndCaptureAsync(
                                         prepare: async token =>
                                         {
-                                            await window.PrepareForCaptureAsync(680, 280, token)
+                                            await window.PrepareForCaptureAsync(
+                                                    VisionEvaluationContract.FormalWindowWidth,
+                                                    VisionEvaluationContract.FormalWindowHeight,
+                                                    token)
                                                 .ConfigureAwait(false);
                                             if (options.Mode == "vision-identity-change")
                                             {

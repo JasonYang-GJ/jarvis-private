@@ -62,6 +62,23 @@ public sealed class Stage4VisionAttemptEvaluatorTests
     }
 
     [Fact]
+    public async Task FormalMixedTokenStillRejectsAOneCharacterMismatch()
+    {
+        var evaluator = new VisionAttemptEvaluator(
+            new StubCaptureService(() => new CapturedWindowFrame([1, 2, 3, 4], 2, 2, "test")),
+            new StubVisionProvider("元枢4821"));
+
+        var result = await evaluator.EvaluateAsync(
+            Target(),
+            VisionEvaluationContract.FormalCanary,
+            isWarmup: false,
+            CancellationToken.None);
+
+        Assert.Equal(EvaluationTerminalState.Failure, result.Attempt.State);
+        Assert.Equal("vision.canary_missing", result.Attempt.ErrorCode);
+    }
+
+    [Fact]
     public async Task IdentityChangeCancelsWithoutCallingAnalysis()
     {
         var provider = new StubVisionProvider("safe canary");

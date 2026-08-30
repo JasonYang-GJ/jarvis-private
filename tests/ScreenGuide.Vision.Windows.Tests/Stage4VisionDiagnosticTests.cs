@@ -10,6 +10,28 @@ namespace ScreenGuide.Vision.Windows.Tests;
 public sealed class Stage4VisionDiagnosticTests
 {
     [Fact]
+    public void FormalCanaryUsesTheDistinctExactCandidateProvenByDiagnosticMode()
+    {
+        var candidate = Assert.Single(
+            VisionEvaluationContract.DiagnosticCandidates,
+            item => item.Id == "mixed-token");
+
+        Assert.Equal("元枢4827", candidate.Text);
+        Assert.Equal(VisionEvaluationContract.FormalCanary, candidate.Text);
+        Assert.DoesNotContain(
+            VisionEvaluationContract.FormalCanary,
+            VisionEvaluationContract.DiagnosticCandidates
+                .Where(item => item.Id != candidate.Id)
+                .Select(item => item.Text));
+        Assert.Equal(
+            VisionEvaluationContract.DiagnosticWindowWidth,
+            VisionEvaluationContract.FormalWindowWidth);
+        Assert.Equal(
+            VisionEvaluationContract.DiagnosticWindowHeight,
+            VisionEvaluationContract.FormalWindowHeight);
+    }
+
+    [Fact]
     public void DiagnosticContractUsesFourShortHighContrastCandidatesOutsideTheTrustedTitle()
     {
         Assert.Collection(
