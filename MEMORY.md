@@ -6,6 +6,7 @@
 
 - V0.6.0 / Stage 4 已完成 Final Freeze，S4-R1/R2/R3/R4 均为 `INTEGRATED_PASS`。正式标签 `v0.6.0-stage4` 指向 C0 `3a591a7b6af7da7d97e07093d4c33a3f44553b82`，annotated tag object 为 `20045c7960c182a052a5e0b2552ce0ed14a3863f`；C1 只记录冻结证据，不改变标签源码或二进制身份。Stage 4 到此结束，不新增 S4-R5。
 - Stage 5 的唯一推荐方向是 Safe Distribution & Upgrade Readiness；当前只有 Charter/Preflight，实施状态为 `NOT_STARTED / NOT_AUTHORIZED`。S5-R1～R4 只是许可清单、隔离安装生命周期、签名/release identity 和最终分发验收的串行规划，不授权下载、安装、签名、采购、联网、上传或发布。
+- S5-R1 Offline Inventory 已 PASS，但 overall=`BLOCKED_PENDING_OFFICIAL_LICENSE_EVIDENCE`、External Distribution=`BLOCKED`。50 个锁定 runtime package 中只有 NAudio 2.2.1 主包具备已绑定的本机 license 文件；其余 49 行和项目源码/文档/Prompt/品牌图标、Sherpa/ONNX、SQLite、.NET 逐文件 attribution、语音模型、Inno/中文翻译条款仍需官方证据。离线结果不是法律意见，也不建立 `PROHIBITED`/`INCOMPATIBLE`；未来在线核验需要新的 exact-SHA Owner 授权。唯一详细记录为 `docs/V2_STAGE5_DISTRIBUTION_LICENSE_INVENTORY.md`。
 - V2 阶段 1“统一会话中枢”已经通过；363/363 自动化和实际 Release DesktopClient + DesktopHost 的真实桌面验收均通过。
 - V0.2.1 标签 `v0.2.1-baseline` 保留为上一版回滚点；回滚必须同时使用 pre-v7 备份或隔离数据目录。
 - V2 阶段 2“可替换 AI 大脑与模型路由”已通过：统一 Chat Model、Provider Registry、Model Router、Prompt Registry、DPAPI、安全停用的 Codex 普通聊天适配器、DeepSeek/千问普通聊天 Provider、设置 UI/IPC、语义建议和 schema v8 AI 调用审计。

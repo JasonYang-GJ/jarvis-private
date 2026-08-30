@@ -133,7 +133,7 @@ Stage 5 的唯一推荐章程见 [Stage 5 Charter](docs/V2_STAGE5_CHARTER.md)。
 - 本机单窗口理解主要依赖 OCR 和可访问控件，不能可靠理解纯图片、视频、图标语义和复杂空间关系。
 - 语音模型不在安装包内；商业分发前仍需完成许可证、下载和更新方案。
 - 安装包未做数字签名；Windows 可能显示未知发布者警告。
-- Stage 5 目前只有 Charter/Preflight；许可盘点、隔离安装/升级/回滚/卸载、真实签名和最终分发均未获实施授权。
+- Stage 5 的 S5-R1 Offline Inventory 已 PASS，但项目自有内容与 49 个锁定包、Sherpa/ONNX、SQLite、.NET attribution、语音模型和 Inno 等官方许可证据仍不完整；S5-R1 overall=`BLOCKED_PENDING_OFFICIAL_LICENSE_EVIDENCE`，External Distribution=`BLOCKED`。详细依据见 [离线许可清单](docs/V2_STAGE5_DISTRIBUTION_LICENSE_INVENTORY.md)。Stage 5 产品/安装器实施仍为 `NOT_STARTED / NOT_AUTHORIZED`。
 - 没有手机端、云同步、远程控制、复杂多 Agent 产品功能或开放式 Tool Calling。
 
 ## 明确禁止或不开放

@@ -25,10 +25,13 @@ Stage 5 的用户价值是给出可核验、失败关闭的答案：**是否可�
 
 ### S5-R1 Distribution Contract & License Inventory
 
+- Offline Inventory：**PASS**；唯一详细证据见 [S5-R1 分发许可离线清单](V2_STAGE5_DISTRIBUTION_LICENSE_INVENTORY.md)。
+- S5-R1 overall：**BLOCKED_PENDING_OFFICIAL_LICENSE_EVIDENCE**；External Distribution：**BLOCKED**。
 - 只读盘点安装包、语音模型、第三方资产和依赖的许可与分发边界。
 - 为每项给出可分发、不可分发或证据不足的明确判定；证据不足时失败关闭。
 - 不下载模型，不接受许可条款，不采购服务，不修改 V0.6.0 tag 或产物。
 - 只有 S5-R1 的架构/发布合同获得 Owner 批准后，才决定 Stage 5 的版本号或新 tag；Charter 不预定 V0.7.0。
+- 下一 Gate 是在新的 exact-SHA Owner 授权下核对官方 LICENSE/NOTICE、模型许可、Inno/翻译许可、Owner 内容声明与只读标签产物 manifest；离线 PASS 不授权在线核验或实施。
 
 ### S5-R2 Isolated Installer Lifecycle
 
