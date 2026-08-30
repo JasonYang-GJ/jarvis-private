@@ -15,9 +15,9 @@ public sealed class EvaluationReport
     private static readonly Regex WindowsBuildPattern = new("^[0-9]{1,6}(\\.[0-9]{1,6}){0,3}$", RegexOptions.CultureInvariant);
     private static readonly HashSet<string> AllowedDiagnosticCandidateIds = new(StringComparer.Ordinal)
     {
-        "current-cn",
         "common-cn",
-        "ascii-token",
+        "digits-token",
+        "latin-token",
         "mixed-token"
     };
 

@@ -40,8 +40,9 @@ internal static class VisionEvaluationRunner
                     diagnosticMode
                         ? VisionEvaluationContract.DiagnosticWindowText
                         : VisionEvaluationContract.FormalCanary,
-                    diagnosticMode ? 760 : 680,
-                    diagnosticMode ? 420 : 280,
+                    diagnosticMode ? VisionEvaluationContract.DiagnosticWindowWidth : 680,
+                    diagnosticMode ? VisionEvaluationContract.DiagnosticWindowHeight : 280,
+                    diagnosticMode,
                     cancellationToken)
                 .ConfigureAwait(false);
             using var process = Process.GetCurrentProcess();
@@ -257,6 +258,7 @@ internal static class VisionEvaluationRunner
             string canary,
             int width,
             int height,
+            bool highContrast,
             CancellationToken cancellationToken)
         {
             var ready = new TaskCompletionSource<(WinForms.Form Form, long Handle)>(
@@ -271,15 +273,28 @@ internal static class VisionEvaluationRunner
                         Width = width,
                         Height = height,
                         StartPosition = WinForms.FormStartPosition.CenterScreen,
-                        TopMost = true
+                        TopMost = true,
+                        BackColor = highContrast
+                            ? System.Drawing.Color.White
+                            : System.Drawing.SystemColors.Control
                     };
                     form.Controls.Add(new WinForms.Label
                     {
                         Text = canary,
                         AutoSize = true,
-                        Font = new System.Drawing.Font("Microsoft YaHei UI", 18),
-                        Left = 46,
-                        Top = 86
+                        Font = new System.Drawing.Font(
+                            "Microsoft YaHei UI",
+                            highContrast ? VisionEvaluationContract.DiagnosticFontSize : 18,
+                            highContrast
+                                ? System.Drawing.FontStyle.Bold
+                                : System.Drawing.FontStyle.Regular),
+                        ForeColor = System.Drawing.Color.Black,
+                        BackColor = highContrast
+                            ? System.Drawing.Color.White
+                            : System.Drawing.Color.Transparent,
+                        UseCompatibleTextRendering = false,
+                        Left = highContrast ? 36 : 46,
+                        Top = highContrast ? 54 : 86
                     });
                     form.Shown += (_, _) =>
                     {

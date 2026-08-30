@@ -8,6 +8,26 @@ namespace ScreenGuide.Vision.Windows.Tests;
 public sealed class Stage4VisionDiagnosticTests
 {
     [Fact]
+    public void DiagnosticContractUsesFourShortHighContrastCandidatesOutsideTheTrustedTitle()
+    {
+        Assert.Collection(
+            VisionEvaluationContract.DiagnosticCandidates,
+            item => Assert.Equal(("common-cn", "今天学习中文"), (item.Id, item.Text)),
+            item => Assert.Equal(("digits-token", "86428642"), (item.Id, item.Text)),
+            item => Assert.Equal(("latin-token", "VISION4827"), (item.Id, item.Text)),
+            item => Assert.Equal(("mixed-token", "元枢4827"), (item.Id, item.Text)));
+        Assert.All(
+            VisionEvaluationContract.DiagnosticCandidates,
+            item => Assert.DoesNotContain(
+                item.Text,
+                VisionEvaluationContract.FormTitle,
+                StringComparison.Ordinal));
+        Assert.True(VisionEvaluationContract.DiagnosticWindowWidth >= 900);
+        Assert.True(VisionEvaluationContract.DiagnosticWindowHeight >= 560);
+        Assert.True(VisionEvaluationContract.DiagnosticFontSize >= 32);
+    }
+
+    [Fact]
     public void AnalyzerKeepsOnlyCandidateIdsLengthsAndEditDistances()
     {
         const string analyzedSummary = "窗口摘要：今 天 我 们 一 起 学 习 中 文；Y U A N S H U 4 8 2 7";

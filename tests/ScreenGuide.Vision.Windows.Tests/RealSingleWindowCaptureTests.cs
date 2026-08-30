@@ -83,18 +83,25 @@ public sealed class RealSingleWindowCaptureTests
             var form = new WinForms.Form
             {
                 Text = VisionEvaluationContract.FormTitle,
-                Width = 760,
-                Height = 420,
+                Width = VisionEvaluationContract.DiagnosticWindowWidth,
+                Height = VisionEvaluationContract.DiagnosticWindowHeight,
                 StartPosition = WinForms.FormStartPosition.CenterScreen,
-                TopMost = true
+                TopMost = true,
+                BackColor = System.Drawing.Color.White
             };
             form.Controls.Add(new WinForms.Label
             {
                 Text = VisionEvaluationContract.DiagnosticWindowText,
                 AutoSize = true,
-                Font = new System.Drawing.Font("Microsoft YaHei UI", 18),
-                Left = 46,
-                Top = 86
+                Font = new System.Drawing.Font(
+                    "Microsoft YaHei UI",
+                    VisionEvaluationContract.DiagnosticFontSize,
+                    System.Drawing.FontStyle.Bold),
+                ForeColor = System.Drawing.Color.Black,
+                BackColor = System.Drawing.Color.White,
+                UseCompatibleTextRendering = false,
+                Left = 36,
+                Top = 54
             });
             form.Shown += (_, _) =>
             {
