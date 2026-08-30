@@ -218,6 +218,7 @@
 | Component boundary | Source | Bundling | Attribution | Notice | 当前结论 |
 |---|---|---|---|---|---|
 | 仓库源码、文档与非 runtime 品牌材料 | `UNKNOWN` | `VERIFIED-EXCLUDED` | `VERIFIED-EXCLUDED` | `VERIFIED-EXCLUDED` | 不属于当前 installer 产品 payload；Owner 权利人/来源/允许分发形态仍须声明。 |
+| 由 C0 项目源码编译的自有 DesktopClient、DesktopHost 与项目 DLL | `PARTIAL` | `PARTIAL` | `UNKNOWN` | `UNKNOWN` | exact C0 Git 已绑定源码身份，但 Owner declaration 仍待确认；这些编译产物是产品 payload 候选，缺原 C0 逐文件 manifest，不得标为 excluded。 |
 | runtime Prompt、`.ico` 与删除脚本 | `UNKNOWN` | `PARTIAL` | `UNKNOWN` | `UNKNOWN` | publish/installer 规则显示会进入产品 payload，但没有原 C0 manifest；Owner 权利人/来源未声明。 |
 | NAudio 2.2.1 / System.Speech 10.0.10 | `VERIFIED` | `PARTIAL` | `PARTIAL` | `UNKNOWN` | exact 官方许可证据已核；原 C0 文件映射与 NOTICE 布置仍缺。 |
 | Microsoft.Data.Sqlite / Microsoft.Extensions application packages | `PARTIAL` | `PARTIAL` | `PARTIAL` | `UNKNOWN` | package/family 证据不等于冻结文件映射。 |
@@ -243,19 +244,24 @@
 
 ### 12.3 Frozen manifest 最小 schema
 
-未来 manifest 每个安装文件至少包含以下字段；不得记录用户绝对路径：
+未来 manifest 必须同时描述 installed payload 与 installer container；每条记录至少包含以下字段，不得记录用户绝对路径：
 
 | Field | Contract |
 |---|---|
-| `relativePath` | 相对安装根的规范化路径；唯一键。 |
+| `artifactScope` | 固定为 `installedPayload` 或 `installerContainer`。 |
+| `relativePath` | `installedPayload` 使用相对安装根路径；`installerContainer` 使用 installer 文件的规范化相对路径。与 `artifactScope`、可选 `containerEntry` 共同构成唯一键。 |
+| `containerEntry` | 直接安装文件为空；installer 内嵌或构建派生组件记录其稳定逻辑项，例如 Inno engine 或 `ChineseSimplified.isl`。 |
 | `size` | 文件字节数。 |
 | `sha256` | 文件内容 SHA-256。 |
 | `component` / `version` | 归属组件与精确版本。 |
+| `componentOrigin` | 组件来源类别及引用，例如 package、C0 Git blob/source 或 build-tool-derived；不得把推测写成来源。 |
 | `packageContentHashOrC0Blob` | 可用时记录 package `contentHash` 或 C0 Git blob；不能伪造。 |
 | `sourceClassification` | `VERIFIED` / `PARTIAL` / `UNKNOWN` 等本节状态。 |
 | `licenseNoticePath` | 安装包内适用 LICENSE/NOTICE 的相对路径；未实现时必须为空并保持阻断。 |
 | `bundlingState` | bundled、`VERIFIED-EXCLUDED` 或 `EXCLUDED-CONDITIONAL`。 |
 | `confidence` | 证据置信级别及其依据类别，不记录法律结论。 |
+
+若采用两个物理 manifest，则 `installedPayload` manifest 记录安装后的文件树；`installerContainer` manifest 必须记录 installer 自身的 size/SHA-256，并为 Inno engine、编译进 container 的 translation 等 embedded/derived component 建立 `containerEntry` 与 `componentOrigin` 行。两份 manifest 以 installer `relativePath` + `sha256` 绑定，不能只生成 payload manifest 而遗漏 container attribution。
 
 ### 12.4 推荐 NOTICE layout
 
@@ -297,10 +303,11 @@ Owner 必须可见决定并声明：
 - 只读 `v0.6.0-stage4` artifact 的完整 per-file manifest、逐文件 hash、来源映射、LICENSE/NOTICE placement 与 attribution；
 - NOTICE 文件与索引的实际 publish/installer 布置、安装后验证及新 release identity；
 - SQLite native `e_sqlite3` 的上游许可与冻结 DLL attribution；
-- Windows SDK exact package/version 与适用 redistribution/license 的精确绑定；
 - Inno compiler exact 小版本及 `ChineseSimplified.isl` 的本地 exact source commit/hash/provenance；
 - .NET、WindowsDesktop、Sherpa 与 ONNX Runtime 到冻结产物逐文件 LICENSE/NOTICE 的映射；
 - WinSDK Ref 与七个非 win-x64 Sherpa runtime 在 frozen manifest 中的不存在性。
+
+WinSDK Ref 与七个非 win-x64 Sherpa runtime 保持 `EXCLUDED-CONDITIONAL`：当前硬阻断仅是 frozen manifest 尚未证明其不存在。若 manifest 发现它们被捆绑，或未来计划捆绑，必须重新执行适用于该 exact package/version 的 license/redistribution Gate；在排除状态下不把 WinSDK exact redistribution/license binding 当作当前硬阻断。
 
 中文语音模型是当前 installer 的 `VERIFIED-EXCLUDED`，不是当前分发包的硬阻断；未来若捆绑或下载，必须重新核对权重、tokens、训练数据许可及 exact model card/source/version/hash。数字签名与 clean-machine same-AppId lifecycle 仍是彼此独立的后续 Gate。
 
