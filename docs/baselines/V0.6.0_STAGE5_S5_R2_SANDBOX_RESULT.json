@@ -1,0 +1,56 @@
+{
+    "contractVersion":  1,
+    "status":  "PASS",
+    "errorCode":  "",
+    "mode":  "evidence",
+    "finalized":  true,
+    "networkRequests":  0,
+    "providerRequests":  0,
+    "credentialReads":  0,
+    "details":  {
+                    "sourceSha":  "2dc99dda8ef31cad0fdd6ed0ccf74b34e8b59867",
+                    "oldSchema":  10,
+                    "newSchema":  11,
+                    "rollbackSchema":  10,
+                    "matchingBackupCount":  1,
+                    "noticeLayoutVerified":  true,
+                    "dataRetained":  true,
+                    "oldPair":  {
+                                    "clientProductVersion":  "0.5.0+d553e7e9d606037df87d98e99250de5498f5934a",
+                                    "hostProductVersion":  "0.5.0+d553e7e9d606037df87d98e99250de5498f5934a",
+                                    "fileVersion":  "0.5.0.0"
+                                },
+                    "newPair":  {
+                                    "clientProductVersion":  "0.6.0+2dc99dda8ef31cad0fdd6ed0ccf74b34e8b59867",
+                                    "hostProductVersion":  "0.6.0+2dc99dda8ef31cad0fdd6ed0ccf74b34e8b59867",
+                                    "fileVersion":  "0.6.0.0"
+                                },
+                    "v11DatabaseSha256":  "85FCA0E5B9E483E3B2EB725225084A44488D24FB627731AF28C17DAE95638A29",
+                    "preservedV11DatabaseSha256":  "85FCA0E5B9E483E3B2EB725225084A44488D24FB627731AF28C17DAE95638A29",
+                    "execution":  {
+                                      "installerExecutions":  5,
+                                      "installOrUpgradeExecutions":  3,
+                                      "uninstallExecutions":  2,
+                                      "plannedInstallerExecutions":  5,
+                                      "plannedInstallOrUpgradeExecutions":  3,
+                                      "plannedUninstallExecutions":  2,
+                                      "installerExitCodeCount":  5,
+                                      "hostExecutions":  3,
+                                      "exitCodes":  [
+                                                        0,
+                                                        0,
+                                                        0,
+                                                        0,
+                                                        0,
+                                                        0,
+                                                        0,
+                                                        0,
+                                                        0,
+                                                        0,
+                                                        0,
+                                                        0,
+                                                        0
+                                                    ]
+                                  }
+                }
+}

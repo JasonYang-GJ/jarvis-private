@@ -3,9 +3,9 @@
 ## 1. 状态与授权边界
 
 - 推荐阶段名称：**Stage 5 = Safe Distribution & Upgrade Readiness（安全分发与升级准备）**。
-- 当前状态：**CHARTER / PREFLIGHT ONLY**。
-- 实施状态：**NOT_STARTED / NOT_AUTHORIZED**。
-- 本文只定义用户问题、串行切片、风险和验收合同，不授权任何产品、安装器、签名、网络或发布行为。
+- 当前状态：**S5-R1 PASS；S5-R2 `S5-R2_REAL_SANDBOX_LIFECYCLE_PASS`；Stage 5 尚未完成**。
+- S5-R3 Signing & Release Identity 与 S5-R4 Final Distribution Acceptance：**NOT_STARTED / NOT_AUTHORIZED**。
+- 本文定义用户问题、串行切片、风险和验收合同；已完成切片的证据不授权未来安装器、签名、网络或发布行为。
 - V0.6.0 / Stage 4 已是 `INTEGRATED_PASS / FINAL FREEZE`。C0、`v0.6.0-stage4`、独立标签源码构建和 C1 证据不可变；后续分发准备不新增、也不命名为 S4-R5，不修改 V0.6.0 tag 或安装包 identity。
 
 ## 2. 要解决的用户问题
@@ -13,7 +13,7 @@
 元枢功能已经冻结，但用户目前仍不能确定能否安全地把产品交给另一台 Windows 机器安装、升级和回滚，原因包括：
 
 - 安装包未签名；
-- 尚未在隔离、干净 Windows 环境完成 same-AppId install → launch → upgrade → rollback → uninstall 生命周期；
+- same-AppId install → launch → upgrade → rollback → uninstall 已在一次授权 Windows Sandbox 中通过，但候选仍未签名且不是发布产物；
 - 语音模型许可、下载、更新与外部分发边界尚未放行；
 - 签名证书来源、费用、私钥保护和最终 release identity 尚无经 Owner 批准的合同。
 
@@ -21,7 +21,7 @@ Stage 5 的用户价值是给出可核验、失败关闭的答案：**是否可�
 
 ## 3. 推荐的最小串行切片
 
-以下切片只是规划。每一项开始前都需要独立 Delegation Packet、Owner 可见授权和 exact-SHA 门禁。
+以下切片按顺序独立授权；S5-R1/S5-R2 的已完成证据不授权后续切片或重新运行真实生命周期。
 
 ### S5-R1 Distribution Contract & License Inventory
 
@@ -32,18 +32,19 @@ Stage 5 的用户价值是给出可核验、失败关闭的答案：**是否可�
 - 不下载模型，不接受许可条款，不采购服务，不修改 V0.6.0 tag 或产物。
 - C0 installer 的产品 payload 收纳边界是 win-x64 publish 树与删除脚本；Inno engine/translation 是 installer 基础设施。中文语音模型为 `VERIFIED-EXCLUDED`，未来捆绑/下载时重新进入许可 Gate。WinSDK Ref 已按 exact DLL/package/REDIST/Owner acceptance/reference-only terms 闭合；七个非 win-x64 Sherpa 已由 539 payload 不存在性关闭当前 Windows x64 边界，未来纳入其他 RID 时重开 Gate。
 - 四轴合同固定区分 Source、Bundling、Attribution 与 Notice；contract PASS 不等于 NOTICE 已实现或可分发。
-- Owner 权属/分发形态确认、原始 C0 只读 manifest、clean rebuild、NOTICE installer 修改、未来在线补证和 S5-R2 lifecycle 都是独立授权门禁。
-- release/installer 已接入离线 fail-closed bundle gate，exact bundle 通过后才生成确定性 mandatory Inno include；缺失/篡改/错绑/越界/default-branch substitute 均在 restore/publish/installer compile 前阻断。安装后 layout 验证与新 release identity 尚未执行；不得把它们塞入 S5-R2 或拖到 S5-R4。
-- Stage 5 implementation 整体仍未完成；Charter 不预定 V0.7.0，不授权下载、真实安装、签名或发布。S5-R2 仅完成离线 Harness 候选，真实 Sandbox 生命周期仍需独立 QA 授权与执行。
+- Owner 权属/分发形态确认、原始 C0 只读 manifest、NOTICE installer 修改和 S5-R2 lifecycle 已分别经过独立门禁；未来在线补证、clean rebuild、重新运行 lifecycle、签名和发布仍需新的可见授权。
+- release/installer 已接入离线 fail-closed bundle gate，exact bundle 通过后才生成确定性 mandatory Inno include；缺失/篡改/错绑/越界/default-branch substitute 均在 restore/publish/installer compile 前阻断。S5-R2 已验证安装后 NOTICE layout；新 signed release identity 尚未执行。
+- Stage 5 implementation 整体仍未完成；Charter 不预定 V0.7.0，不授权下载、未来安装、签名或发布。
 
 ### S5-R2 Isolated Installer Lifecycle
 
-- 仅在未来单独授权的干净、隔离 Windows 环境中验证 install → launch → upgrade → rollback → uninstall。
+- 状态：**S5-R2_REAL_SANDBOX_LIFECYCLE_PASS**；权威记录见 [S5-R2 生命周期基线](baselines/V0.6.0_STAGE5_S5_R2_LIFECYCLE.md)。
+- 已在单独授权的 Windows Sandbox 中验证 install → launch → upgrade → rollback → uninstall。
 - 保护现有安装登记、现有用户数据和当前开发机；不得在需保留的同 AppId 安装上试验。
 - 验证 Host+Client 成对升级/回滚、数据库保留、匹配备份与缺失备份失败关闭。
 - 不把浅层脚本成功或安装器退出码单独当作用户可见生命周期通过。
-- 离线 Harness 状态为 `READY_FOR_QA`：Host 只做 exact-SHA/clean/hash/Sandbox/既有安装预检并生成临时 `.wsb`；输入只读映射，证据只写入专属临时目录，网络、剪贴板、音频、麦克风、视频与打印均关闭，Host 不执行安装器。
-- Sandbox bootstrap 固定验证 V0.5 schema v10 → V0.6 schema v11 → 匹配 `pre-v11-from-v10` 备份回滚 → 卸载与数据保留，并输出不含正文、路径、凭据或日志的紧凑 JSON。当前真实 Sandbox 启动和安装器执行均为 0，不能记为生命周期 PASS。
+- exact SHA `2dc99dda8ef31cad0fdd6ed0ccf74b34e8b59867` 真实运行和独立 QA 均 PASS：Sandbox 启动 1 次，installer/uninstaller 5 次（3+2，均 exit 0），retry/resend=0，网络/Provider/凭据读取=0。
+- Sandbox 验证 V0.5 schema v10 → V0.6 schema v11 → 匹配 `pre-v11-from-v10` 备份回滚至 v10、NOTICE 与数据保留；输入只读、证据目录独占可写、repo 不映射，宿主安装文件与卸载登记前后不变。
 
 ### S5-R3 Signing & Release Identity
 

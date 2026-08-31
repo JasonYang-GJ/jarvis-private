@@ -13,10 +13,11 @@
 - S5-R1 Attribution / NOTICE Contract：**S5-R1_CONTRACT_PASS**
 - S5-R1 Packaging / NOTICE Gate Infrastructure：**FAIL_CLOSED_INFRASTRUCTURE_IMPLEMENTED**
 - S5-R1 Exact LICENSE/NOTICE Bundle：**NOTICE_BUNDLE_IMPLEMENTATION_PASS**
+- S5-R2 Isolated Installer Lifecycle：**S5-R2_REAL_SANDBOX_LIFECYCLE_PASS**
 - External Distribution：**EXTERNAL_DISTRIBUTION_BLOCKED**
-- Stage 5 产品与可分发安装包实施：**NOT_STARTED / NOT_AUTHORIZED**；本轮只实现分发构建前置门禁，不产生可分发安装包。
+- Stage 5 整体：**NOT_COMPLETE**；S5-R3 Signing & Release Identity 与 S5-R4 Final Distribution Acceptance 仍为 **NOT_STARTED / NOT_AUTHORIZED**，没有可分发安装包。
 
-本清单不是法律意见，不建立 `PROHIBITED`、`INCOMPATIBLE` 或商业合法性结论。`S5-R1_CONTRACT_PASS` 表示四轴归属、manifest schema、NOTICE layout 与授权门禁已经形成合同；`FAIL_CLOSED_INFRASTRUCTURE_IMPLEMENTED` 表示 release 脚本和 Inno 已接入确定性离线验证器。当前 exact bundle 已把冻结 attribution 的 539/539 条 installed payload 与 2 条 installer-container entry 映射到显式 component/version，并为每个组件绑定已保存的精确 LICENSE、NOTICE 或明确标注为 reference-only 的 TERMS-REFERENCE；离线 validator 已验证文件、规范化/原始 SHA-256、组件归属、路径、排除项与 Inno include，结果为 `NOTICE_BUNDLE_IMPLEMENTATION_PASS`。这不等于安装后生命周期、数字签名或外部分发已经放行。
+本清单不是法律意见，不建立 `PROHIBITED`、`INCOMPATIBLE` 或商业合法性结论。`S5-R1_CONTRACT_PASS` 表示四轴归属、manifest schema、NOTICE layout 与授权门禁已经形成合同；`FAIL_CLOSED_INFRASTRUCTURE_IMPLEMENTED` 表示 release 脚本和 Inno 已接入确定性离线验证器。当前 exact bundle 已把冻结 attribution 的 539/539 条 installed payload 与 2 条 installer-container entry 映射到显式 component/version，并为每个组件绑定已保存的精确 LICENSE、NOTICE 或明确标注为 reference-only 的 TERMS-REFERENCE；离线 validator 已验证文件、规范化/原始 SHA-256、组件归属、路径、排除项与 Inno include，结果为 `NOTICE_BUNDLE_IMPLEMENTATION_PASS`。S5-R2 已独立验证安装后 NOTICE layout 与隔离生命周期，但这仍不等于数字签名、signed release identity 或外部分发已经放行。
 
 ## 2. 证据边界与方法
 
@@ -173,7 +174,7 @@
 
 1. License/NOTICE/attribution 完整性；
 2. 数字签名与私钥安全；
-3. 隔离干净 Windows 的 same-AppId install/upgrade/rollback/uninstall 生命周期；
+3. 隔离干净 Windows 的 same-AppId install/upgrade/rollback/uninstall 生命周期（S5-R2 已 PASS）；
 4. tag、version、hash、signature 与 per-file release identity。
 
 任一项缺失都保持 External Distribution=`EXTERNAL_DISTRIBUTION_BLOCKED`。
@@ -349,25 +350,24 @@ Owner 已决定以专有编译产品形式分发且不公开分发项目源码�
 
 ### 12.6 新授权门禁
 
-原始 C0 artifact 的只读静态 manifest 已在本轮 Owner 明确授权下完成；其余动作各自仍需要新的、可见的 Owner 授权，不能相互替代：
+原始 C0 artifact 的只读静态 manifest 与 S5-R2 生命周期已分别在 Owner 明确授权下完成；以下动作保持各自独立状态，不能相互替代：
 
 1. Owner 对图标 AI 披露、第三方权利、商标与外部分发开放项，以及其他尚未闭合资产的补证、替换或排除决定；
 2. clean rebuild 及其可重建参考 manifest；
-3. 安装后 NOTICE layout 验证与新 release identity；
+3. 新 release identity 及其安装后 NOTICE layout 再验证；
 4. 任何未来在线许可补证；
-5. S5-R2 隔离安装生命周期。
+5. S5-R2 隔离安装生命周期已独立授权并 PASS；任何重新运行仍需新的 exact-SHA 授权。
 
 ## 13. Remaining blocks
 
-`NOTICE_BUNDLE_IMPLEMENTATION_PASS` 后仍缺少以下相互独立的发布 Gate；本轮不执行：
+`NOTICE_BUNDLE_IMPLEMENTATION_PASS` 与 `S5-R2_REAL_SANDBOX_LIFECYCLE_PASS` 后仍缺少以下相互独立的发布 Gate：
 
 - 数字签名、证书/私钥安全、时间戳与 signed artifact identity；
-- clean-machine same-AppId install → launch → upgrade → rollback → uninstall 生命周期，以及安装后 LICENSE/NOTICE layout 的实际核对；
 - 上述 Gate 通过后的新 release identity、最终小型分发验收和 Owner 单独发布授权。
 
 WinSDK 的 exact file/package binding、官方 REDIST listing 与 WinRT 用途适用性已验证；Owner 已声明亲自阅读并接受适用的 Windows SDK license/REDIST 条件，bundle 中只安装清楚标记为 reference-only 的 terms reference，不把它冒充开源 LICENSE。Microsoft.Windows.SDK.BuildTools 10.0.26100.4948 保持 `BUILD_TOOL_NOT_DISTRIBUTED`。七个非 win-x64 Sherpa runtime 由 539 条冻结 payload 不存在性证据关闭当前 Windows x64 捆绑边界；若未来计划捆绑，必须重新执行 license/redistribution Gate。
 
-中文语音模型是当前 installer 的 `VERIFIED-EXCLUDED`，不是当前分发包的硬阻断；未来若捆绑或下载，必须重新核对权重、tokens、训练数据许可及 exact model card/source/version/hash。数字签名与 clean-machine same-AppId lifecycle 仍是彼此独立的后续 Gate。
+中文语音模型是当前 installer 的 `VERIFIED-EXCLUDED`，不是当前分发包的硬阻断；未来若捆绑或下载，必须重新核对权重、tokens、训练数据许可及 exact model card/source/version/hash。S5-R2 生命周期已 PASS；数字签名与 signed release identity 仍是独立后续 Gate。
 
 在上述证据和实施补齐并通过独立 Gate 前，不得把 `EXTERNAL_DISTRIBUTION_BLOCKED` 改为可分发。
 

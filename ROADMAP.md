@@ -122,13 +122,13 @@ S3-R3 已完成范围：
 
 ## 阶段 5：安全分发与升级准备（推荐 Charter）
 
-状态：**CHARTER / PREFLIGHT ONLY；实施 `NOT_STARTED / NOT_AUTHORIZED`。** Stage 5 只推荐解决“元枢是否能安全交付另一台机器、为什么、还缺什么”，不改变 Stage 4 冻结事实。唯一章程见 [Stage 5 Charter](docs/V2_STAGE5_CHARTER.md)。
+状态：**S5-R1 PASS；S5-R2 `S5-R2_REAL_SANDBOX_LIFECYCLE_PASS`；Stage 5 尚未完成。** S5-R3 Signing & Release Identity 与 S5-R4 Final Distribution Acceptance 仍为 `NOT_STARTED / NOT_AUTHORIZED`，External Distribution 仍为 `BLOCKED`。Stage 5 不改变 Stage 4 冻结事实；唯一章程见 [Stage 5 Charter](docs/V2_STAGE5_CHARTER.md)。
 
-推荐最小串行切片（仅规划）：
+最小串行切片及当前状态：
 
-1. S5-R1 Distribution Contract & License Inventory：Offline Inventory、归属合同与 exact LICENSE/NOTICE bundle 已 PASS；External Distribution 仍为 `BLOCKED`，下一门禁是独立的签名/release identity 与 clean-machine same-AppId lifecycle，且仍需逐步 Owner 授权。唯一详细证据见 [分发许可清单](docs/V2_STAGE5_DISTRIBUTION_LICENSE_INVENTORY.md)。
-2. S5-R2 Isolated Installer Lifecycle：未来经单独授权后，在干净隔离 Windows 验证 install → launch → upgrade → rollback → uninstall，并保护现有安装和用户数据。
+1. S5-R1 Distribution Contract & License Inventory：Offline Inventory、归属合同与 exact LICENSE/NOTICE bundle 已 PASS；External Distribution 仍为 `BLOCKED`，后续门禁是签名/release identity 与最终分发验收，且仍需逐步 Owner 授权。唯一详细证据见 [分发许可清单](docs/V2_STAGE5_DISTRIBUTION_LICENSE_INVENTORY.md)。
+2. S5-R2 Isolated Installer Lifecycle：已在 exact SHA `2dc99dda8ef31cad0fdd6ed0ccf74b34e8b59867` 的一次授权 Windows Sandbox 运行中完成 install → launch → upgrade → rollback → uninstall；schema `10 → 11 → 10`、匹配备份、NOTICE、数据保留和宿主不变均 PASS。证据见 [S5-R2 生命周期基线](docs/baselines/V0.6.0_STAGE5_S5_R2_LIFECYCLE.md)。
 3. S5-R3 Signing & Release Identity：先定义签名、证书/费用/私钥安全和 signed artifact identity；采购、私钥接触和真实签名另行授权。
 4. S5-R4 Final Distribution Acceptance：前述门禁通过后才执行小型 release gate；Push、上传和发布仍需独立授权。
 
-Stage 5 不增加产品功能，不拆分 `SessionCoordinator`，不修改 schema/protocol/Prompt/Provider/凭据/权限，不自动下载、签名、运行安装器或发布。本 Charter 不决定 V0.7.0 或新 tag。
+Stage 5 不增加产品功能，不拆分 `SessionCoordinator`，不修改 schema/protocol/Prompt/Provider/凭据/权限。已完成的 S5-R2 单次授权不授权未来自动运行安装器；仍不自动下载、签名或发布。本 Charter 不决定 V0.7.0 或新 tag。

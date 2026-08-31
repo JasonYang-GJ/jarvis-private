@@ -1,6 +1,6 @@
 # 元枢产品事实（V0.6.0 / Stage 4 Final Freeze）
 
-> 当前产品事实的唯一入口。更新时间：2026-08-30。V0.6.0 / Stage 4 已完成 Final Freeze，S4-R1 Window Identity v2、S4-R2 本机真实使用评测、S4-R3 有界 Session 投影与 S4-R4 runtime gate 有界化均为 `INTEGRATED_PASS`。正式标签 `v0.6.0-stage4` 指向 C0 源码提交 `3a591a7b6af7da7d97e07093d4c33a3f44553b82`；本 C1 只记录标签源码构建与产物证据，不改变标签或二进制身份。安装包仍未获对外分发放行，不新增 S4-R5；Stage 5 只有 Charter/Preflight，实施仍未授权。
+> 当前产品事实的唯一入口。更新时间：2026-09-01。V0.6.0 / Stage 4 已完成 Final Freeze，S4-R1 Window Identity v2、S4-R2 本机真实使用评测、S4-R3 有界 Session 投影与 S4-R4 runtime gate 有界化均为 `INTEGRATED_PASS`。正式标签 `v0.6.0-stage4` 指向 C0 源码提交 `3a591a7b6af7da7d97e07093d4c33a3f44553b82`；Stage 5 的 S5-R1 与 S5-R2 已分别完成许可/NOTICE 合同和真实隔离生命周期证据，但不改变标签或 Stage 4 二进制身份。安装包仍未获对外分发放行，不新增 S4-R5。
 
 ## 产品定位
 
@@ -13,7 +13,7 @@
 - **发布合同**：普通聊天发布目标是 DeepSeek + 千问；千问仅作手动备用，无自动 fallback、retry 或跨 Provider resend。Codex 普通聊天保持 `ProductionDisabled`/`PolicyDisabled`，独立 Codex 编程 Agent 不随聊天 Provider 改变。
 - **阶段 3 R1 / R2 / R3**：已有本机加密记忆账本和确定性预览；用户可为单个 Turn 选择记忆，并在查看完整 Provider、HTTPS 去向、项目绑定和正文后单次确认发送。默认仍为 0 条，不自动提取或后台发送。
 - **阶段 4 R1 / R2**：单窗口授权已升级为 Host 可信完整身份；独立人工 Runner 已完成真实麦克风、单窗口 OCR、停止和窗口身份变化验收，不加入产品遥测、网络或 Provider 路径。
-- **阶段 5 Charter / Preflight**：推荐方向为“安全分发与升级准备”，仅规划许可清单、隔离安装生命周期、签名/release identity 和最终分发验收。实施仍为 `NOT_STARTED / NOT_AUTHORIZED`，不改变当前产品行为或 Stage 4 冻结身份。
+- **阶段 5 安全分发与升级准备**：S5-R1 许可/NOTICE 与 S5-R2 真实 Windows Sandbox 生命周期均已 PASS；S5-R3 签名/release identity 和 S5-R4 最终分发验收仍为 `NOT_STARTED / NOT_AUTHORIZED`。Stage 5 尚未完成，也不改变当前产品行为或 Stage 4 冻结身份。
 
 详细代码边界见 [阶段 2 AI 模型路由设计](docs/V2_STAGE2_AI_MODEL_ROUTING_DESIGN.md)。
 Stage 5 的唯一推荐章程见 [Stage 5 Charter](docs/V2_STAGE5_CHARTER.md)。
@@ -122,10 +122,10 @@ Stage 5 的唯一推荐章程见 [Stage 5 Charter](docs/V2_STAGE5_CHARTER.md)。
 - 离线门禁在最终代码候选 `996da9acb9cf00537794668bfd81f65d1444cca8` 通过 focused 3/3、Vision 35/35、Voice 43/43，以及 Runner/DesktopHost Release 构建；独立 QA 与安全/架构审查均为 PASS。
 - 真实语音批次为 18/20（成功率 90%，达到首批观察线），另一次 STOP 场景正确取消；真实视觉批次在最终代码候选上为 20/20（成功率 100%），窗口身份变化场景正确以 `Cancelled / vision.identity_changed` 失败关闭。所有批次均确认清理完成，`NetworkRequests=0`、`ProviderRequests=0`。
 
-## 尚未完成
+## 尚未完成与当前边界
 
 - 阶段 3 不包含自动记忆提取、后台/语义检索、RAG、向量数据库、用户画像或跨 Session 自动个性化；`intent.semantic` 永不接收记忆。
-- 同 AppId 的安装—卸载—重装生命周期尚未在干净 Windows 环境执行；V0.6.0 标签是可追溯的 Stage 4 冻结源码基线，但不等于已放行对外分发。
+- S5-R2 已在一次授权 Windows Sandbox 中完成 same-AppId install → launch → upgrade → rollback → uninstall，验证 Host/Client 成对、schema `10 → 11 → 10`、匹配备份、NOTICE、数据保留与宿主不变；这项 PASS 不等于已放行对外分发。
 - Prompt 已有版本、哈希和固定小型评测集，但真实模型质量评测、成本/Token 对比和长期回归趋势仍未形成发布证据。
 - Provider 路由当前只支持用户明确默认选择，不做自动成本/速度路由或自动降级；这是阶段 2 的有意范围，不是缺陷。
 - 每轮会把当前 Conversation 历史交给所选 Provider，并有字符上限；尚未做 Token 精确预算、摘要或上下文裁剪。
@@ -133,7 +133,7 @@ Stage 5 的唯一推荐章程见 [Stage 5 Charter](docs/V2_STAGE5_CHARTER.md)。
 - 本机单窗口理解主要依赖 OCR 和可访问控件，不能可靠理解纯图片、视频、图标语义和复杂空间关系。
 - 语音模型不在安装包内；商业分发前仍需完成许可证、下载和更新方案。
 - 安装包未做数字签名；Windows 可能显示未知发布者警告。
-- Stage 5 的 S5-R1 Offline Inventory、归属合同与 exact LICENSE/NOTICE bundle 已 PASS：539 条 frozen payload 与 2 条 installer-container entry 已完成确定性组件/版本/材料映射，release/installer 继续 fail-closed。External Distribution 仍为 `BLOCKED`，因为数字签名和 clean-machine same-AppId 安装/升级/回滚/卸载生命周期尚未通过；本状态不代表允许发布。详细依据见 [分发许可清单](docs/V2_STAGE5_DISTRIBUTION_LICENSE_INVENTORY.md)。
+- Stage 5 的 S5-R1 Offline Inventory、归属合同与 exact LICENSE/NOTICE bundle 已 PASS：539 条 frozen payload 与 2 条 installer-container entry 已完成确定性组件/版本/材料映射，release/installer 继续 fail-closed。S5-R2 真实隔离生命周期也已 PASS；External Distribution 仍为 `BLOCKED`，因为数字签名、signed release identity、S5-R4 最终验收和 Owner 发布授权尚未通过。详细依据见 [分发许可清单](docs/V2_STAGE5_DISTRIBUTION_LICENSE_INVENTORY.md)与 [S5-R2 生命周期基线](docs/baselines/V0.6.0_STAGE5_S5_R2_LIFECYCLE.md)。
 - 没有手机端、云同步、远程控制、复杂多 Agent 产品功能或开放式 Tool Calling。
 
 ## 明确禁止或不开放
@@ -150,10 +150,10 @@ Stage 5 的唯一推荐章程见 [Stage 5 Charter](docs/V2_STAGE5_CHARTER.md)。
 - 阶段 3 版本为 V0.5.0；正式标签 `v0.5.0-stage3` 指向 `d553e7e9d606037df87d98e99250de5498f5934a`，annotated tag object 为 `a67d2b24308edb2ce72db97676b837f5018617b8`。90/90 离线 Release 定向测试、实际 Release Client+Host 本机 Fake Provider 桌面流程和独立干净标签源码构建均已通过；安装包为 64,173,791 bytes，SHA-256 `4683E10CD6C5317EB537681978DB8A77E2DC15041838EF3DCE2DEE47C7C16F95`，未签名。
 - 阶段 2 版本为 V0.4.0，正式标签 `v0.4.0-stage2` 指向 `33b5859dcaa697bacd5edc5036a58d162b723a0e`，annotated tag object 为 `47a2b3b70fc22904954e2291470e809e58303eca`。干净标签源码产出的安装包为 64,128,304 bytes，SHA-256 `222DC720E677202BBCAEC6D507F48ACFA8B2FCA31535FF7B03010DF80EE7DEE9`，未签名。
 - 阶段 2 最终集成功能 SHA 为 `f7506a6013d83318572c63865607d78861e669bc`；最终标签还包含 V0.4.0 版本和冻结文档。
-- 上一标签 `v0.3.0-stage1` 继续可达；完整安装生命周期仍需在干净机验收后，才可把安装包视为对外分发版本。
+- 上一标签 `v0.3.0-stage1` 继续可达；S5-R2 隔离安装生命周期虽已 PASS，但安装包仍须通过签名、release identity 与最终分发验收，才可视为对外分发版本。
 - V0.2.1 标签 `v0.2.1-baseline` 保留为上一版回滚点；回滚数据必须使用 pre-v7 备份或隔离数据目录。
 - 阶段 2 候选代码把 SQLite 升到 schema v8 并在升级前建立 `pre-v8` 备份。V0.3.0 不能直接打开 schema v8；回滚到阶段 1 时必须使用 pre-v8 备份或隔离数据目录，不能覆盖正式数据库。
 - V0.5.0 使用 schema v10。直接从 V0.4.0 schema v8 升级只建立 `pre-v10-from-v8`，不会自动建立中间 pre-v9；从 v9 升级建立 `pre-v10-from-v9`。V0.4.0 不能直接打开 v9/v10；回滚时必须保留新主库，并使用匹配来源的 pre-v10、既有 v8 备份或隔离数据目录。
 - 阶段 4 当前使用 schema v11、protocol v11；S4-R3/S4-R4 没有新增 schema 迁移。回滚到 V0.5.0 时 Host 与 Client 必须成对回滚，保留 v11 主库，只能在隔离数据目录使用与来源匹配的 `pre-v11-from-v10`；没有匹配备份时必须失败关闭，不能覆盖或原地降级正式主库。
-- 为保护本机同 AppId 的现有 V0.2.0 安装、卸载登记和用户数据，本阶段没有在该机器重复完整安装—卸载—重装；该发布生命周期仍应在干净机执行。
-- V0.6.0 冻结安装包仍未获得数字签名、语音模型许可/分发和同 AppId 干净环境生命周期放行，因此 Final Freeze 只证明源码与产物身份，不得声称已获对外分发批准。
+- S5-R2 使用隔离 Windows Sandbox 完成生命周期，宿主现有元枢的 536 个文件、tree SHA-256 与卸载登记在运行前后保持不变；没有在宿主上运行 installer。
+- V0.6.0 冻结安装包仍未获得数字签名、语音模型许可/分发和最终分发放行；S5-R2 候选也未签名且不是新 tag，因此不得声称已获对外分发批准。
