@@ -1,0 +1,70 @@
+Yuanshu 0.6.0 THIRD-PARTY-NOTICES index
+This file is a deterministic index. Full upstream texts are installed under licenses/<component>/.
+Project-authored notices and reference-only terms are identified by their file names; this index is not legal advice.
+
+inno-chinese-simplified-translation | 6da09d23e14443d4cf8f07b1c5fd821bfe459788 | installerContainer | files/inno-chinese-simplified-6da09d23e14443d4cf8f07b1c5fd821bfe459788/LICENSE
+inno-installer-engine | 6.7.3 | installerContainer | files/inno-setup-6.7.3/LICENSE.txt
+payload-build-ScreenGuide.DesktopClient | 0.6.0 | installedPayload | files/yuanshu-v0.6.0/PROPRIETARY-NOTICE.txt
+payload-build-ScreenGuide.DesktopHost | 0.6.0 | installedPayload | files/yuanshu-v0.6.0/PROPRIETARY-NOTICE.txt
+payload-package-Microsoft.Data.Sqlite.Core | 10.0.11 | installedPayload | files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT, files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/THIRD-PARTY-NOTICES.txt
+payload-package-Microsoft.Extensions.Configuration | 10.0.11 | installedPayload | files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT, files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/THIRD-PARTY-NOTICES.txt
+payload-package-Microsoft.Extensions.Configuration.Abstractions | 10.0.11 | installedPayload | files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT, files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/THIRD-PARTY-NOTICES.txt
+payload-package-Microsoft.Extensions.Configuration.Binder | 10.0.11 | installedPayload | files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT, files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/THIRD-PARTY-NOTICES.txt
+payload-package-Microsoft.Extensions.Configuration.CommandLine | 10.0.11 | installedPayload | files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT, files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/THIRD-PARTY-NOTICES.txt
+payload-package-Microsoft.Extensions.Configuration.EnvironmentVariables | 10.0.11 | installedPayload | files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT, files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/THIRD-PARTY-NOTICES.txt
+payload-package-Microsoft.Extensions.Configuration.FileExtensions | 10.0.11 | installedPayload | files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT, files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/THIRD-PARTY-NOTICES.txt
+payload-package-Microsoft.Extensions.Configuration.Json | 10.0.11 | installedPayload | files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT, files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/THIRD-PARTY-NOTICES.txt
+payload-package-Microsoft.Extensions.Configuration.UserSecrets | 10.0.11 | installedPayload | files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT, files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/THIRD-PARTY-NOTICES.txt
+payload-package-Microsoft.Extensions.DependencyInjection | 10.0.11 | installedPayload | files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT, files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/THIRD-PARTY-NOTICES.txt
+payload-package-Microsoft.Extensions.DependencyInjection.Abstractions | 10.0.11 | installedPayload | files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT, files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/THIRD-PARTY-NOTICES.txt
+payload-package-Microsoft.Extensions.Diagnostics | 10.0.11 | installedPayload | files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT, files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/THIRD-PARTY-NOTICES.txt
+payload-package-Microsoft.Extensions.Diagnostics.Abstractions | 10.0.11 | installedPayload | files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT, files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/THIRD-PARTY-NOTICES.txt
+payload-package-Microsoft.Extensions.FileProviders.Abstractions | 10.0.11 | installedPayload | files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT, files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/THIRD-PARTY-NOTICES.txt
+payload-package-Microsoft.Extensions.FileProviders.Physical | 10.0.11 | installedPayload | files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT, files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/THIRD-PARTY-NOTICES.txt
+payload-package-Microsoft.Extensions.FileSystemGlobbing | 10.0.11 | installedPayload | files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT, files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/THIRD-PARTY-NOTICES.txt
+payload-package-Microsoft.Extensions.Hosting | 10.0.11 | installedPayload | files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT, files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/THIRD-PARTY-NOTICES.txt
+payload-package-Microsoft.Extensions.Hosting.Abstractions | 10.0.11 | installedPayload | files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT, files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/THIRD-PARTY-NOTICES.txt
+payload-package-Microsoft.Extensions.Logging | 10.0.11 | installedPayload | files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT, files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/THIRD-PARTY-NOTICES.txt
+payload-package-Microsoft.Extensions.Logging.Abstractions | 10.0.11 | installedPayload | files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT, files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/THIRD-PARTY-NOTICES.txt
+payload-package-Microsoft.Extensions.Logging.Configuration | 10.0.11 | installedPayload | files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT, files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/THIRD-PARTY-NOTICES.txt
+payload-package-Microsoft.Extensions.Logging.Console | 10.0.11 | installedPayload | files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT, files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/THIRD-PARTY-NOTICES.txt
+payload-package-Microsoft.Extensions.Logging.Debug | 10.0.11 | installedPayload | files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT, files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/THIRD-PARTY-NOTICES.txt
+payload-package-Microsoft.Extensions.Logging.EventLog | 10.0.11 | installedPayload | files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT, files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/THIRD-PARTY-NOTICES.txt
+payload-package-Microsoft.Extensions.Logging.EventSource | 10.0.11 | installedPayload | files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT, files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/THIRD-PARTY-NOTICES.txt
+payload-package-Microsoft.Extensions.Options | 10.0.11 | installedPayload | files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT, files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/THIRD-PARTY-NOTICES.txt
+payload-package-Microsoft.Extensions.Options.ConfigurationExtensions | 10.0.11 | installedPayload | files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT, files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/THIRD-PARTY-NOTICES.txt
+payload-package-Microsoft.Extensions.Primitives | 10.0.11 | installedPayload | files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT, files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/THIRD-PARTY-NOTICES.txt
+payload-package-Microsoft.NETCore.App.Runtime.win-x64 | 10.0.11 | installedPayload | files/dotnet-runtime-10.0.11/LICENSE.TXT, files/dotnet-runtime-10.0.11/TERMS-REFERENCE.txt, files/dotnet-runtime-10.0.11/THIRD-PARTY-NOTICES.TXT
+payload-package-Microsoft.Windows.SDK.NET.Ref | 10.0.19041.57 | installedPayload | files/microsoft-windows-sdk-net-ref-10.0.19041.57/TERMS-REFERENCE.txt
+payload-package-Microsoft.WindowsDesktop.App.Runtime.win-x64 | 10.0.11 | installedPayload | files/dotnet-runtime-10.0.11/TERMS-REFERENCE.txt, files/windowsdesktop-runtime-10.0.11/LICENSE, files/windowsdesktop-runtime-10.0.11/WINFORMS-THIRD-PARTY-NOTICES.TXT, files/windowsdesktop-runtime-10.0.11/WPF-THIRD-PARTY-NOTICES.TXT
+payload-package-NAudio | 2.2.1 | installedPayload | files/naudio-2.2.1/LICENSE.txt
+payload-package-NAudio.Asio | 2.2.1 | installedPayload | files/naudio-2.2.1/LICENSE.txt
+payload-package-NAudio.Core | 2.2.1 | installedPayload | files/naudio-2.2.1/LICENSE.txt
+payload-package-NAudio.Midi | 2.2.1 | installedPayload | files/naudio-2.2.1/LICENSE.txt
+payload-package-NAudio.Wasapi | 2.2.1 | installedPayload | files/naudio-2.2.1/LICENSE.txt
+payload-package-NAudio.WinForms | 2.2.1 | installedPayload | files/naudio-2.2.1/LICENSE.txt
+payload-package-NAudio.WinMM | 2.2.1 | installedPayload | files/naudio-2.2.1/LICENSE.txt
+payload-package-SQLitePCLRaw.bundle_e_sqlite3 | 2.1.12 | installedPayload | files/sqlitepclraw-2.1.12/LICENSE.TXT, files/sqlitepclraw-2.1.12/NOTICE.TXT, files/sqlitepclraw-2.1.12/TERMS-REFERENCE.txt
+payload-package-SQLitePCLRaw.core | 2.1.12 | installedPayload | files/sqlitepclraw-2.1.12/LICENSE.TXT, files/sqlitepclraw-2.1.12/NOTICE.TXT, files/sqlitepclraw-2.1.12/TERMS-REFERENCE.txt
+payload-package-SQLitePCLRaw.lib.e_sqlite3 | 2.1.12 | installedPayload | files/sqlitepclraw-2.1.12/LICENSE.TXT, files/sqlitepclraw-2.1.12/NOTICE.TXT, files/sqlitepclraw-2.1.12/TERMS-REFERENCE.txt
+payload-package-SQLitePCLRaw.provider.e_sqlite3 | 2.1.12 | installedPayload | files/sqlitepclraw-2.1.12/LICENSE.TXT, files/sqlitepclraw-2.1.12/NOTICE.TXT, files/sqlitepclraw-2.1.12/TERMS-REFERENCE.txt
+payload-package-System.Speech | 10.0.10 | installedPayload | files/system-speech-10.0.10-f7d90799ce4ef09a0bb257852a57248d2a8fb8dd/LICENSE.TXT, files/system-speech-10.0.10-f7d90799ce4ef09a0bb257852a57248d2a8fb8dd/THIRD-PARTY-NOTICES.txt
+payload-package-org.k2fsa.sherpa.onnx | 1.13.4 | installedPayload | files/sherpa-onnx-1.13.4/LICENSE
+payload-package-org.k2fsa.sherpa.onnx.runtime.win-x64 | 1.13.4 | installedPayload | files/onnxruntime-1.27.0/LICENSE, files/onnxruntime-1.27.0/ThirdPartyNotices.txt, files/sherpa-onnx-1.13.4/LICENSE
+payload-project-ScreenGuide.AI.Core | 0.6.0 | installedPayload | files/yuanshu-v0.6.0/PROPRIETARY-NOTICE.txt
+payload-project-ScreenGuide.AI.DeepSeek | 0.6.0 | installedPayload | files/yuanshu-v0.6.0/PROPRIETARY-NOTICE.txt
+payload-project-ScreenGuide.AI.Qwen | 0.6.0 | installedPayload | files/yuanshu-v0.6.0/PROPRIETARY-NOTICE.txt
+payload-project-ScreenGuide.Agent.Abstractions | 0.6.0 | installedPayload | files/yuanshu-v0.6.0/PROPRIETARY-NOTICE.txt
+payload-project-ScreenGuide.Agent.Codex | 0.6.0 | installedPayload | files/yuanshu-v0.6.0/PROPRIETARY-NOTICE.txt
+payload-project-ScreenGuide.Core | 0.6.0 | installedPayload | files/yuanshu-v0.6.0/PROPRIETARY-NOTICE.txt
+payload-project-ScreenGuide.DesktopClient | 0.6.0 | installedPayload | files/yuanshu-v0.6.0/PROPRIETARY-NOTICE.txt
+payload-project-ScreenGuide.DesktopHost | 0.6.0 | installedPayload | files/yuanshu-v0.6.0/PROPRIETARY-NOTICE.txt
+payload-project-ScreenGuide.DesktopProtocol | 0.6.0 | installedPayload | files/yuanshu-v0.6.0/PROPRIETARY-NOTICE.txt
+payload-project-ScreenGuide.Evidence | 0.6.0 | installedPayload | files/yuanshu-v0.6.0/PROPRIETARY-NOTICE.txt
+payload-project-ScreenGuide.Persistence | 0.6.0 | installedPayload | files/yuanshu-v0.6.0/PROPRIETARY-NOTICE.txt
+payload-project-ScreenGuide.Skills.Abstractions | 0.6.0 | installedPayload | files/yuanshu-v0.6.0/PROPRIETARY-NOTICE.txt
+payload-project-ScreenGuide.Skills.Windows | 0.6.0 | installedPayload | files/yuanshu-v0.6.0/PROPRIETARY-NOTICE.txt
+payload-project-ScreenGuide.Vision.Abstractions | 0.6.0 | installedPayload | files/yuanshu-v0.6.0/PROPRIETARY-NOTICE.txt
+payload-project-ScreenGuide.Vision.Windows | 0.6.0 | installedPayload | files/yuanshu-v0.6.0/PROPRIETARY-NOTICE.txt
+payload-project-ScreenGuide.Voice.Windows | 0.6.0 | installedPayload | files/yuanshu-v0.6.0/PROPRIETARY-NOTICE.txt
+payload-project-runtime-prompts | 0.6.0 | installedPayload | files/yuanshu-v0.6.0/PROPRIETARY-NOTICE.txt

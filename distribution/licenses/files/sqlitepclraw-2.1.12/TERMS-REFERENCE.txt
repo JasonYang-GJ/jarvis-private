@@ -1,0 +1,6 @@
+TERMS-REFERENCE — this file is not an open-source license copy.
+
+Component: SQLitePCLRaw 2.1.12 native SQLite distribution.
+Official reference: https://sqlite.org/copyright.html
+
+The referenced SQLite page records SQLite core's public-domain statement. The exact SQLitePCLRaw LICENSE.TXT and NOTICE.TXT are bundled separately. This reference does not replace those files and is not legal advice or release approval.

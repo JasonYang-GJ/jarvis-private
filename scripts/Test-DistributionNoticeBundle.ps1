@@ -73,6 +73,26 @@ function Test-Sha256([string]$value) {
     return -not [string]::IsNullOrWhiteSpace($value) -and $value -match '^[0-9A-Fa-f]{64}$'
 }
 
+function Test-PinnedSourceUrl([string]$value) {
+    if ($value -eq 'PROJECT_AUTHORED') { return $true }
+    $uri = $null
+    if (-not [Uri]::TryCreate($value, [UriKind]::Absolute, [ref]$uri) -or $uri.Scheme -ne 'https') { return $false }
+    if ($uri.Host -eq 'raw.githubusercontent.com') {
+        if ($uri.AbsolutePath -match '/(?:main|master)/') { return $false }
+        return $uri.AbsolutePath -match '/(?:v\d+\.\d+(?:\.\d+)?|is-\d+_\d+_\d+|[0-9a-f]{40})/'
+    }
+    return $true
+}
+
+function Test-SourceUrls($values) {
+    $urls = @($values)
+    if ($urls.Count -eq 0) { return $false }
+    foreach ($url in $urls) {
+        if (-not (Test-PinnedSourceUrl ([string]$url))) { return $false }
+    }
+    return $true
+}
+
 function Test-PathChainHasReparsePoint([string]$path) {
     $current = [IO.Path]::GetFullPath($path)
     while (-not [string]::IsNullOrWhiteSpace($current)) {
@@ -142,7 +162,7 @@ try {
     }
 
     if ($manifest.schemaVersion -ne 1 -or $payloadManifest.schemaVersion -ne 1 -or
-        $null -eq $manifest.noticeIndex -or $null -eq $manifest.components -or
+        $null -eq $manifest.noticeIndex -or $null -eq $manifest.rootNotice -or $null -eq $manifest.components -or
         $null -eq $payloadManifest.records) {
         Write-ResultAndExit $false 'distribution_notice_bundle_invalid' @('invalid_schema') 0 1
     }
@@ -154,6 +174,25 @@ try {
         -not (Test-Sha256 ([string]$manifest.payloadManifestSha256)) -or
         (Get-CanonicalUtf8LfSha256 $resolvedPayloadPath) -ne ([string]$manifest.payloadManifestSha256).ToUpperInvariant()) {
         $blockers.Add('payload_manifest_hash_mismatch')
+    }
+
+    try { $rootNoticePath = Resolve-BundleFile $resolvedBundleRoot ([string]$manifest.rootNotice.path) }
+    catch { Write-ResultAndExit $false 'distribution_notice_bundle_invalid' @('invalid_root_notice_path') $payloadCount 1 }
+    if (Test-PathChainHasReparsePoint $rootNoticePath) {
+        Write-ResultAndExit $false 'distribution_notice_reparse_point' @('reparse_point_rejected') $payloadCount 1
+    }
+    if (-not (Test-Path -LiteralPath $rootNoticePath -PathType Leaf)) {
+        $blockers.Add('root_notice_missing')
+    }
+    else {
+        try { $rootNoticeHash = Get-ProfiledSha256 $rootNoticePath ([string]$manifest.rootNotice.hashProfile) }
+        catch { Write-ResultAndExit $false 'distribution_notice_bundle_invalid' @('invalid_root_notice_hash_profile') $payloadCount 1 }
+        if (-not (Test-Sha256 ([string]$manifest.rootNotice.sha256)) -or
+            -not (Test-Sha256 ([string]$manifest.rootNotice.rawSha256)) -or
+            $rootNoticeHash -ne ([string]$manifest.rootNotice.sha256).ToUpperInvariant() -or
+            (Get-FileSha256 $rootNoticePath) -ne ([string]$manifest.rootNotice.rawSha256).ToUpperInvariant()) {
+            $blockers.Add('root_notice_hash_mismatch')
+        }
     }
 
     try {
@@ -209,8 +248,35 @@ try {
         if ($null -eq $component.sourceBinding -or
             [string]::IsNullOrWhiteSpace([string]$component.sourceBinding.kind) -or
             [string]::IsNullOrWhiteSpace([string]$component.sourceBinding.reference) -or
-            -not (Test-Sha256 ([string]$component.sourceBinding.sha256))) {
+            [string]::IsNullOrWhiteSpace([string]$component.sourceBinding.path) -or
+            -not (Test-Sha256 ([string]$component.sourceBinding.sha256)) -or
+            -not (Test-Sha256 ([string]$component.sourceBinding.rawSha256))) {
             $blockers.Add(('source_binding_incomplete:' + $componentId))
+        }
+        elseif (-not (Test-SourceUrls $component.sourceBinding.sourceUrls)) {
+            Write-ResultAndExit $false 'distribution_notice_bundle_invalid' @('source_reference_unpinned') $payloadCount 1
+        }
+        else {
+            $sourceBindingPath = ([string]$component.sourceBinding.path).Replace('\', '/')
+            if (-not $sourceBindingPath.StartsWith('files/', [StringComparison]::Ordinal)) {
+                Write-ResultAndExit $false 'distribution_notice_bundle_invalid' @('invalid_source_binding_layout') $payloadCount 1
+            }
+            try { $resolvedSourceBinding = Resolve-BundleFile $resolvedBundleRoot $sourceBindingPath }
+            catch { Write-ResultAndExit $false 'distribution_notice_bundle_invalid' @('invalid_source_binding_path') $payloadCount 1 }
+            if (Test-PathChainHasReparsePoint $resolvedSourceBinding) {
+                Write-ResultAndExit $false 'distribution_notice_reparse_point' @('reparse_point_rejected') $payloadCount 1
+            }
+            if (-not (Test-Path -LiteralPath $resolvedSourceBinding -PathType Leaf)) {
+                $blockers.Add(('source_binding_file_missing:' + $componentId))
+            }
+            else {
+                try { $sourceBindingHash = Get-ProfiledSha256 $resolvedSourceBinding ([string]$component.sourceBinding.hashProfile) }
+                catch { Write-ResultAndExit $false 'distribution_notice_bundle_invalid' @('invalid_source_binding_hash_profile') $payloadCount 1 }
+                if ($sourceBindingHash -ne ([string]$component.sourceBinding.sha256).ToUpperInvariant() -or
+                    (Get-FileSha256 $resolvedSourceBinding) -ne ([string]$component.sourceBinding.rawSha256).ToUpperInvariant()) {
+                    $blockers.Add(('source_binding_hash_mismatch:' + $componentId))
+                }
+            }
         }
 
         $componentFiles = @($component.licenseNoticeFiles)
@@ -219,6 +285,10 @@ try {
         }
         foreach ($file in $componentFiles) {
             $relativeLicensePath = ([string]$file.path).Replace('\', '/')
+            if ([string]$file.kind -notin @('LICENSE', 'NOTICE', 'TERMS_REFERENCE') -or
+                -not (Test-SourceUrls $file.sourceUrls)) {
+                Write-ResultAndExit $false 'distribution_notice_bundle_invalid' @('source_reference_unpinned') $payloadCount 1
+            }
             if (-not $relativeLicensePath.StartsWith('files/', [StringComparison]::Ordinal) -or $relativeLicensePath.Length -le 6) {
                 Write-ResultAndExit $false 'distribution_notice_bundle_invalid' @('invalid_license_notice_layout') $payloadCount 1
             }
@@ -238,7 +308,9 @@ try {
             try { $licenseNoticeHash = Get-ProfiledSha256 $resolvedFile ([string]$file.hashProfile) }
             catch { Write-ResultAndExit $false 'distribution_notice_bundle_invalid' @('invalid_license_notice_hash_profile') $payloadCount 1 }
             if (-not (Test-Sha256 ([string]$file.sha256)) -or
-                $licenseNoticeHash -ne ([string]$file.sha256).ToUpperInvariant()) {
+                -not (Test-Sha256 ([string]$file.rawSha256)) -or
+                $licenseNoticeHash -ne ([string]$file.sha256).ToUpperInvariant() -or
+                (Get-FileSha256 $resolvedFile) -ne ([string]$file.rawSha256).ToUpperInvariant()) {
                 $blockers.Add(('license_notice_hash_mismatch:' + $componentId))
             }
             $normalizedLicensePath = $relativeLicensePath.Replace('/', '\')
@@ -343,7 +415,9 @@ try {
     $includeLines.Add('; Generated only after the distribution notice bundle passes validation.')
     $includeLines.Add('Source: "..\distribution\licenses\bundle-manifest.json"; DestDir: "{app}\distribution"; Flags: ignoreversion')
     $noticeRelative = ([string]$manifest.noticeIndex.path).Replace('/', '\')
-    $includeLines.Add(('Source: "..\distribution\licenses\' + $noticeRelative + '"; DestDir: "{app}"; Flags: ignoreversion'))
+    $includeLines.Add(('Source: "..\distribution\licenses\' + $noticeRelative + '"; DestDir: "{app}\distribution"; Flags: ignoreversion'))
+    $rootNoticeRelative = ([string]$manifest.rootNotice.path).Replace('/', '\')
+    $includeLines.Add(('Source: "..\distribution\licenses\' + $rootNoticeRelative + '"; DestDir: "{app}"; Flags: ignoreversion'))
     foreach ($licensePath in @($licensePaths | Sort-Object -Unique)) {
         $installedLicensePath = $licensePath.Substring('files\'.Length)
         $destination = [IO.Path]::GetDirectoryName($installedLicensePath)

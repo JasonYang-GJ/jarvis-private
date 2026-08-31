@@ -9,6 +9,9 @@ param(
     [string]$OutputPath,
 
     [Parameter(Mandatory = $true)]
+    [string]$RootNoticeOutputPath,
+
+    [Parameter(Mandatory = $true)]
     [string]$ApprovedOutputRoot
 )
 
@@ -46,6 +49,23 @@ function Get-CatalogKey([string]$kind, [string]$id, [string]$version) {
     return $kind + [char]0 + $id + [char]0 + $version
 }
 
+function Get-ComponentLicensePaths($component) {
+    $paths = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+    foreach ($file in @($component.licenseNoticeFiles)) {
+        $path = ([string]$file.path).Replace('\', '/')
+        if ([string]::IsNullOrWhiteSpace($path) -or
+            -not $path.StartsWith('files/', [StringComparison]::Ordinal) -or
+            [IO.Path]::IsPathRooted($path) -or $path.Split('/') -contains '..' -or
+            -not $paths.Add($path)) {
+            return $null
+        }
+    }
+    if ($paths.Count -eq 0) { return $null }
+    $sorted = [string[]]$paths
+    [Array]::Sort($sorted, [StringComparer]::Ordinal)
+    return $sorted
+}
+
 function Test-PathChainHasReparsePoint([string]$path) {
     $current = [IO.Path]::GetFullPath($path)
     while (-not [string]::IsNullOrWhiteSpace($current)) {
@@ -66,13 +86,17 @@ try {
     $resolvedBundleManifestPath = [IO.Path]::GetFullPath($BundleManifestPath)
     $approvedRoot = $resolvedApprovedRoot.TrimEnd('\') + '\'
     $resolvedOutputPath = [IO.Path]::GetFullPath($OutputPath)
-    if (-not $resolvedOutputPath.StartsWith($approvedRoot, [StringComparison]::OrdinalIgnoreCase)) {
+    $resolvedRootNoticePath = [IO.Path]::GetFullPath($RootNoticeOutputPath)
+    if (-not $resolvedOutputPath.StartsWith($approvedRoot, [StringComparison]::OrdinalIgnoreCase) -or
+        -not $resolvedRootNoticePath.StartsWith($approvedRoot, [StringComparison]::OrdinalIgnoreCase) -or
+        $resolvedOutputPath -eq $resolvedRootNoticePath) {
         Write-ResultAndExit $false 'distribution_notice_output_out_of_bounds' @('output_out_of_bounds') 0 0 0 1
     }
     if ((Test-PathChainHasReparsePoint $resolvedApprovedRoot) -or
         (Test-PathChainHasReparsePoint $resolvedPayloadManifestPath) -or
         (Test-PathChainHasReparsePoint $resolvedBundleManifestPath) -or
-        (Test-PathChainHasReparsePoint $resolvedOutputPath)) {
+        (Test-PathChainHasReparsePoint $resolvedOutputPath) -or
+        (Test-PathChainHasReparsePoint $resolvedRootNoticePath)) {
         Write-ResultAndExit $false 'distribution_notice_reparse_point' @('reparse_point_rejected') 0 0 0 1
     }
 
@@ -94,17 +118,33 @@ try {
 
     $catalog = [Collections.Generic.Dictionary[string, object]]::new([StringComparer]::Ordinal)
     $componentIds = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+    $containerComponents = [Collections.Generic.List[object]]::new()
     foreach ($component in @($bundleManifest.components)) {
-        if ([string]$component.artifactScope -ne 'installedPayload') { continue }
         $componentId = [string]$component.componentId
-        $sourceKind = [string]$component.payloadSourceKind
-        $payloadComponentId = [string]$component.payloadComponentId
         $version = [string]$component.version
         if ([string]::IsNullOrWhiteSpace($componentId) -or
-            [string]::IsNullOrWhiteSpace($sourceKind) -or
-            [string]::IsNullOrWhiteSpace($payloadComponentId) -or
             [string]::IsNullOrWhiteSpace($version) -or
             -not $componentIds.Add($componentId)) {
+            Write-ResultAndExit $false 'distribution_notice_catalog_conflict' @('catalog_conflict') 0 0 0 1
+        }
+        if ($null -eq (Get-ComponentLicensePaths $component)) {
+            Write-ResultAndExit $false 'distribution_notice_catalog_missing' @('license_mapping_missing') 0 0 0 1
+        }
+        if ([string]$component.artifactScope -eq 'installerContainer') {
+            $containerEntry = ([string]$component.containerEntry).Replace('\', '/')
+            if ([string]::IsNullOrWhiteSpace($containerEntry) -or [IO.Path]::IsPathRooted($containerEntry) -or
+                $containerEntry.Split('/') -contains '..') {
+                Write-ResultAndExit $false 'distribution_notice_catalog_conflict' @('catalog_conflict') 0 0 0 1
+            }
+            $containerComponents.Add($component)
+            continue
+        }
+        if ([string]$component.artifactScope -ne 'installedPayload') {
+            Write-ResultAndExit $false 'distribution_notice_catalog_conflict' @('catalog_conflict') 0 0 0 1
+        }
+        $sourceKind = [string]$component.payloadSourceKind
+        $payloadComponentId = [string]$component.payloadComponentId
+        if ([string]::IsNullOrWhiteSpace($sourceKind) -or [string]::IsNullOrWhiteSpace($payloadComponentId)) {
             Write-ResultAndExit $false 'distribution_notice_catalog_conflict' @('catalog_conflict') 0 0 0 1
         }
         $catalogKey = Get-CatalogKey $sourceKind $payloadComponentId $version
@@ -156,12 +196,13 @@ try {
             Write-ResultAndExit $false 'distribution_notice_catalog_missing' @('catalog_missing') $payloadCount 0 0 1
         }
         $component = $catalog[$catalogKey]
+        $licensePaths = Get-ComponentLicensePaths $component
         $recordsByPath.Add($payloadPath, [ordered]@{
             artifactScope = 'installedPayload'
             payloadPath = $payloadPath
             componentId = [string]$component.componentId
             version = [string]$component.version
-            licenseNoticePaths = @()
+            licenseNoticePaths = @($licensePaths)
         })
     }
 
@@ -169,6 +210,18 @@ try {
     [Array]::Sort($sortedPaths, [StringComparer]::Ordinal)
     $records = [Collections.Generic.List[object]]::new()
     foreach ($path in $sortedPaths) { $records.Add($recordsByPath[$path]) }
+    $containerEntries = [string[]]@($containerComponents | ForEach-Object { [string]$_.containerEntry })
+    [Array]::Sort($containerEntries, [StringComparer]::Ordinal)
+    foreach ($containerEntry in $containerEntries) {
+        $component = @($containerComponents | Where-Object { [string]$_.containerEntry -ceq $containerEntry })[0]
+        $records.Add([ordered]@{
+            artifactScope = 'installerContainer'
+            containerEntry = ([string]$component.containerEntry).Replace('\', '/')
+            componentId = [string]$component.componentId
+            version = [string]$component.version
+            licenseNoticePaths = @(Get-ComponentLicensePaths $component)
+        })
+    }
 
     $sortedExcludedPackages = [string[]]$excludedPackageIds
     [Array]::Sort($sortedExcludedPackages, [StringComparer]::Ordinal)
@@ -176,7 +229,7 @@ try {
     [Array]::Sort($sortedExcludedPrefixes, [StringComparer]::Ordinal)
     $index = [ordered]@{
         schemaVersion = 1
-        bundleStatus = 'BLOCKED'
+        bundleStatus = [string]$bundleManifest.bundleStatus
         records = $records.ToArray()
         exclusionEvidence = [ordered]@{
             packageIdsAbsentFromPayload = $sortedExcludedPackages
@@ -185,11 +238,29 @@ try {
     }
 
     $json = ($index | ConvertTo-Json -Depth 30).Replace("`r`n", "`n") + "`n"
+    $noticeLines = [Collections.Generic.List[string]]::new()
+    $noticeLines.Add(('Yuanshu ' + [string]$bundleManifest.releaseVersion + ' THIRD-PARTY-NOTICES index'))
+    $noticeLines.Add('This file is a deterministic index. Full upstream texts are installed under licenses/<component>/.')
+    $noticeLines.Add('Project-authored notices and reference-only terms are identified by their file names; this index is not legal advice.')
+    $noticeLines.Add('')
+    $noticeComponentIds = [string[]]@($bundleManifest.components | ForEach-Object { [string]$_.componentId })
+    [Array]::Sort($noticeComponentIds, [StringComparer]::Ordinal)
+    foreach ($componentId in $noticeComponentIds) {
+        $component = @($bundleManifest.components | Where-Object { [string]$_.componentId -ceq $componentId })[0]
+        $paths = Get-ComponentLicensePaths $component
+        $noticeLines.Add(([string]$component.componentId + ' | ' + [string]$component.version + ' | ' + [string]$component.artifactScope + ' | ' + ($paths -join ', ')))
+    }
+    $rootNotice = ($noticeLines -join "`n") + "`n"
     $outputDirectory = [IO.Path]::GetDirectoryName($resolvedOutputPath)
+    $rootNoticeDirectory = [IO.Path]::GetDirectoryName($resolvedRootNoticePath)
     [IO.Directory]::CreateDirectory($outputDirectory) | Out-Null
+    [IO.Directory]::CreateDirectory($rootNoticeDirectory) | Out-Null
     $temporaryPath = $resolvedOutputPath + '.tmp'
+    $temporaryRootNoticePath = $resolvedRootNoticePath + '.tmp'
     [IO.File]::WriteAllText($temporaryPath, $json, [Text.UTF8Encoding]::new($false))
+    [IO.File]::WriteAllText($temporaryRootNoticePath, $rootNotice, [Text.UTF8Encoding]::new($false))
     Move-Item -LiteralPath $temporaryPath -Destination $resolvedOutputPath -Force
+    Move-Item -LiteralPath $temporaryRootNoticePath -Destination $resolvedRootNoticePath -Force
 
     Write-ResultAndExit $true $null @() $payloadCount $excludedPackageIds.Count $excludedPathPrefixes.Count 0
 }

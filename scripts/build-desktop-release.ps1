@@ -105,6 +105,14 @@ $iscc = $isccCandidates | Select-Object -First 1
 if (-not $iscc) {
     throw '未找到 Inno Setup 6。请先安装 JRSoftware.InnoSetup。'
 }
+$innoUninstaller = Join-Path ([IO.Path]::GetDirectoryName($iscc)) 'unins000.exe'
+if (-not (Test-Path -LiteralPath $innoUninstaller -PathType Leaf)) {
+    throw '无法核验 Inno Setup 6.7.3：安装目录缺少版本锚点。'
+}
+$innoProductVersion = ([Diagnostics.FileVersionInfo]::GetVersionInfo($innoUninstaller).ProductVersion).Trim()
+if ($innoProductVersion -cne '6.7.3') {
+    throw "Inno Setup 版本不匹配：要求 6.7.3，实际为 $innoProductVersion。"
+}
 
 & $iscc (Join-Path $repoRoot 'installer\ScreenGuideDesktop.iss')
 if ($LASTEXITCODE -ne 0) { throw 'Installer compilation failed.' }

@@ -27,6 +27,7 @@ function New-GeneratorFixture([string]$root) {
     $manifestPath = Join-Path $root 'bundle-manifest.json'
     $approvedRoot = Join-Path $root 'approved'
     $outputPath = Join-Path $approvedRoot 'notice-index.json'
+    $rootNoticePath = Join-Path $approvedRoot 'THIRD-PARTY-NOTICES.txt'
 
     $payload = [ordered]@{
         schemaVersion = 1
@@ -54,9 +55,10 @@ function New-GeneratorFixture([string]$root) {
     Write-Utf8Json $payloadPath $payload
 
     $components = @(
-        [ordered]@{ componentId = 'component-alpha'; version = 'test'; artifactScope = 'installedPayload'; payloadSourceKind = 'project'; payloadComponentId = 'alpha-project' },
-        [ordered]@{ componentId = 'component-middle'; version = 'test'; artifactScope = 'installedPayload'; payloadSourceKind = 'build'; payloadComponentId = 'middle-project' },
-        [ordered]@{ componentId = 'component-zeta'; version = '1.0.0'; artifactScope = 'installedPayload'; payloadSourceKind = 'package'; payloadComponentId = 'zeta' }
+        [ordered]@{ componentId = 'component-alpha'; version = 'test'; artifactScope = 'installedPayload'; payloadSourceKind = 'project'; payloadComponentId = 'alpha-project'; licenseNoticeFiles = @([ordered]@{ path = 'files/alpha/NOTICE.txt' }) },
+        [ordered]@{ componentId = 'component-middle'; version = 'test'; artifactScope = 'installedPayload'; payloadSourceKind = 'build'; payloadComponentId = 'middle-project'; licenseNoticeFiles = @([ordered]@{ path = 'files/middle/NOTICE.txt' }) },
+        [ordered]@{ componentId = 'component-zeta'; version = '1.0.0'; artifactScope = 'installedPayload'; payloadSourceKind = 'package'; payloadComponentId = 'zeta'; licenseNoticeFiles = @([ordered]@{ path = 'files/zeta/LICENSE.txt' }) },
+        [ordered]@{ componentId = 'component-installer'; version = '2.0.0'; artifactScope = 'installerContainer'; containerEntry = 'installer/engine'; licenseNoticeFiles = @([ordered]@{ path = 'files/installer/LICENSE.txt' }) }
     )
     $manifest = [ordered]@{
         schemaVersion = 1
@@ -77,6 +79,7 @@ function New-GeneratorFixture([string]$root) {
         ManifestPath = $manifestPath
         ApprovedRoot = $approvedRoot
         OutputPath = $outputPath
+        RootNoticePath = $rootNoticePath
     }
 }
 
@@ -85,6 +88,7 @@ function Invoke-Generator($fixture, [string]$outputPath) {
         -PayloadManifestPath $fixture.PayloadPath `
         -BundleManifestPath $fixture.ManifestPath `
         -OutputPath $outputPath `
+        -RootNoticeOutputPath $fixture.RootNoticePath `
         -ApprovedOutputRoot $fixture.ApprovedRoot 2>&1)
     return [pscustomobject]@{
         ExitCode = $LASTEXITCODE
@@ -99,6 +103,7 @@ function Assert-GeneratorFailure($fixture, [string]$outputPath, [string]$expecte
     Assert-Equal $expectedCode $result.errorCode 'Generator failure code must be stable.'
     Assert-True (@($result.blockers) -contains $expectedBlocker) "Expected generator blocker [$expectedBlocker]."
     Assert-True (-not (Test-Path -LiteralPath $outputPath)) 'Failure must not emit an index.'
+    Assert-True (-not (Test-Path -LiteralPath $fixture.RootNoticePath)) 'Failure must not emit a root notice.'
 }
 
 try {
@@ -114,18 +119,27 @@ try {
     Assert-Equal 1 $result.excludedPathPrefixesVerifiedCount 'The explicit voice-model prefix exclusion must be verified.'
 
     $index = Get-Content -Raw -LiteralPath $fixture.OutputPath | ConvertFrom-Json
-    Assert-Equal 3 @($index.records).Count 'Generated index must contain every payload row.'
+    Assert-Equal 4 @($index.records).Count 'Generated index must contain every payload row and explicit installer-container entry.'
     Assert-Equal 'alpha.dll' $index.records[0].payloadPath 'Records must use deterministic ordinal path order.'
     Assert-Equal 'component-alpha' $index.records[0].componentId 'Project source must use its explicit catalog component.'
     Assert-Equal 'component-middle' $index.records[1].componentId 'Build source must use its explicit catalog component.'
     Assert-Equal 'component-zeta' $index.records[2].componentId 'Package source must use its explicit catalog component.'
-    Assert-Equal 0 @($index.records[0].licenseNoticePaths).Count 'Generator must not invent license material mappings.'
+    Assert-Equal 'files/alpha/NOTICE.txt' $index.records[0].licenseNoticePaths[0] 'Generator must copy only the component explicit NOTICE mapping.'
+    Assert-Equal 'installerContainer' $index.records[3].artifactScope 'Installer entry must retain its scope.'
+    Assert-Equal 'installer/engine' $index.records[3].containerEntry 'Installer entry must retain its exact container path.'
+    Assert-Equal 'files/installer/LICENSE.txt' $index.records[3].licenseNoticePaths[0] 'Installer entry must use only its component material.'
+    Assert-True (Test-Path -LiteralPath $fixture.RootNoticePath -PathType Leaf) 'Generator must emit the human-readable root notice.'
+    $rootNotice = Get-Content -Raw -LiteralPath $fixture.RootNoticePath
+    Assert-True ($rootNotice.Contains('component-alpha | test | installedPayload | files/alpha/NOTICE.txt')) 'Root notice must index component/version/scope/material without copying material text.'
 
     $firstBytes = [IO.File]::ReadAllBytes($fixture.OutputPath)
+    $firstNoticeBytes = [IO.File]::ReadAllBytes($fixture.RootNoticePath)
     $secondPath = Join-Path $fixture.ApprovedRoot 'notice-index-second.json'
+    $fixture.RootNoticePath = Join-Path $fixture.ApprovedRoot 'THIRD-PARTY-NOTICES-second.txt'
     $second = Invoke-Generator $fixture $secondPath
     Assert-Equal 0 $second.ExitCode 'Repeated generation must pass.'
     Assert-True ([Linq.Enumerable]::SequenceEqual($firstBytes, [IO.File]::ReadAllBytes($secondPath))) 'Repeated generation must be byte-for-byte deterministic.'
+    Assert-True ([Linq.Enumerable]::SequenceEqual($firstNoticeBytes, [IO.File]::ReadAllBytes($fixture.RootNoticePath))) 'Repeated root notice generation must be byte-for-byte deterministic.'
 
     Write-Host 'GENERATOR deterministic fixture: passed'
 

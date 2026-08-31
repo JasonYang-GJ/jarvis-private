@@ -2,13 +2,13 @@
   "schemaVersion": 1,
   "bundleId": "yuanshu-v0.6.0-distribution-notice-bundle",
   "releaseVersion": "0.6.0",
-  "bundleStatus": "BLOCKED",
+  "bundleStatus": "VERIFIED",
   "payloadManifestHashProfile": "UTF8_NO_BOM_LF_V1",
   "payloadManifestSha256": "C18B2D2F0356F6C8577FE4FD48F82937568F4D67FABF627D26F278F275742FAC",
   "noticeIndex": {
     "path": "notice-index.json",
     "hashProfile": "UTF8_NO_BOM_LF_V1",
-    "sha256": "0142369F8C8C40907E69CE1F9D7229D2167A93D77C67061A69E483FDFB553755"
+    "sha256": "ACCAA185E88E5E687D4C54BDD13CFA6F1C797701A5926161127BCFF745C6CF1F"
   },
   "components": [
     {
@@ -18,17 +18,34 @@
       "payloadSourceKind": "build",
       "payloadComponentId": "ScreenGuide.DesktopClient",
       "sourceBinding": {
-        "kind": "c0-payload-attribution-catalog",
-        "reference": "build/ScreenGuide.DesktopClient@0.6.0",
-        "sha256": "PENDING"
+        "kind": "owner-declared-project-source",
+        "reference": "C0/build/ScreenGuide.DesktopClient@0.6.0",
+        "path": "files/yuanshu-v0.6.0/PROPRIETARY-NOTICE.txt",
+        "hashProfile": "UTF8_NO_BOM_LF_V1",
+        "sha256": "596C52BC74985F0066D97CE89C13375D0B294FD25625839997210279892250F9",
+        "rawSha256": "596C52BC74985F0066D97CE89C13375D0B294FD25625839997210279892250F9",
+        "sourceUrls": [
+          "PROJECT_AUTHORED"
+        ]
       },
       "status": {
-        "source": "PARTIAL",
-        "bundling": "PARTIAL",
-        "attribution": "PARTIAL",
-        "notice": "UNKNOWN"
+        "source": "VERIFIED",
+        "bundling": "VERIFIED",
+        "attribution": "VERIFIED",
+        "notice": "VERIFIED"
       },
-      "licenseNoticeFiles": []
+      "licenseNoticeFiles": [
+        {
+          "kind": "NOTICE",
+          "path": "files/yuanshu-v0.6.0/PROPRIETARY-NOTICE.txt",
+          "hashProfile": "UTF8_NO_BOM_LF_V1",
+          "sha256": "596C52BC74985F0066D97CE89C13375D0B294FD25625839997210279892250F9",
+          "rawSha256": "596C52BC74985F0066D97CE89C13375D0B294FD25625839997210279892250F9",
+          "sourceUrls": [
+            "PROJECT_AUTHORED"
+          ]
+        }
+      ]
     },
     {
       "componentId": "payload-build-ScreenGuide.DesktopHost",
@@ -37,17 +54,34 @@
       "payloadSourceKind": "build",
       "payloadComponentId": "ScreenGuide.DesktopHost",
       "sourceBinding": {
-        "kind": "c0-payload-attribution-catalog",
-        "reference": "build/ScreenGuide.DesktopHost@0.6.0",
-        "sha256": "PENDING"
+        "kind": "owner-declared-project-source",
+        "reference": "C0/build/ScreenGuide.DesktopHost@0.6.0",
+        "path": "files/yuanshu-v0.6.0/PROPRIETARY-NOTICE.txt",
+        "hashProfile": "UTF8_NO_BOM_LF_V1",
+        "sha256": "596C52BC74985F0066D97CE89C13375D0B294FD25625839997210279892250F9",
+        "rawSha256": "596C52BC74985F0066D97CE89C13375D0B294FD25625839997210279892250F9",
+        "sourceUrls": [
+          "PROJECT_AUTHORED"
+        ]
       },
       "status": {
-        "source": "PARTIAL",
-        "bundling": "PARTIAL",
-        "attribution": "PARTIAL",
-        "notice": "UNKNOWN"
+        "source": "VERIFIED",
+        "bundling": "VERIFIED",
+        "attribution": "VERIFIED",
+        "notice": "VERIFIED"
       },
-      "licenseNoticeFiles": []
+      "licenseNoticeFiles": [
+        {
+          "kind": "NOTICE",
+          "path": "files/yuanshu-v0.6.0/PROPRIETARY-NOTICE.txt",
+          "hashProfile": "UTF8_NO_BOM_LF_V1",
+          "sha256": "596C52BC74985F0066D97CE89C13375D0B294FD25625839997210279892250F9",
+          "rawSha256": "596C52BC74985F0066D97CE89C13375D0B294FD25625839997210279892250F9",
+          "sourceUrls": [
+            "PROJECT_AUTHORED"
+          ]
+        }
+      ]
     },
     {
       "componentId": "payload-package-Microsoft.Data.Sqlite.Core",
@@ -56,17 +90,44 @@
       "payloadSourceKind": "package",
       "payloadComponentId": "Microsoft.Data.Sqlite.Core",
       "sourceBinding": {
-        "kind": "c0-payload-attribution-catalog",
-        "reference": "package/Microsoft.Data.Sqlite.Core@10.0.11",
-        "sha256": "PENDING"
+        "kind": "exact-package-source-commit",
+        "reference": "dotnet/dotnet@e2f47b0110ed922f21a1522da67279133ce28f32/Microsoft.Data.Sqlite.Core@10.0.11",
+        "path": "files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT",
+        "hashProfile": "UTF8_NO_BOM_LF_V1",
+        "sha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+        "rawSha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+        "sourceUrls": [
+          "https://raw.githubusercontent.com/dotnet/dotnet/e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT"
+        ]
       },
       "status": {
-        "source": "PARTIAL",
-        "bundling": "PARTIAL",
-        "attribution": "PARTIAL",
-        "notice": "UNKNOWN"
+        "source": "VERIFIED",
+        "bundling": "VERIFIED",
+        "attribution": "VERIFIED",
+        "notice": "VERIFIED"
       },
-      "licenseNoticeFiles": []
+      "licenseNoticeFiles": [
+        {
+          "kind": "LICENSE",
+          "path": "files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT",
+          "hashProfile": "UTF8_NO_BOM_LF_V1",
+          "sha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+          "rawSha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+          "sourceUrls": [
+            "https://raw.githubusercontent.com/dotnet/dotnet/e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT"
+          ]
+        },
+        {
+          "kind": "NOTICE",
+          "path": "files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/THIRD-PARTY-NOTICES.txt",
+          "hashProfile": "UTF8_NO_BOM_LF_V1",
+          "sha256": "4BEF6A7E7B359869D751C9FF70274A80A0F626927AFA5A0681583C1B1861267B",
+          "rawSha256": "4BEF6A7E7B359869D751C9FF70274A80A0F626927AFA5A0681583C1B1861267B",
+          "sourceUrls": [
+            "https://raw.githubusercontent.com/dotnet/dotnet/e2f47b0110ed922f21a1522da67279133ce28f32/THIRD-PARTY-NOTICES.txt"
+          ]
+        }
+      ]
     },
     {
       "componentId": "payload-package-Microsoft.Extensions.Configuration",
@@ -75,17 +136,44 @@
       "payloadSourceKind": "package",
       "payloadComponentId": "Microsoft.Extensions.Configuration",
       "sourceBinding": {
-        "kind": "c0-payload-attribution-catalog",
-        "reference": "package/Microsoft.Extensions.Configuration@10.0.11",
-        "sha256": "PENDING"
+        "kind": "exact-package-source-commit",
+        "reference": "dotnet/dotnet@e2f47b0110ed922f21a1522da67279133ce28f32/Microsoft.Extensions.Configuration@10.0.11",
+        "path": "files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT",
+        "hashProfile": "UTF8_NO_BOM_LF_V1",
+        "sha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+        "rawSha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+        "sourceUrls": [
+          "https://raw.githubusercontent.com/dotnet/dotnet/e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT"
+        ]
       },
       "status": {
-        "source": "PARTIAL",
-        "bundling": "PARTIAL",
-        "attribution": "PARTIAL",
-        "notice": "UNKNOWN"
+        "source": "VERIFIED",
+        "bundling": "VERIFIED",
+        "attribution": "VERIFIED",
+        "notice": "VERIFIED"
       },
-      "licenseNoticeFiles": []
+      "licenseNoticeFiles": [
+        {
+          "kind": "LICENSE",
+          "path": "files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT",
+          "hashProfile": "UTF8_NO_BOM_LF_V1",
+          "sha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+          "rawSha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+          "sourceUrls": [
+            "https://raw.githubusercontent.com/dotnet/dotnet/e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT"
+          ]
+        },
+        {
+          "kind": "NOTICE",
+          "path": "files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/THIRD-PARTY-NOTICES.txt",
+          "hashProfile": "UTF8_NO_BOM_LF_V1",
+          "sha256": "4BEF6A7E7B359869D751C9FF70274A80A0F626927AFA5A0681583C1B1861267B",
+          "rawSha256": "4BEF6A7E7B359869D751C9FF70274A80A0F626927AFA5A0681583C1B1861267B",
+          "sourceUrls": [
+            "https://raw.githubusercontent.com/dotnet/dotnet/e2f47b0110ed922f21a1522da67279133ce28f32/THIRD-PARTY-NOTICES.txt"
+          ]
+        }
+      ]
     },
     {
       "componentId": "payload-package-Microsoft.Extensions.Configuration.Abstractions",
@@ -94,17 +182,44 @@
       "payloadSourceKind": "package",
       "payloadComponentId": "Microsoft.Extensions.Configuration.Abstractions",
       "sourceBinding": {
-        "kind": "c0-payload-attribution-catalog",
-        "reference": "package/Microsoft.Extensions.Configuration.Abstractions@10.0.11",
-        "sha256": "PENDING"
+        "kind": "exact-package-source-commit",
+        "reference": "dotnet/dotnet@e2f47b0110ed922f21a1522da67279133ce28f32/Microsoft.Extensions.Configuration.Abstractions@10.0.11",
+        "path": "files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT",
+        "hashProfile": "UTF8_NO_BOM_LF_V1",
+        "sha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+        "rawSha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+        "sourceUrls": [
+          "https://raw.githubusercontent.com/dotnet/dotnet/e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT"
+        ]
       },
       "status": {
-        "source": "PARTIAL",
-        "bundling": "PARTIAL",
-        "attribution": "PARTIAL",
-        "notice": "UNKNOWN"
+        "source": "VERIFIED",
+        "bundling": "VERIFIED",
+        "attribution": "VERIFIED",
+        "notice": "VERIFIED"
       },
-      "licenseNoticeFiles": []
+      "licenseNoticeFiles": [
+        {
+          "kind": "LICENSE",
+          "path": "files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT",
+          "hashProfile": "UTF8_NO_BOM_LF_V1",
+          "sha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+          "rawSha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+          "sourceUrls": [
+            "https://raw.githubusercontent.com/dotnet/dotnet/e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT"
+          ]
+        },
+        {
+          "kind": "NOTICE",
+          "path": "files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/THIRD-PARTY-NOTICES.txt",
+          "hashProfile": "UTF8_NO_BOM_LF_V1",
+          "sha256": "4BEF6A7E7B359869D751C9FF70274A80A0F626927AFA5A0681583C1B1861267B",
+          "rawSha256": "4BEF6A7E7B359869D751C9FF70274A80A0F626927AFA5A0681583C1B1861267B",
+          "sourceUrls": [
+            "https://raw.githubusercontent.com/dotnet/dotnet/e2f47b0110ed922f21a1522da67279133ce28f32/THIRD-PARTY-NOTICES.txt"
+          ]
+        }
+      ]
     },
     {
       "componentId": "payload-package-Microsoft.Extensions.Configuration.Binder",
@@ -113,17 +228,44 @@
       "payloadSourceKind": "package",
       "payloadComponentId": "Microsoft.Extensions.Configuration.Binder",
       "sourceBinding": {
-        "kind": "c0-payload-attribution-catalog",
-        "reference": "package/Microsoft.Extensions.Configuration.Binder@10.0.11",
-        "sha256": "PENDING"
+        "kind": "exact-package-source-commit",
+        "reference": "dotnet/dotnet@e2f47b0110ed922f21a1522da67279133ce28f32/Microsoft.Extensions.Configuration.Binder@10.0.11",
+        "path": "files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT",
+        "hashProfile": "UTF8_NO_BOM_LF_V1",
+        "sha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+        "rawSha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+        "sourceUrls": [
+          "https://raw.githubusercontent.com/dotnet/dotnet/e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT"
+        ]
       },
       "status": {
-        "source": "PARTIAL",
-        "bundling": "PARTIAL",
-        "attribution": "PARTIAL",
-        "notice": "UNKNOWN"
+        "source": "VERIFIED",
+        "bundling": "VERIFIED",
+        "attribution": "VERIFIED",
+        "notice": "VERIFIED"
       },
-      "licenseNoticeFiles": []
+      "licenseNoticeFiles": [
+        {
+          "kind": "LICENSE",
+          "path": "files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT",
+          "hashProfile": "UTF8_NO_BOM_LF_V1",
+          "sha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+          "rawSha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+          "sourceUrls": [
+            "https://raw.githubusercontent.com/dotnet/dotnet/e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT"
+          ]
+        },
+        {
+          "kind": "NOTICE",
+          "path": "files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/THIRD-PARTY-NOTICES.txt",
+          "hashProfile": "UTF8_NO_BOM_LF_V1",
+          "sha256": "4BEF6A7E7B359869D751C9FF70274A80A0F626927AFA5A0681583C1B1861267B",
+          "rawSha256": "4BEF6A7E7B359869D751C9FF70274A80A0F626927AFA5A0681583C1B1861267B",
+          "sourceUrls": [
+            "https://raw.githubusercontent.com/dotnet/dotnet/e2f47b0110ed922f21a1522da67279133ce28f32/THIRD-PARTY-NOTICES.txt"
+          ]
+        }
+      ]
     },
     {
       "componentId": "payload-package-Microsoft.Extensions.Configuration.CommandLine",
@@ -132,17 +274,44 @@
       "payloadSourceKind": "package",
       "payloadComponentId": "Microsoft.Extensions.Configuration.CommandLine",
       "sourceBinding": {
-        "kind": "c0-payload-attribution-catalog",
-        "reference": "package/Microsoft.Extensions.Configuration.CommandLine@10.0.11",
-        "sha256": "PENDING"
+        "kind": "exact-package-source-commit",
+        "reference": "dotnet/dotnet@e2f47b0110ed922f21a1522da67279133ce28f32/Microsoft.Extensions.Configuration.CommandLine@10.0.11",
+        "path": "files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT",
+        "hashProfile": "UTF8_NO_BOM_LF_V1",
+        "sha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+        "rawSha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+        "sourceUrls": [
+          "https://raw.githubusercontent.com/dotnet/dotnet/e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT"
+        ]
       },
       "status": {
-        "source": "PARTIAL",
-        "bundling": "PARTIAL",
-        "attribution": "PARTIAL",
-        "notice": "UNKNOWN"
+        "source": "VERIFIED",
+        "bundling": "VERIFIED",
+        "attribution": "VERIFIED",
+        "notice": "VERIFIED"
       },
-      "licenseNoticeFiles": []
+      "licenseNoticeFiles": [
+        {
+          "kind": "LICENSE",
+          "path": "files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT",
+          "hashProfile": "UTF8_NO_BOM_LF_V1",
+          "sha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+          "rawSha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+          "sourceUrls": [
+            "https://raw.githubusercontent.com/dotnet/dotnet/e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT"
+          ]
+        },
+        {
+          "kind": "NOTICE",
+          "path": "files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/THIRD-PARTY-NOTICES.txt",
+          "hashProfile": "UTF8_NO_BOM_LF_V1",
+          "sha256": "4BEF6A7E7B359869D751C9FF70274A80A0F626927AFA5A0681583C1B1861267B",
+          "rawSha256": "4BEF6A7E7B359869D751C9FF70274A80A0F626927AFA5A0681583C1B1861267B",
+          "sourceUrls": [
+            "https://raw.githubusercontent.com/dotnet/dotnet/e2f47b0110ed922f21a1522da67279133ce28f32/THIRD-PARTY-NOTICES.txt"
+          ]
+        }
+      ]
     },
     {
       "componentId": "payload-package-Microsoft.Extensions.Configuration.EnvironmentVariables",
@@ -151,17 +320,44 @@
       "payloadSourceKind": "package",
       "payloadComponentId": "Microsoft.Extensions.Configuration.EnvironmentVariables",
       "sourceBinding": {
-        "kind": "c0-payload-attribution-catalog",
-        "reference": "package/Microsoft.Extensions.Configuration.EnvironmentVariables@10.0.11",
-        "sha256": "PENDING"
+        "kind": "exact-package-source-commit",
+        "reference": "dotnet/dotnet@e2f47b0110ed922f21a1522da67279133ce28f32/Microsoft.Extensions.Configuration.EnvironmentVariables@10.0.11",
+        "path": "files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT",
+        "hashProfile": "UTF8_NO_BOM_LF_V1",
+        "sha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+        "rawSha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+        "sourceUrls": [
+          "https://raw.githubusercontent.com/dotnet/dotnet/e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT"
+        ]
       },
       "status": {
-        "source": "PARTIAL",
-        "bundling": "PARTIAL",
-        "attribution": "PARTIAL",
-        "notice": "UNKNOWN"
+        "source": "VERIFIED",
+        "bundling": "VERIFIED",
+        "attribution": "VERIFIED",
+        "notice": "VERIFIED"
       },
-      "licenseNoticeFiles": []
+      "licenseNoticeFiles": [
+        {
+          "kind": "LICENSE",
+          "path": "files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT",
+          "hashProfile": "UTF8_NO_BOM_LF_V1",
+          "sha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+          "rawSha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+          "sourceUrls": [
+            "https://raw.githubusercontent.com/dotnet/dotnet/e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT"
+          ]
+        },
+        {
+          "kind": "NOTICE",
+          "path": "files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/THIRD-PARTY-NOTICES.txt",
+          "hashProfile": "UTF8_NO_BOM_LF_V1",
+          "sha256": "4BEF6A7E7B359869D751C9FF70274A80A0F626927AFA5A0681583C1B1861267B",
+          "rawSha256": "4BEF6A7E7B359869D751C9FF70274A80A0F626927AFA5A0681583C1B1861267B",
+          "sourceUrls": [
+            "https://raw.githubusercontent.com/dotnet/dotnet/e2f47b0110ed922f21a1522da67279133ce28f32/THIRD-PARTY-NOTICES.txt"
+          ]
+        }
+      ]
     },
     {
       "componentId": "payload-package-Microsoft.Extensions.Configuration.FileExtensions",
@@ -170,17 +366,44 @@
       "payloadSourceKind": "package",
       "payloadComponentId": "Microsoft.Extensions.Configuration.FileExtensions",
       "sourceBinding": {
-        "kind": "c0-payload-attribution-catalog",
-        "reference": "package/Microsoft.Extensions.Configuration.FileExtensions@10.0.11",
-        "sha256": "PENDING"
+        "kind": "exact-package-source-commit",
+        "reference": "dotnet/dotnet@e2f47b0110ed922f21a1522da67279133ce28f32/Microsoft.Extensions.Configuration.FileExtensions@10.0.11",
+        "path": "files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT",
+        "hashProfile": "UTF8_NO_BOM_LF_V1",
+        "sha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+        "rawSha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+        "sourceUrls": [
+          "https://raw.githubusercontent.com/dotnet/dotnet/e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT"
+        ]
       },
       "status": {
-        "source": "PARTIAL",
-        "bundling": "PARTIAL",
-        "attribution": "PARTIAL",
-        "notice": "UNKNOWN"
+        "source": "VERIFIED",
+        "bundling": "VERIFIED",
+        "attribution": "VERIFIED",
+        "notice": "VERIFIED"
       },
-      "licenseNoticeFiles": []
+      "licenseNoticeFiles": [
+        {
+          "kind": "LICENSE",
+          "path": "files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT",
+          "hashProfile": "UTF8_NO_BOM_LF_V1",
+          "sha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+          "rawSha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+          "sourceUrls": [
+            "https://raw.githubusercontent.com/dotnet/dotnet/e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT"
+          ]
+        },
+        {
+          "kind": "NOTICE",
+          "path": "files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/THIRD-PARTY-NOTICES.txt",
+          "hashProfile": "UTF8_NO_BOM_LF_V1",
+          "sha256": "4BEF6A7E7B359869D751C9FF70274A80A0F626927AFA5A0681583C1B1861267B",
+          "rawSha256": "4BEF6A7E7B359869D751C9FF70274A80A0F626927AFA5A0681583C1B1861267B",
+          "sourceUrls": [
+            "https://raw.githubusercontent.com/dotnet/dotnet/e2f47b0110ed922f21a1522da67279133ce28f32/THIRD-PARTY-NOTICES.txt"
+          ]
+        }
+      ]
     },
     {
       "componentId": "payload-package-Microsoft.Extensions.Configuration.Json",
@@ -189,17 +412,44 @@
       "payloadSourceKind": "package",
       "payloadComponentId": "Microsoft.Extensions.Configuration.Json",
       "sourceBinding": {
-        "kind": "c0-payload-attribution-catalog",
-        "reference": "package/Microsoft.Extensions.Configuration.Json@10.0.11",
-        "sha256": "PENDING"
+        "kind": "exact-package-source-commit",
+        "reference": "dotnet/dotnet@e2f47b0110ed922f21a1522da67279133ce28f32/Microsoft.Extensions.Configuration.Json@10.0.11",
+        "path": "files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT",
+        "hashProfile": "UTF8_NO_BOM_LF_V1",
+        "sha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+        "rawSha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+        "sourceUrls": [
+          "https://raw.githubusercontent.com/dotnet/dotnet/e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT"
+        ]
       },
       "status": {
-        "source": "PARTIAL",
-        "bundling": "PARTIAL",
-        "attribution": "PARTIAL",
-        "notice": "UNKNOWN"
+        "source": "VERIFIED",
+        "bundling": "VERIFIED",
+        "attribution": "VERIFIED",
+        "notice": "VERIFIED"
       },
-      "licenseNoticeFiles": []
+      "licenseNoticeFiles": [
+        {
+          "kind": "LICENSE",
+          "path": "files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT",
+          "hashProfile": "UTF8_NO_BOM_LF_V1",
+          "sha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+          "rawSha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+          "sourceUrls": [
+            "https://raw.githubusercontent.com/dotnet/dotnet/e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT"
+          ]
+        },
+        {
+          "kind": "NOTICE",
+          "path": "files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/THIRD-PARTY-NOTICES.txt",
+          "hashProfile": "UTF8_NO_BOM_LF_V1",
+          "sha256": "4BEF6A7E7B359869D751C9FF70274A80A0F626927AFA5A0681583C1B1861267B",
+          "rawSha256": "4BEF6A7E7B359869D751C9FF70274A80A0F626927AFA5A0681583C1B1861267B",
+          "sourceUrls": [
+            "https://raw.githubusercontent.com/dotnet/dotnet/e2f47b0110ed922f21a1522da67279133ce28f32/THIRD-PARTY-NOTICES.txt"
+          ]
+        }
+      ]
     },
     {
       "componentId": "payload-package-Microsoft.Extensions.Configuration.UserSecrets",
@@ -208,17 +458,44 @@
       "payloadSourceKind": "package",
       "payloadComponentId": "Microsoft.Extensions.Configuration.UserSecrets",
       "sourceBinding": {
-        "kind": "c0-payload-attribution-catalog",
-        "reference": "package/Microsoft.Extensions.Configuration.UserSecrets@10.0.11",
-        "sha256": "PENDING"
+        "kind": "exact-package-source-commit",
+        "reference": "dotnet/dotnet@e2f47b0110ed922f21a1522da67279133ce28f32/Microsoft.Extensions.Configuration.UserSecrets@10.0.11",
+        "path": "files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT",
+        "hashProfile": "UTF8_NO_BOM_LF_V1",
+        "sha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+        "rawSha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+        "sourceUrls": [
+          "https://raw.githubusercontent.com/dotnet/dotnet/e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT"
+        ]
       },
       "status": {
-        "source": "PARTIAL",
-        "bundling": "PARTIAL",
-        "attribution": "PARTIAL",
-        "notice": "UNKNOWN"
+        "source": "VERIFIED",
+        "bundling": "VERIFIED",
+        "attribution": "VERIFIED",
+        "notice": "VERIFIED"
       },
-      "licenseNoticeFiles": []
+      "licenseNoticeFiles": [
+        {
+          "kind": "LICENSE",
+          "path": "files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT",
+          "hashProfile": "UTF8_NO_BOM_LF_V1",
+          "sha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+          "rawSha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+          "sourceUrls": [
+            "https://raw.githubusercontent.com/dotnet/dotnet/e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT"
+          ]
+        },
+        {
+          "kind": "NOTICE",
+          "path": "files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/THIRD-PARTY-NOTICES.txt",
+          "hashProfile": "UTF8_NO_BOM_LF_V1",
+          "sha256": "4BEF6A7E7B359869D751C9FF70274A80A0F626927AFA5A0681583C1B1861267B",
+          "rawSha256": "4BEF6A7E7B359869D751C9FF70274A80A0F626927AFA5A0681583C1B1861267B",
+          "sourceUrls": [
+            "https://raw.githubusercontent.com/dotnet/dotnet/e2f47b0110ed922f21a1522da67279133ce28f32/THIRD-PARTY-NOTICES.txt"
+          ]
+        }
+      ]
     },
     {
       "componentId": "payload-package-Microsoft.Extensions.DependencyInjection",
@@ -227,17 +504,44 @@
       "payloadSourceKind": "package",
       "payloadComponentId": "Microsoft.Extensions.DependencyInjection",
       "sourceBinding": {
-        "kind": "c0-payload-attribution-catalog",
-        "reference": "package/Microsoft.Extensions.DependencyInjection@10.0.11",
-        "sha256": "PENDING"
+        "kind": "exact-package-source-commit",
+        "reference": "dotnet/dotnet@e2f47b0110ed922f21a1522da67279133ce28f32/Microsoft.Extensions.DependencyInjection@10.0.11",
+        "path": "files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT",
+        "hashProfile": "UTF8_NO_BOM_LF_V1",
+        "sha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+        "rawSha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+        "sourceUrls": [
+          "https://raw.githubusercontent.com/dotnet/dotnet/e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT"
+        ]
       },
       "status": {
-        "source": "PARTIAL",
-        "bundling": "PARTIAL",
-        "attribution": "PARTIAL",
-        "notice": "UNKNOWN"
+        "source": "VERIFIED",
+        "bundling": "VERIFIED",
+        "attribution": "VERIFIED",
+        "notice": "VERIFIED"
       },
-      "licenseNoticeFiles": []
+      "licenseNoticeFiles": [
+        {
+          "kind": "LICENSE",
+          "path": "files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT",
+          "hashProfile": "UTF8_NO_BOM_LF_V1",
+          "sha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+          "rawSha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+          "sourceUrls": [
+            "https://raw.githubusercontent.com/dotnet/dotnet/e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT"
+          ]
+        },
+        {
+          "kind": "NOTICE",
+          "path": "files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/THIRD-PARTY-NOTICES.txt",
+          "hashProfile": "UTF8_NO_BOM_LF_V1",
+          "sha256": "4BEF6A7E7B359869D751C9FF70274A80A0F626927AFA5A0681583C1B1861267B",
+          "rawSha256": "4BEF6A7E7B359869D751C9FF70274A80A0F626927AFA5A0681583C1B1861267B",
+          "sourceUrls": [
+            "https://raw.githubusercontent.com/dotnet/dotnet/e2f47b0110ed922f21a1522da67279133ce28f32/THIRD-PARTY-NOTICES.txt"
+          ]
+        }
+      ]
     },
     {
       "componentId": "payload-package-Microsoft.Extensions.DependencyInjection.Abstractions",
@@ -246,17 +550,44 @@
       "payloadSourceKind": "package",
       "payloadComponentId": "Microsoft.Extensions.DependencyInjection.Abstractions",
       "sourceBinding": {
-        "kind": "c0-payload-attribution-catalog",
-        "reference": "package/Microsoft.Extensions.DependencyInjection.Abstractions@10.0.11",
-        "sha256": "PENDING"
+        "kind": "exact-package-source-commit",
+        "reference": "dotnet/dotnet@e2f47b0110ed922f21a1522da67279133ce28f32/Microsoft.Extensions.DependencyInjection.Abstractions@10.0.11",
+        "path": "files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT",
+        "hashProfile": "UTF8_NO_BOM_LF_V1",
+        "sha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+        "rawSha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+        "sourceUrls": [
+          "https://raw.githubusercontent.com/dotnet/dotnet/e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT"
+        ]
       },
       "status": {
-        "source": "PARTIAL",
-        "bundling": "PARTIAL",
-        "attribution": "PARTIAL",
-        "notice": "UNKNOWN"
+        "source": "VERIFIED",
+        "bundling": "VERIFIED",
+        "attribution": "VERIFIED",
+        "notice": "VERIFIED"
       },
-      "licenseNoticeFiles": []
+      "licenseNoticeFiles": [
+        {
+          "kind": "LICENSE",
+          "path": "files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT",
+          "hashProfile": "UTF8_NO_BOM_LF_V1",
+          "sha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+          "rawSha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+          "sourceUrls": [
+            "https://raw.githubusercontent.com/dotnet/dotnet/e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT"
+          ]
+        },
+        {
+          "kind": "NOTICE",
+          "path": "files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/THIRD-PARTY-NOTICES.txt",
+          "hashProfile": "UTF8_NO_BOM_LF_V1",
+          "sha256": "4BEF6A7E7B359869D751C9FF70274A80A0F626927AFA5A0681583C1B1861267B",
+          "rawSha256": "4BEF6A7E7B359869D751C9FF70274A80A0F626927AFA5A0681583C1B1861267B",
+          "sourceUrls": [
+            "https://raw.githubusercontent.com/dotnet/dotnet/e2f47b0110ed922f21a1522da67279133ce28f32/THIRD-PARTY-NOTICES.txt"
+          ]
+        }
+      ]
     },
     {
       "componentId": "payload-package-Microsoft.Extensions.Diagnostics",
@@ -265,17 +596,44 @@
       "payloadSourceKind": "package",
       "payloadComponentId": "Microsoft.Extensions.Diagnostics",
       "sourceBinding": {
-        "kind": "c0-payload-attribution-catalog",
-        "reference": "package/Microsoft.Extensions.Diagnostics@10.0.11",
-        "sha256": "PENDING"
+        "kind": "exact-package-source-commit",
+        "reference": "dotnet/dotnet@e2f47b0110ed922f21a1522da67279133ce28f32/Microsoft.Extensions.Diagnostics@10.0.11",
+        "path": "files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT",
+        "hashProfile": "UTF8_NO_BOM_LF_V1",
+        "sha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+        "rawSha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+        "sourceUrls": [
+          "https://raw.githubusercontent.com/dotnet/dotnet/e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT"
+        ]
       },
       "status": {
-        "source": "PARTIAL",
-        "bundling": "PARTIAL",
-        "attribution": "PARTIAL",
-        "notice": "UNKNOWN"
+        "source": "VERIFIED",
+        "bundling": "VERIFIED",
+        "attribution": "VERIFIED",
+        "notice": "VERIFIED"
       },
-      "licenseNoticeFiles": []
+      "licenseNoticeFiles": [
+        {
+          "kind": "LICENSE",
+          "path": "files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT",
+          "hashProfile": "UTF8_NO_BOM_LF_V1",
+          "sha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+          "rawSha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+          "sourceUrls": [
+            "https://raw.githubusercontent.com/dotnet/dotnet/e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT"
+          ]
+        },
+        {
+          "kind": "NOTICE",
+          "path": "files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/THIRD-PARTY-NOTICES.txt",
+          "hashProfile": "UTF8_NO_BOM_LF_V1",
+          "sha256": "4BEF6A7E7B359869D751C9FF70274A80A0F626927AFA5A0681583C1B1861267B",
+          "rawSha256": "4BEF6A7E7B359869D751C9FF70274A80A0F626927AFA5A0681583C1B1861267B",
+          "sourceUrls": [
+            "https://raw.githubusercontent.com/dotnet/dotnet/e2f47b0110ed922f21a1522da67279133ce28f32/THIRD-PARTY-NOTICES.txt"
+          ]
+        }
+      ]
     },
     {
       "componentId": "payload-package-Microsoft.Extensions.Diagnostics.Abstractions",
@@ -284,17 +642,44 @@
       "payloadSourceKind": "package",
       "payloadComponentId": "Microsoft.Extensions.Diagnostics.Abstractions",
       "sourceBinding": {
-        "kind": "c0-payload-attribution-catalog",
-        "reference": "package/Microsoft.Extensions.Diagnostics.Abstractions@10.0.11",
-        "sha256": "PENDING"
+        "kind": "exact-package-source-commit",
+        "reference": "dotnet/dotnet@e2f47b0110ed922f21a1522da67279133ce28f32/Microsoft.Extensions.Diagnostics.Abstractions@10.0.11",
+        "path": "files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT",
+        "hashProfile": "UTF8_NO_BOM_LF_V1",
+        "sha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+        "rawSha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+        "sourceUrls": [
+          "https://raw.githubusercontent.com/dotnet/dotnet/e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT"
+        ]
       },
       "status": {
-        "source": "PARTIAL",
-        "bundling": "PARTIAL",
-        "attribution": "PARTIAL",
-        "notice": "UNKNOWN"
+        "source": "VERIFIED",
+        "bundling": "VERIFIED",
+        "attribution": "VERIFIED",
+        "notice": "VERIFIED"
       },
-      "licenseNoticeFiles": []
+      "licenseNoticeFiles": [
+        {
+          "kind": "LICENSE",
+          "path": "files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT",
+          "hashProfile": "UTF8_NO_BOM_LF_V1",
+          "sha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+          "rawSha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+          "sourceUrls": [
+            "https://raw.githubusercontent.com/dotnet/dotnet/e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT"
+          ]
+        },
+        {
+          "kind": "NOTICE",
+          "path": "files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/THIRD-PARTY-NOTICES.txt",
+          "hashProfile": "UTF8_NO_BOM_LF_V1",
+          "sha256": "4BEF6A7E7B359869D751C9FF70274A80A0F626927AFA5A0681583C1B1861267B",
+          "rawSha256": "4BEF6A7E7B359869D751C9FF70274A80A0F626927AFA5A0681583C1B1861267B",
+          "sourceUrls": [
+            "https://raw.githubusercontent.com/dotnet/dotnet/e2f47b0110ed922f21a1522da67279133ce28f32/THIRD-PARTY-NOTICES.txt"
+          ]
+        }
+      ]
     },
     {
       "componentId": "payload-package-Microsoft.Extensions.FileProviders.Abstractions",
@@ -303,17 +688,44 @@
       "payloadSourceKind": "package",
       "payloadComponentId": "Microsoft.Extensions.FileProviders.Abstractions",
       "sourceBinding": {
-        "kind": "c0-payload-attribution-catalog",
-        "reference": "package/Microsoft.Extensions.FileProviders.Abstractions@10.0.11",
-        "sha256": "PENDING"
+        "kind": "exact-package-source-commit",
+        "reference": "dotnet/dotnet@e2f47b0110ed922f21a1522da67279133ce28f32/Microsoft.Extensions.FileProviders.Abstractions@10.0.11",
+        "path": "files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT",
+        "hashProfile": "UTF8_NO_BOM_LF_V1",
+        "sha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+        "rawSha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+        "sourceUrls": [
+          "https://raw.githubusercontent.com/dotnet/dotnet/e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT"
+        ]
       },
       "status": {
-        "source": "PARTIAL",
-        "bundling": "PARTIAL",
-        "attribution": "PARTIAL",
-        "notice": "UNKNOWN"
+        "source": "VERIFIED",
+        "bundling": "VERIFIED",
+        "attribution": "VERIFIED",
+        "notice": "VERIFIED"
       },
-      "licenseNoticeFiles": []
+      "licenseNoticeFiles": [
+        {
+          "kind": "LICENSE",
+          "path": "files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT",
+          "hashProfile": "UTF8_NO_BOM_LF_V1",
+          "sha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+          "rawSha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+          "sourceUrls": [
+            "https://raw.githubusercontent.com/dotnet/dotnet/e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT"
+          ]
+        },
+        {
+          "kind": "NOTICE",
+          "path": "files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/THIRD-PARTY-NOTICES.txt",
+          "hashProfile": "UTF8_NO_BOM_LF_V1",
+          "sha256": "4BEF6A7E7B359869D751C9FF70274A80A0F626927AFA5A0681583C1B1861267B",
+          "rawSha256": "4BEF6A7E7B359869D751C9FF70274A80A0F626927AFA5A0681583C1B1861267B",
+          "sourceUrls": [
+            "https://raw.githubusercontent.com/dotnet/dotnet/e2f47b0110ed922f21a1522da67279133ce28f32/THIRD-PARTY-NOTICES.txt"
+          ]
+        }
+      ]
     },
     {
       "componentId": "payload-package-Microsoft.Extensions.FileProviders.Physical",
@@ -322,17 +734,44 @@
       "payloadSourceKind": "package",
       "payloadComponentId": "Microsoft.Extensions.FileProviders.Physical",
       "sourceBinding": {
-        "kind": "c0-payload-attribution-catalog",
-        "reference": "package/Microsoft.Extensions.FileProviders.Physical@10.0.11",
-        "sha256": "PENDING"
+        "kind": "exact-package-source-commit",
+        "reference": "dotnet/dotnet@e2f47b0110ed922f21a1522da67279133ce28f32/Microsoft.Extensions.FileProviders.Physical@10.0.11",
+        "path": "files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT",
+        "hashProfile": "UTF8_NO_BOM_LF_V1",
+        "sha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+        "rawSha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+        "sourceUrls": [
+          "https://raw.githubusercontent.com/dotnet/dotnet/e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT"
+        ]
       },
       "status": {
-        "source": "PARTIAL",
-        "bundling": "PARTIAL",
-        "attribution": "PARTIAL",
-        "notice": "UNKNOWN"
+        "source": "VERIFIED",
+        "bundling": "VERIFIED",
+        "attribution": "VERIFIED",
+        "notice": "VERIFIED"
       },
-      "licenseNoticeFiles": []
+      "licenseNoticeFiles": [
+        {
+          "kind": "LICENSE",
+          "path": "files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT",
+          "hashProfile": "UTF8_NO_BOM_LF_V1",
+          "sha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+          "rawSha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+          "sourceUrls": [
+            "https://raw.githubusercontent.com/dotnet/dotnet/e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT"
+          ]
+        },
+        {
+          "kind": "NOTICE",
+          "path": "files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/THIRD-PARTY-NOTICES.txt",
+          "hashProfile": "UTF8_NO_BOM_LF_V1",
+          "sha256": "4BEF6A7E7B359869D751C9FF70274A80A0F626927AFA5A0681583C1B1861267B",
+          "rawSha256": "4BEF6A7E7B359869D751C9FF70274A80A0F626927AFA5A0681583C1B1861267B",
+          "sourceUrls": [
+            "https://raw.githubusercontent.com/dotnet/dotnet/e2f47b0110ed922f21a1522da67279133ce28f32/THIRD-PARTY-NOTICES.txt"
+          ]
+        }
+      ]
     },
     {
       "componentId": "payload-package-Microsoft.Extensions.FileSystemGlobbing",
@@ -341,17 +780,44 @@
       "payloadSourceKind": "package",
       "payloadComponentId": "Microsoft.Extensions.FileSystemGlobbing",
       "sourceBinding": {
-        "kind": "c0-payload-attribution-catalog",
-        "reference": "package/Microsoft.Extensions.FileSystemGlobbing@10.0.11",
-        "sha256": "PENDING"
+        "kind": "exact-package-source-commit",
+        "reference": "dotnet/dotnet@e2f47b0110ed922f21a1522da67279133ce28f32/Microsoft.Extensions.FileSystemGlobbing@10.0.11",
+        "path": "files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT",
+        "hashProfile": "UTF8_NO_BOM_LF_V1",
+        "sha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+        "rawSha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+        "sourceUrls": [
+          "https://raw.githubusercontent.com/dotnet/dotnet/e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT"
+        ]
       },
       "status": {
-        "source": "PARTIAL",
-        "bundling": "PARTIAL",
-        "attribution": "PARTIAL",
-        "notice": "UNKNOWN"
+        "source": "VERIFIED",
+        "bundling": "VERIFIED",
+        "attribution": "VERIFIED",
+        "notice": "VERIFIED"
       },
-      "licenseNoticeFiles": []
+      "licenseNoticeFiles": [
+        {
+          "kind": "LICENSE",
+          "path": "files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT",
+          "hashProfile": "UTF8_NO_BOM_LF_V1",
+          "sha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+          "rawSha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+          "sourceUrls": [
+            "https://raw.githubusercontent.com/dotnet/dotnet/e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT"
+          ]
+        },
+        {
+          "kind": "NOTICE",
+          "path": "files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/THIRD-PARTY-NOTICES.txt",
+          "hashProfile": "UTF8_NO_BOM_LF_V1",
+          "sha256": "4BEF6A7E7B359869D751C9FF70274A80A0F626927AFA5A0681583C1B1861267B",
+          "rawSha256": "4BEF6A7E7B359869D751C9FF70274A80A0F626927AFA5A0681583C1B1861267B",
+          "sourceUrls": [
+            "https://raw.githubusercontent.com/dotnet/dotnet/e2f47b0110ed922f21a1522da67279133ce28f32/THIRD-PARTY-NOTICES.txt"
+          ]
+        }
+      ]
     },
     {
       "componentId": "payload-package-Microsoft.Extensions.Hosting",
@@ -360,17 +826,44 @@
       "payloadSourceKind": "package",
       "payloadComponentId": "Microsoft.Extensions.Hosting",
       "sourceBinding": {
-        "kind": "c0-payload-attribution-catalog",
-        "reference": "package/Microsoft.Extensions.Hosting@10.0.11",
-        "sha256": "PENDING"
+        "kind": "exact-package-source-commit",
+        "reference": "dotnet/dotnet@e2f47b0110ed922f21a1522da67279133ce28f32/Microsoft.Extensions.Hosting@10.0.11",
+        "path": "files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT",
+        "hashProfile": "UTF8_NO_BOM_LF_V1",
+        "sha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+        "rawSha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+        "sourceUrls": [
+          "https://raw.githubusercontent.com/dotnet/dotnet/e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT"
+        ]
       },
       "status": {
-        "source": "PARTIAL",
-        "bundling": "PARTIAL",
-        "attribution": "PARTIAL",
-        "notice": "UNKNOWN"
+        "source": "VERIFIED",
+        "bundling": "VERIFIED",
+        "attribution": "VERIFIED",
+        "notice": "VERIFIED"
       },
-      "licenseNoticeFiles": []
+      "licenseNoticeFiles": [
+        {
+          "kind": "LICENSE",
+          "path": "files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT",
+          "hashProfile": "UTF8_NO_BOM_LF_V1",
+          "sha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+          "rawSha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+          "sourceUrls": [
+            "https://raw.githubusercontent.com/dotnet/dotnet/e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT"
+          ]
+        },
+        {
+          "kind": "NOTICE",
+          "path": "files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/THIRD-PARTY-NOTICES.txt",
+          "hashProfile": "UTF8_NO_BOM_LF_V1",
+          "sha256": "4BEF6A7E7B359869D751C9FF70274A80A0F626927AFA5A0681583C1B1861267B",
+          "rawSha256": "4BEF6A7E7B359869D751C9FF70274A80A0F626927AFA5A0681583C1B1861267B",
+          "sourceUrls": [
+            "https://raw.githubusercontent.com/dotnet/dotnet/e2f47b0110ed922f21a1522da67279133ce28f32/THIRD-PARTY-NOTICES.txt"
+          ]
+        }
+      ]
     },
     {
       "componentId": "payload-package-Microsoft.Extensions.Hosting.Abstractions",
@@ -379,17 +872,44 @@
       "payloadSourceKind": "package",
       "payloadComponentId": "Microsoft.Extensions.Hosting.Abstractions",
       "sourceBinding": {
-        "kind": "c0-payload-attribution-catalog",
-        "reference": "package/Microsoft.Extensions.Hosting.Abstractions@10.0.11",
-        "sha256": "PENDING"
+        "kind": "exact-package-source-commit",
+        "reference": "dotnet/dotnet@e2f47b0110ed922f21a1522da67279133ce28f32/Microsoft.Extensions.Hosting.Abstractions@10.0.11",
+        "path": "files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT",
+        "hashProfile": "UTF8_NO_BOM_LF_V1",
+        "sha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+        "rawSha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+        "sourceUrls": [
+          "https://raw.githubusercontent.com/dotnet/dotnet/e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT"
+        ]
       },
       "status": {
-        "source": "PARTIAL",
-        "bundling": "PARTIAL",
-        "attribution": "PARTIAL",
-        "notice": "UNKNOWN"
+        "source": "VERIFIED",
+        "bundling": "VERIFIED",
+        "attribution": "VERIFIED",
+        "notice": "VERIFIED"
       },
-      "licenseNoticeFiles": []
+      "licenseNoticeFiles": [
+        {
+          "kind": "LICENSE",
+          "path": "files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT",
+          "hashProfile": "UTF8_NO_BOM_LF_V1",
+          "sha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+          "rawSha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+          "sourceUrls": [
+            "https://raw.githubusercontent.com/dotnet/dotnet/e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT"
+          ]
+        },
+        {
+          "kind": "NOTICE",
+          "path": "files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/THIRD-PARTY-NOTICES.txt",
+          "hashProfile": "UTF8_NO_BOM_LF_V1",
+          "sha256": "4BEF6A7E7B359869D751C9FF70274A80A0F626927AFA5A0681583C1B1861267B",
+          "rawSha256": "4BEF6A7E7B359869D751C9FF70274A80A0F626927AFA5A0681583C1B1861267B",
+          "sourceUrls": [
+            "https://raw.githubusercontent.com/dotnet/dotnet/e2f47b0110ed922f21a1522da67279133ce28f32/THIRD-PARTY-NOTICES.txt"
+          ]
+        }
+      ]
     },
     {
       "componentId": "payload-package-Microsoft.Extensions.Logging",
@@ -398,17 +918,44 @@
       "payloadSourceKind": "package",
       "payloadComponentId": "Microsoft.Extensions.Logging",
       "sourceBinding": {
-        "kind": "c0-payload-attribution-catalog",
-        "reference": "package/Microsoft.Extensions.Logging@10.0.11",
-        "sha256": "PENDING"
+        "kind": "exact-package-source-commit",
+        "reference": "dotnet/dotnet@e2f47b0110ed922f21a1522da67279133ce28f32/Microsoft.Extensions.Logging@10.0.11",
+        "path": "files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT",
+        "hashProfile": "UTF8_NO_BOM_LF_V1",
+        "sha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+        "rawSha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+        "sourceUrls": [
+          "https://raw.githubusercontent.com/dotnet/dotnet/e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT"
+        ]
       },
       "status": {
-        "source": "PARTIAL",
-        "bundling": "PARTIAL",
-        "attribution": "PARTIAL",
-        "notice": "UNKNOWN"
+        "source": "VERIFIED",
+        "bundling": "VERIFIED",
+        "attribution": "VERIFIED",
+        "notice": "VERIFIED"
       },
-      "licenseNoticeFiles": []
+      "licenseNoticeFiles": [
+        {
+          "kind": "LICENSE",
+          "path": "files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT",
+          "hashProfile": "UTF8_NO_BOM_LF_V1",
+          "sha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+          "rawSha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+          "sourceUrls": [
+            "https://raw.githubusercontent.com/dotnet/dotnet/e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT"
+          ]
+        },
+        {
+          "kind": "NOTICE",
+          "path": "files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/THIRD-PARTY-NOTICES.txt",
+          "hashProfile": "UTF8_NO_BOM_LF_V1",
+          "sha256": "4BEF6A7E7B359869D751C9FF70274A80A0F626927AFA5A0681583C1B1861267B",
+          "rawSha256": "4BEF6A7E7B359869D751C9FF70274A80A0F626927AFA5A0681583C1B1861267B",
+          "sourceUrls": [
+            "https://raw.githubusercontent.com/dotnet/dotnet/e2f47b0110ed922f21a1522da67279133ce28f32/THIRD-PARTY-NOTICES.txt"
+          ]
+        }
+      ]
     },
     {
       "componentId": "payload-package-Microsoft.Extensions.Logging.Abstractions",
@@ -417,17 +964,44 @@
       "payloadSourceKind": "package",
       "payloadComponentId": "Microsoft.Extensions.Logging.Abstractions",
       "sourceBinding": {
-        "kind": "c0-payload-attribution-catalog",
-        "reference": "package/Microsoft.Extensions.Logging.Abstractions@10.0.11",
-        "sha256": "PENDING"
+        "kind": "exact-package-source-commit",
+        "reference": "dotnet/dotnet@e2f47b0110ed922f21a1522da67279133ce28f32/Microsoft.Extensions.Logging.Abstractions@10.0.11",
+        "path": "files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT",
+        "hashProfile": "UTF8_NO_BOM_LF_V1",
+        "sha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+        "rawSha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+        "sourceUrls": [
+          "https://raw.githubusercontent.com/dotnet/dotnet/e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT"
+        ]
       },
       "status": {
-        "source": "PARTIAL",
-        "bundling": "PARTIAL",
-        "attribution": "PARTIAL",
-        "notice": "UNKNOWN"
+        "source": "VERIFIED",
+        "bundling": "VERIFIED",
+        "attribution": "VERIFIED",
+        "notice": "VERIFIED"
       },
-      "licenseNoticeFiles": []
+      "licenseNoticeFiles": [
+        {
+          "kind": "LICENSE",
+          "path": "files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT",
+          "hashProfile": "UTF8_NO_BOM_LF_V1",
+          "sha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+          "rawSha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+          "sourceUrls": [
+            "https://raw.githubusercontent.com/dotnet/dotnet/e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT"
+          ]
+        },
+        {
+          "kind": "NOTICE",
+          "path": "files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/THIRD-PARTY-NOTICES.txt",
+          "hashProfile": "UTF8_NO_BOM_LF_V1",
+          "sha256": "4BEF6A7E7B359869D751C9FF70274A80A0F626927AFA5A0681583C1B1861267B",
+          "rawSha256": "4BEF6A7E7B359869D751C9FF70274A80A0F626927AFA5A0681583C1B1861267B",
+          "sourceUrls": [
+            "https://raw.githubusercontent.com/dotnet/dotnet/e2f47b0110ed922f21a1522da67279133ce28f32/THIRD-PARTY-NOTICES.txt"
+          ]
+        }
+      ]
     },
     {
       "componentId": "payload-package-Microsoft.Extensions.Logging.Configuration",
@@ -436,17 +1010,44 @@
       "payloadSourceKind": "package",
       "payloadComponentId": "Microsoft.Extensions.Logging.Configuration",
       "sourceBinding": {
-        "kind": "c0-payload-attribution-catalog",
-        "reference": "package/Microsoft.Extensions.Logging.Configuration@10.0.11",
-        "sha256": "PENDING"
+        "kind": "exact-package-source-commit",
+        "reference": "dotnet/dotnet@e2f47b0110ed922f21a1522da67279133ce28f32/Microsoft.Extensions.Logging.Configuration@10.0.11",
+        "path": "files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT",
+        "hashProfile": "UTF8_NO_BOM_LF_V1",
+        "sha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+        "rawSha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+        "sourceUrls": [
+          "https://raw.githubusercontent.com/dotnet/dotnet/e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT"
+        ]
       },
       "status": {
-        "source": "PARTIAL",
-        "bundling": "PARTIAL",
-        "attribution": "PARTIAL",
-        "notice": "UNKNOWN"
+        "source": "VERIFIED",
+        "bundling": "VERIFIED",
+        "attribution": "VERIFIED",
+        "notice": "VERIFIED"
       },
-      "licenseNoticeFiles": []
+      "licenseNoticeFiles": [
+        {
+          "kind": "LICENSE",
+          "path": "files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT",
+          "hashProfile": "UTF8_NO_BOM_LF_V1",
+          "sha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+          "rawSha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+          "sourceUrls": [
+            "https://raw.githubusercontent.com/dotnet/dotnet/e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT"
+          ]
+        },
+        {
+          "kind": "NOTICE",
+          "path": "files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/THIRD-PARTY-NOTICES.txt",
+          "hashProfile": "UTF8_NO_BOM_LF_V1",
+          "sha256": "4BEF6A7E7B359869D751C9FF70274A80A0F626927AFA5A0681583C1B1861267B",
+          "rawSha256": "4BEF6A7E7B359869D751C9FF70274A80A0F626927AFA5A0681583C1B1861267B",
+          "sourceUrls": [
+            "https://raw.githubusercontent.com/dotnet/dotnet/e2f47b0110ed922f21a1522da67279133ce28f32/THIRD-PARTY-NOTICES.txt"
+          ]
+        }
+      ]
     },
     {
       "componentId": "payload-package-Microsoft.Extensions.Logging.Console",
@@ -455,17 +1056,44 @@
       "payloadSourceKind": "package",
       "payloadComponentId": "Microsoft.Extensions.Logging.Console",
       "sourceBinding": {
-        "kind": "c0-payload-attribution-catalog",
-        "reference": "package/Microsoft.Extensions.Logging.Console@10.0.11",
-        "sha256": "PENDING"
+        "kind": "exact-package-source-commit",
+        "reference": "dotnet/dotnet@e2f47b0110ed922f21a1522da67279133ce28f32/Microsoft.Extensions.Logging.Console@10.0.11",
+        "path": "files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT",
+        "hashProfile": "UTF8_NO_BOM_LF_V1",
+        "sha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+        "rawSha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+        "sourceUrls": [
+          "https://raw.githubusercontent.com/dotnet/dotnet/e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT"
+        ]
       },
       "status": {
-        "source": "PARTIAL",
-        "bundling": "PARTIAL",
-        "attribution": "PARTIAL",
-        "notice": "UNKNOWN"
+        "source": "VERIFIED",
+        "bundling": "VERIFIED",
+        "attribution": "VERIFIED",
+        "notice": "VERIFIED"
       },
-      "licenseNoticeFiles": []
+      "licenseNoticeFiles": [
+        {
+          "kind": "LICENSE",
+          "path": "files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT",
+          "hashProfile": "UTF8_NO_BOM_LF_V1",
+          "sha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+          "rawSha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+          "sourceUrls": [
+            "https://raw.githubusercontent.com/dotnet/dotnet/e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT"
+          ]
+        },
+        {
+          "kind": "NOTICE",
+          "path": "files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/THIRD-PARTY-NOTICES.txt",
+          "hashProfile": "UTF8_NO_BOM_LF_V1",
+          "sha256": "4BEF6A7E7B359869D751C9FF70274A80A0F626927AFA5A0681583C1B1861267B",
+          "rawSha256": "4BEF6A7E7B359869D751C9FF70274A80A0F626927AFA5A0681583C1B1861267B",
+          "sourceUrls": [
+            "https://raw.githubusercontent.com/dotnet/dotnet/e2f47b0110ed922f21a1522da67279133ce28f32/THIRD-PARTY-NOTICES.txt"
+          ]
+        }
+      ]
     },
     {
       "componentId": "payload-package-Microsoft.Extensions.Logging.Debug",
@@ -474,17 +1102,44 @@
       "payloadSourceKind": "package",
       "payloadComponentId": "Microsoft.Extensions.Logging.Debug",
       "sourceBinding": {
-        "kind": "c0-payload-attribution-catalog",
-        "reference": "package/Microsoft.Extensions.Logging.Debug@10.0.11",
-        "sha256": "PENDING"
+        "kind": "exact-package-source-commit",
+        "reference": "dotnet/dotnet@e2f47b0110ed922f21a1522da67279133ce28f32/Microsoft.Extensions.Logging.Debug@10.0.11",
+        "path": "files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT",
+        "hashProfile": "UTF8_NO_BOM_LF_V1",
+        "sha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+        "rawSha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+        "sourceUrls": [
+          "https://raw.githubusercontent.com/dotnet/dotnet/e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT"
+        ]
       },
       "status": {
-        "source": "PARTIAL",
-        "bundling": "PARTIAL",
-        "attribution": "PARTIAL",
-        "notice": "UNKNOWN"
+        "source": "VERIFIED",
+        "bundling": "VERIFIED",
+        "attribution": "VERIFIED",
+        "notice": "VERIFIED"
       },
-      "licenseNoticeFiles": []
+      "licenseNoticeFiles": [
+        {
+          "kind": "LICENSE",
+          "path": "files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT",
+          "hashProfile": "UTF8_NO_BOM_LF_V1",
+          "sha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+          "rawSha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+          "sourceUrls": [
+            "https://raw.githubusercontent.com/dotnet/dotnet/e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT"
+          ]
+        },
+        {
+          "kind": "NOTICE",
+          "path": "files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/THIRD-PARTY-NOTICES.txt",
+          "hashProfile": "UTF8_NO_BOM_LF_V1",
+          "sha256": "4BEF6A7E7B359869D751C9FF70274A80A0F626927AFA5A0681583C1B1861267B",
+          "rawSha256": "4BEF6A7E7B359869D751C9FF70274A80A0F626927AFA5A0681583C1B1861267B",
+          "sourceUrls": [
+            "https://raw.githubusercontent.com/dotnet/dotnet/e2f47b0110ed922f21a1522da67279133ce28f32/THIRD-PARTY-NOTICES.txt"
+          ]
+        }
+      ]
     },
     {
       "componentId": "payload-package-Microsoft.Extensions.Logging.EventLog",
@@ -493,17 +1148,44 @@
       "payloadSourceKind": "package",
       "payloadComponentId": "Microsoft.Extensions.Logging.EventLog",
       "sourceBinding": {
-        "kind": "c0-payload-attribution-catalog",
-        "reference": "package/Microsoft.Extensions.Logging.EventLog@10.0.11",
-        "sha256": "PENDING"
+        "kind": "exact-package-source-commit",
+        "reference": "dotnet/dotnet@e2f47b0110ed922f21a1522da67279133ce28f32/Microsoft.Extensions.Logging.EventLog@10.0.11",
+        "path": "files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT",
+        "hashProfile": "UTF8_NO_BOM_LF_V1",
+        "sha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+        "rawSha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+        "sourceUrls": [
+          "https://raw.githubusercontent.com/dotnet/dotnet/e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT"
+        ]
       },
       "status": {
-        "source": "PARTIAL",
-        "bundling": "PARTIAL",
-        "attribution": "PARTIAL",
-        "notice": "UNKNOWN"
+        "source": "VERIFIED",
+        "bundling": "VERIFIED",
+        "attribution": "VERIFIED",
+        "notice": "VERIFIED"
       },
-      "licenseNoticeFiles": []
+      "licenseNoticeFiles": [
+        {
+          "kind": "LICENSE",
+          "path": "files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT",
+          "hashProfile": "UTF8_NO_BOM_LF_V1",
+          "sha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+          "rawSha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+          "sourceUrls": [
+            "https://raw.githubusercontent.com/dotnet/dotnet/e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT"
+          ]
+        },
+        {
+          "kind": "NOTICE",
+          "path": "files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/THIRD-PARTY-NOTICES.txt",
+          "hashProfile": "UTF8_NO_BOM_LF_V1",
+          "sha256": "4BEF6A7E7B359869D751C9FF70274A80A0F626927AFA5A0681583C1B1861267B",
+          "rawSha256": "4BEF6A7E7B359869D751C9FF70274A80A0F626927AFA5A0681583C1B1861267B",
+          "sourceUrls": [
+            "https://raw.githubusercontent.com/dotnet/dotnet/e2f47b0110ed922f21a1522da67279133ce28f32/THIRD-PARTY-NOTICES.txt"
+          ]
+        }
+      ]
     },
     {
       "componentId": "payload-package-Microsoft.Extensions.Logging.EventSource",
@@ -512,17 +1194,44 @@
       "payloadSourceKind": "package",
       "payloadComponentId": "Microsoft.Extensions.Logging.EventSource",
       "sourceBinding": {
-        "kind": "c0-payload-attribution-catalog",
-        "reference": "package/Microsoft.Extensions.Logging.EventSource@10.0.11",
-        "sha256": "PENDING"
+        "kind": "exact-package-source-commit",
+        "reference": "dotnet/dotnet@e2f47b0110ed922f21a1522da67279133ce28f32/Microsoft.Extensions.Logging.EventSource@10.0.11",
+        "path": "files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT",
+        "hashProfile": "UTF8_NO_BOM_LF_V1",
+        "sha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+        "rawSha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+        "sourceUrls": [
+          "https://raw.githubusercontent.com/dotnet/dotnet/e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT"
+        ]
       },
       "status": {
-        "source": "PARTIAL",
-        "bundling": "PARTIAL",
-        "attribution": "PARTIAL",
-        "notice": "UNKNOWN"
+        "source": "VERIFIED",
+        "bundling": "VERIFIED",
+        "attribution": "VERIFIED",
+        "notice": "VERIFIED"
       },
-      "licenseNoticeFiles": []
+      "licenseNoticeFiles": [
+        {
+          "kind": "LICENSE",
+          "path": "files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT",
+          "hashProfile": "UTF8_NO_BOM_LF_V1",
+          "sha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+          "rawSha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+          "sourceUrls": [
+            "https://raw.githubusercontent.com/dotnet/dotnet/e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT"
+          ]
+        },
+        {
+          "kind": "NOTICE",
+          "path": "files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/THIRD-PARTY-NOTICES.txt",
+          "hashProfile": "UTF8_NO_BOM_LF_V1",
+          "sha256": "4BEF6A7E7B359869D751C9FF70274A80A0F626927AFA5A0681583C1B1861267B",
+          "rawSha256": "4BEF6A7E7B359869D751C9FF70274A80A0F626927AFA5A0681583C1B1861267B",
+          "sourceUrls": [
+            "https://raw.githubusercontent.com/dotnet/dotnet/e2f47b0110ed922f21a1522da67279133ce28f32/THIRD-PARTY-NOTICES.txt"
+          ]
+        }
+      ]
     },
     {
       "componentId": "payload-package-Microsoft.Extensions.Options",
@@ -531,17 +1240,44 @@
       "payloadSourceKind": "package",
       "payloadComponentId": "Microsoft.Extensions.Options",
       "sourceBinding": {
-        "kind": "c0-payload-attribution-catalog",
-        "reference": "package/Microsoft.Extensions.Options@10.0.11",
-        "sha256": "PENDING"
+        "kind": "exact-package-source-commit",
+        "reference": "dotnet/dotnet@e2f47b0110ed922f21a1522da67279133ce28f32/Microsoft.Extensions.Options@10.0.11",
+        "path": "files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT",
+        "hashProfile": "UTF8_NO_BOM_LF_V1",
+        "sha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+        "rawSha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+        "sourceUrls": [
+          "https://raw.githubusercontent.com/dotnet/dotnet/e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT"
+        ]
       },
       "status": {
-        "source": "PARTIAL",
-        "bundling": "PARTIAL",
-        "attribution": "PARTIAL",
-        "notice": "UNKNOWN"
+        "source": "VERIFIED",
+        "bundling": "VERIFIED",
+        "attribution": "VERIFIED",
+        "notice": "VERIFIED"
       },
-      "licenseNoticeFiles": []
+      "licenseNoticeFiles": [
+        {
+          "kind": "LICENSE",
+          "path": "files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT",
+          "hashProfile": "UTF8_NO_BOM_LF_V1",
+          "sha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+          "rawSha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+          "sourceUrls": [
+            "https://raw.githubusercontent.com/dotnet/dotnet/e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT"
+          ]
+        },
+        {
+          "kind": "NOTICE",
+          "path": "files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/THIRD-PARTY-NOTICES.txt",
+          "hashProfile": "UTF8_NO_BOM_LF_V1",
+          "sha256": "4BEF6A7E7B359869D751C9FF70274A80A0F626927AFA5A0681583C1B1861267B",
+          "rawSha256": "4BEF6A7E7B359869D751C9FF70274A80A0F626927AFA5A0681583C1B1861267B",
+          "sourceUrls": [
+            "https://raw.githubusercontent.com/dotnet/dotnet/e2f47b0110ed922f21a1522da67279133ce28f32/THIRD-PARTY-NOTICES.txt"
+          ]
+        }
+      ]
     },
     {
       "componentId": "payload-package-Microsoft.Extensions.Options.ConfigurationExtensions",
@@ -550,17 +1286,44 @@
       "payloadSourceKind": "package",
       "payloadComponentId": "Microsoft.Extensions.Options.ConfigurationExtensions",
       "sourceBinding": {
-        "kind": "c0-payload-attribution-catalog",
-        "reference": "package/Microsoft.Extensions.Options.ConfigurationExtensions@10.0.11",
-        "sha256": "PENDING"
+        "kind": "exact-package-source-commit",
+        "reference": "dotnet/dotnet@e2f47b0110ed922f21a1522da67279133ce28f32/Microsoft.Extensions.Options.ConfigurationExtensions@10.0.11",
+        "path": "files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT",
+        "hashProfile": "UTF8_NO_BOM_LF_V1",
+        "sha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+        "rawSha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+        "sourceUrls": [
+          "https://raw.githubusercontent.com/dotnet/dotnet/e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT"
+        ]
       },
       "status": {
-        "source": "PARTIAL",
-        "bundling": "PARTIAL",
-        "attribution": "PARTIAL",
-        "notice": "UNKNOWN"
+        "source": "VERIFIED",
+        "bundling": "VERIFIED",
+        "attribution": "VERIFIED",
+        "notice": "VERIFIED"
       },
-      "licenseNoticeFiles": []
+      "licenseNoticeFiles": [
+        {
+          "kind": "LICENSE",
+          "path": "files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT",
+          "hashProfile": "UTF8_NO_BOM_LF_V1",
+          "sha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+          "rawSha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+          "sourceUrls": [
+            "https://raw.githubusercontent.com/dotnet/dotnet/e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT"
+          ]
+        },
+        {
+          "kind": "NOTICE",
+          "path": "files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/THIRD-PARTY-NOTICES.txt",
+          "hashProfile": "UTF8_NO_BOM_LF_V1",
+          "sha256": "4BEF6A7E7B359869D751C9FF70274A80A0F626927AFA5A0681583C1B1861267B",
+          "rawSha256": "4BEF6A7E7B359869D751C9FF70274A80A0F626927AFA5A0681583C1B1861267B",
+          "sourceUrls": [
+            "https://raw.githubusercontent.com/dotnet/dotnet/e2f47b0110ed922f21a1522da67279133ce28f32/THIRD-PARTY-NOTICES.txt"
+          ]
+        }
+      ]
     },
     {
       "componentId": "payload-package-Microsoft.Extensions.Primitives",
@@ -569,17 +1332,44 @@
       "payloadSourceKind": "package",
       "payloadComponentId": "Microsoft.Extensions.Primitives",
       "sourceBinding": {
-        "kind": "c0-payload-attribution-catalog",
-        "reference": "package/Microsoft.Extensions.Primitives@10.0.11",
-        "sha256": "PENDING"
+        "kind": "exact-package-source-commit",
+        "reference": "dotnet/dotnet@e2f47b0110ed922f21a1522da67279133ce28f32/Microsoft.Extensions.Primitives@10.0.11",
+        "path": "files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT",
+        "hashProfile": "UTF8_NO_BOM_LF_V1",
+        "sha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+        "rawSha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+        "sourceUrls": [
+          "https://raw.githubusercontent.com/dotnet/dotnet/e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT"
+        ]
       },
       "status": {
-        "source": "PARTIAL",
-        "bundling": "PARTIAL",
-        "attribution": "PARTIAL",
-        "notice": "UNKNOWN"
+        "source": "VERIFIED",
+        "bundling": "VERIFIED",
+        "attribution": "VERIFIED",
+        "notice": "VERIFIED"
       },
-      "licenseNoticeFiles": []
+      "licenseNoticeFiles": [
+        {
+          "kind": "LICENSE",
+          "path": "files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT",
+          "hashProfile": "UTF8_NO_BOM_LF_V1",
+          "sha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+          "rawSha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+          "sourceUrls": [
+            "https://raw.githubusercontent.com/dotnet/dotnet/e2f47b0110ed922f21a1522da67279133ce28f32/LICENSE.TXT"
+          ]
+        },
+        {
+          "kind": "NOTICE",
+          "path": "files/dotnet-products-e2f47b0110ed922f21a1522da67279133ce28f32/THIRD-PARTY-NOTICES.txt",
+          "hashProfile": "UTF8_NO_BOM_LF_V1",
+          "sha256": "4BEF6A7E7B359869D751C9FF70274A80A0F626927AFA5A0681583C1B1861267B",
+          "rawSha256": "4BEF6A7E7B359869D751C9FF70274A80A0F626927AFA5A0681583C1B1861267B",
+          "sourceUrls": [
+            "https://raw.githubusercontent.com/dotnet/dotnet/e2f47b0110ed922f21a1522da67279133ce28f32/THIRD-PARTY-NOTICES.txt"
+          ]
+        }
+      ]
     },
     {
       "componentId": "payload-package-Microsoft.NETCore.App.Runtime.win-x64",
@@ -588,17 +1378,54 @@
       "payloadSourceKind": "package",
       "payloadComponentId": "Microsoft.NETCore.App.Runtime.win-x64",
       "sourceBinding": {
-        "kind": "c0-payload-attribution-catalog",
-        "reference": "package/Microsoft.NETCore.App.Runtime.win-x64@10.0.11",
-        "sha256": "PENDING"
+        "kind": "exact-runtime-tag",
+        "reference": "dotnet/runtime@v10.0.11",
+        "path": "files/dotnet-runtime-10.0.11/LICENSE.TXT",
+        "hashProfile": "UTF8_NO_BOM_LF_V1",
+        "sha256": "CFC21F5E8BD655AE997EEC916138B707B1D290B83272C02A95C9F821B8C87310",
+        "rawSha256": "CFC21F5E8BD655AE997EEC916138B707B1D290B83272C02A95C9F821B8C87310",
+        "sourceUrls": [
+          "https://raw.githubusercontent.com/dotnet/runtime/v10.0.11/LICENSE.TXT"
+        ]
       },
       "status": {
-        "source": "PARTIAL",
-        "bundling": "PARTIAL",
-        "attribution": "PARTIAL",
-        "notice": "UNKNOWN"
+        "source": "VERIFIED",
+        "bundling": "VERIFIED",
+        "attribution": "VERIFIED",
+        "notice": "VERIFIED"
       },
-      "licenseNoticeFiles": []
+      "licenseNoticeFiles": [
+        {
+          "kind": "LICENSE",
+          "path": "files/dotnet-runtime-10.0.11/LICENSE.TXT",
+          "hashProfile": "UTF8_NO_BOM_LF_V1",
+          "sha256": "CFC21F5E8BD655AE997EEC916138B707B1D290B83272C02A95C9F821B8C87310",
+          "rawSha256": "CFC21F5E8BD655AE997EEC916138B707B1D290B83272C02A95C9F821B8C87310",
+          "sourceUrls": [
+            "https://raw.githubusercontent.com/dotnet/runtime/v10.0.11/LICENSE.TXT"
+          ]
+        },
+        {
+          "kind": "NOTICE",
+          "path": "files/dotnet-runtime-10.0.11/THIRD-PARTY-NOTICES.TXT",
+          "hashProfile": "UTF8_NO_BOM_LF_V1",
+          "sha256": "66F1D4E44973185519BB4AA8A9718EB22FC7AF2CC532E3AE9CFC4C127EE7FC54",
+          "rawSha256": "66F1D4E44973185519BB4AA8A9718EB22FC7AF2CC532E3AE9CFC4C127EE7FC54",
+          "sourceUrls": [
+            "https://raw.githubusercontent.com/dotnet/runtime/v10.0.11/THIRD-PARTY-NOTICES.TXT"
+          ]
+        },
+        {
+          "kind": "TERMS_REFERENCE",
+          "path": "files/dotnet-runtime-10.0.11/TERMS-REFERENCE.txt",
+          "hashProfile": "UTF8_NO_BOM_LF_V1",
+          "sha256": "D352647BBEF02065B94426878900DF7218AABAC14D46FBE113167ED764FC73C8",
+          "rawSha256": "D352647BBEF02065B94426878900DF7218AABAC14D46FBE113167ED764FC73C8",
+          "sourceUrls": [
+            "https://dotnet.microsoft.com/en-us/dotnet_library_license.htm"
+          ]
+        }
+      ]
     },
     {
       "componentId": "payload-package-Microsoft.Windows.SDK.NET.Ref",
@@ -607,17 +1434,36 @@
       "payloadSourceKind": "package",
       "payloadComponentId": "Microsoft.Windows.SDK.NET.Ref",
       "sourceBinding": {
-        "kind": "c0-payload-attribution-catalog",
-        "reference": "package/Microsoft.Windows.SDK.NET.Ref@10.0.19041.57",
-        "sha256": "PENDING"
+        "kind": "exact-package-redist-terms-reference",
+        "reference": "Microsoft.Windows.SDK.NET.Ref@10.0.19041.57/Microsoft.Windows.SDK.NET.dll",
+        "path": "files/microsoft-windows-sdk-net-ref-10.0.19041.57/TERMS-REFERENCE.txt",
+        "hashProfile": "UTF8_NO_BOM_LF_V1",
+        "sha256": "1B34291F1503647B0B9B8332805481A51E5C838A3088E2EAB611DD086B7E9C8C",
+        "rawSha256": "1B34291F1503647B0B9B8332805481A51E5C838A3088E2EAB611DD086B7E9C8C",
+        "sourceUrls": [
+          "https://learn.microsoft.com/en-us/legal/windows-sdk/redist",
+          "https://www.nuget.org/packages/Microsoft.Windows.SDK.NET.Ref/10.0.19041.57"
+        ]
       },
       "status": {
-        "source": "PARTIAL",
-        "bundling": "PARTIAL",
-        "attribution": "PARTIAL",
-        "notice": "UNKNOWN"
+        "source": "VERIFIED",
+        "bundling": "VERIFIED",
+        "attribution": "VERIFIED",
+        "notice": "VERIFIED"
       },
-      "licenseNoticeFiles": []
+      "licenseNoticeFiles": [
+        {
+          "kind": "TERMS_REFERENCE",
+          "path": "files/microsoft-windows-sdk-net-ref-10.0.19041.57/TERMS-REFERENCE.txt",
+          "hashProfile": "UTF8_NO_BOM_LF_V1",
+          "sha256": "1B34291F1503647B0B9B8332805481A51E5C838A3088E2EAB611DD086B7E9C8C",
+          "rawSha256": "1B34291F1503647B0B9B8332805481A51E5C838A3088E2EAB611DD086B7E9C8C",
+          "sourceUrls": [
+            "https://learn.microsoft.com/en-us/legal/windows-sdk/redist",
+            "https://www.nuget.org/packages/Microsoft.Windows.SDK.NET.Ref/10.0.19041.57"
+          ]
+        }
+      ]
     },
     {
       "componentId": "payload-package-Microsoft.WindowsDesktop.App.Runtime.win-x64",
@@ -626,17 +1472,64 @@
       "payloadSourceKind": "package",
       "payloadComponentId": "Microsoft.WindowsDesktop.App.Runtime.win-x64",
       "sourceBinding": {
-        "kind": "c0-payload-attribution-catalog",
-        "reference": "package/Microsoft.WindowsDesktop.App.Runtime.win-x64@10.0.11",
-        "sha256": "PENDING"
+        "kind": "exact-runtime-tag",
+        "reference": "dotnet/windowsdesktop@v10.0.11+wpf/winforms@v10.0.11",
+        "path": "files/windowsdesktop-runtime-10.0.11/LICENSE",
+        "hashProfile": "UTF8_NO_BOM_LF_V1",
+        "sha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+        "rawSha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+        "sourceUrls": [
+          "https://raw.githubusercontent.com/dotnet/windowsdesktop/v10.0.11/LICENSE"
+        ]
       },
       "status": {
-        "source": "PARTIAL",
-        "bundling": "PARTIAL",
-        "attribution": "PARTIAL",
-        "notice": "UNKNOWN"
+        "source": "VERIFIED",
+        "bundling": "VERIFIED",
+        "attribution": "VERIFIED",
+        "notice": "VERIFIED"
       },
-      "licenseNoticeFiles": []
+      "licenseNoticeFiles": [
+        {
+          "kind": "LICENSE",
+          "path": "files/windowsdesktop-runtime-10.0.11/LICENSE",
+          "hashProfile": "UTF8_NO_BOM_LF_V1",
+          "sha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+          "rawSha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+          "sourceUrls": [
+            "https://raw.githubusercontent.com/dotnet/windowsdesktop/v10.0.11/LICENSE"
+          ]
+        },
+        {
+          "kind": "NOTICE",
+          "path": "files/windowsdesktop-runtime-10.0.11/WPF-THIRD-PARTY-NOTICES.TXT",
+          "hashProfile": "UTF8_NO_BOM_LF_V1",
+          "sha256": "D23DBA2FEE20C6B59D8F7088EE9ED372459C952A319B7CA90F3EEC370CC76EB9",
+          "rawSha256": "D23DBA2FEE20C6B59D8F7088EE9ED372459C952A319B7CA90F3EEC370CC76EB9",
+          "sourceUrls": [
+            "https://raw.githubusercontent.com/dotnet/wpf/v10.0.11/THIRD-PARTY-NOTICES.TXT"
+          ]
+        },
+        {
+          "kind": "NOTICE",
+          "path": "files/windowsdesktop-runtime-10.0.11/WINFORMS-THIRD-PARTY-NOTICES.TXT",
+          "hashProfile": "UTF8_NO_BOM_LF_V1",
+          "sha256": "5A412B38EFAE0B162DC0893B319023F4CD14A8985A0F9F9AE01AC052B37A36EB",
+          "rawSha256": "5A412B38EFAE0B162DC0893B319023F4CD14A8985A0F9F9AE01AC052B37A36EB",
+          "sourceUrls": [
+            "https://raw.githubusercontent.com/dotnet/winforms/v10.0.11/THIRD-PARTY-NOTICES.TXT"
+          ]
+        },
+        {
+          "kind": "TERMS_REFERENCE",
+          "path": "files/dotnet-runtime-10.0.11/TERMS-REFERENCE.txt",
+          "hashProfile": "UTF8_NO_BOM_LF_V1",
+          "sha256": "D352647BBEF02065B94426878900DF7218AABAC14D46FBE113167ED764FC73C8",
+          "rawSha256": "D352647BBEF02065B94426878900DF7218AABAC14D46FBE113167ED764FC73C8",
+          "sourceUrls": [
+            "https://dotnet.microsoft.com/en-us/dotnet_library_license.htm"
+          ]
+        }
+      ]
     },
     {
       "componentId": "payload-package-NAudio",
@@ -645,17 +1538,34 @@
       "payloadSourceKind": "package",
       "payloadComponentId": "NAudio",
       "sourceBinding": {
-        "kind": "c0-payload-attribution-catalog",
-        "reference": "package/NAudio@2.2.1",
-        "sha256": "PENDING"
+        "kind": "exact-upstream-tag",
+        "reference": "naudio/NAudio@v2.2.1/NAudio",
+        "path": "files/naudio-2.2.1/LICENSE.txt",
+        "hashProfile": "UTF8_NO_BOM_LF_V1",
+        "sha256": "7C57209555296E73FAA34FE38740AA4A86AA8250D969AB73A6E37DE57C36C0A5",
+        "rawSha256": "303E01786B271EB464B3F43D18A375F2F17D37BC708A37C2FDF45B289FB5BFAA",
+        "sourceUrls": [
+          "https://raw.githubusercontent.com/naudio/NAudio/v2.2.1/license.txt"
+        ]
       },
       "status": {
-        "source": "PARTIAL",
-        "bundling": "PARTIAL",
-        "attribution": "PARTIAL",
-        "notice": "UNKNOWN"
+        "source": "VERIFIED",
+        "bundling": "VERIFIED",
+        "attribution": "VERIFIED",
+        "notice": "VERIFIED"
       },
-      "licenseNoticeFiles": []
+      "licenseNoticeFiles": [
+        {
+          "kind": "LICENSE",
+          "path": "files/naudio-2.2.1/LICENSE.txt",
+          "hashProfile": "UTF8_NO_BOM_LF_V1",
+          "sha256": "7C57209555296E73FAA34FE38740AA4A86AA8250D969AB73A6E37DE57C36C0A5",
+          "rawSha256": "303E01786B271EB464B3F43D18A375F2F17D37BC708A37C2FDF45B289FB5BFAA",
+          "sourceUrls": [
+            "https://raw.githubusercontent.com/naudio/NAudio/v2.2.1/license.txt"
+          ]
+        }
+      ]
     },
     {
       "componentId": "payload-package-NAudio.Asio",
@@ -664,17 +1574,34 @@
       "payloadSourceKind": "package",
       "payloadComponentId": "NAudio.Asio",
       "sourceBinding": {
-        "kind": "c0-payload-attribution-catalog",
-        "reference": "package/NAudio.Asio@2.2.1",
-        "sha256": "PENDING"
+        "kind": "exact-upstream-tag",
+        "reference": "naudio/NAudio@v2.2.1/NAudio.Asio",
+        "path": "files/naudio-2.2.1/LICENSE.txt",
+        "hashProfile": "UTF8_NO_BOM_LF_V1",
+        "sha256": "7C57209555296E73FAA34FE38740AA4A86AA8250D969AB73A6E37DE57C36C0A5",
+        "rawSha256": "303E01786B271EB464B3F43D18A375F2F17D37BC708A37C2FDF45B289FB5BFAA",
+        "sourceUrls": [
+          "https://raw.githubusercontent.com/naudio/NAudio/v2.2.1/license.txt"
+        ]
       },
       "status": {
-        "source": "PARTIAL",
-        "bundling": "PARTIAL",
-        "attribution": "PARTIAL",
-        "notice": "UNKNOWN"
+        "source": "VERIFIED",
+        "bundling": "VERIFIED",
+        "attribution": "VERIFIED",
+        "notice": "VERIFIED"
       },
-      "licenseNoticeFiles": []
+      "licenseNoticeFiles": [
+        {
+          "kind": "LICENSE",
+          "path": "files/naudio-2.2.1/LICENSE.txt",
+          "hashProfile": "UTF8_NO_BOM_LF_V1",
+          "sha256": "7C57209555296E73FAA34FE38740AA4A86AA8250D969AB73A6E37DE57C36C0A5",
+          "rawSha256": "303E01786B271EB464B3F43D18A375F2F17D37BC708A37C2FDF45B289FB5BFAA",
+          "sourceUrls": [
+            "https://raw.githubusercontent.com/naudio/NAudio/v2.2.1/license.txt"
+          ]
+        }
+      ]
     },
     {
       "componentId": "payload-package-NAudio.Core",
@@ -683,17 +1610,34 @@
       "payloadSourceKind": "package",
       "payloadComponentId": "NAudio.Core",
       "sourceBinding": {
-        "kind": "c0-payload-attribution-catalog",
-        "reference": "package/NAudio.Core@2.2.1",
-        "sha256": "PENDING"
+        "kind": "exact-upstream-tag",
+        "reference": "naudio/NAudio@v2.2.1/NAudio.Core",
+        "path": "files/naudio-2.2.1/LICENSE.txt",
+        "hashProfile": "UTF8_NO_BOM_LF_V1",
+        "sha256": "7C57209555296E73FAA34FE38740AA4A86AA8250D969AB73A6E37DE57C36C0A5",
+        "rawSha256": "303E01786B271EB464B3F43D18A375F2F17D37BC708A37C2FDF45B289FB5BFAA",
+        "sourceUrls": [
+          "https://raw.githubusercontent.com/naudio/NAudio/v2.2.1/license.txt"
+        ]
       },
       "status": {
-        "source": "PARTIAL",
-        "bundling": "PARTIAL",
-        "attribution": "PARTIAL",
-        "notice": "UNKNOWN"
+        "source": "VERIFIED",
+        "bundling": "VERIFIED",
+        "attribution": "VERIFIED",
+        "notice": "VERIFIED"
       },
-      "licenseNoticeFiles": []
+      "licenseNoticeFiles": [
+        {
+          "kind": "LICENSE",
+          "path": "files/naudio-2.2.1/LICENSE.txt",
+          "hashProfile": "UTF8_NO_BOM_LF_V1",
+          "sha256": "7C57209555296E73FAA34FE38740AA4A86AA8250D969AB73A6E37DE57C36C0A5",
+          "rawSha256": "303E01786B271EB464B3F43D18A375F2F17D37BC708A37C2FDF45B289FB5BFAA",
+          "sourceUrls": [
+            "https://raw.githubusercontent.com/naudio/NAudio/v2.2.1/license.txt"
+          ]
+        }
+      ]
     },
     {
       "componentId": "payload-package-NAudio.Midi",
@@ -702,17 +1646,34 @@
       "payloadSourceKind": "package",
       "payloadComponentId": "NAudio.Midi",
       "sourceBinding": {
-        "kind": "c0-payload-attribution-catalog",
-        "reference": "package/NAudio.Midi@2.2.1",
-        "sha256": "PENDING"
+        "kind": "exact-upstream-tag",
+        "reference": "naudio/NAudio@v2.2.1/NAudio.Midi",
+        "path": "files/naudio-2.2.1/LICENSE.txt",
+        "hashProfile": "UTF8_NO_BOM_LF_V1",
+        "sha256": "7C57209555296E73FAA34FE38740AA4A86AA8250D969AB73A6E37DE57C36C0A5",
+        "rawSha256": "303E01786B271EB464B3F43D18A375F2F17D37BC708A37C2FDF45B289FB5BFAA",
+        "sourceUrls": [
+          "https://raw.githubusercontent.com/naudio/NAudio/v2.2.1/license.txt"
+        ]
       },
       "status": {
-        "source": "PARTIAL",
-        "bundling": "PARTIAL",
-        "attribution": "PARTIAL",
-        "notice": "UNKNOWN"
+        "source": "VERIFIED",
+        "bundling": "VERIFIED",
+        "attribution": "VERIFIED",
+        "notice": "VERIFIED"
       },
-      "licenseNoticeFiles": []
+      "licenseNoticeFiles": [
+        {
+          "kind": "LICENSE",
+          "path": "files/naudio-2.2.1/LICENSE.txt",
+          "hashProfile": "UTF8_NO_BOM_LF_V1",
+          "sha256": "7C57209555296E73FAA34FE38740AA4A86AA8250D969AB73A6E37DE57C36C0A5",
+          "rawSha256": "303E01786B271EB464B3F43D18A375F2F17D37BC708A37C2FDF45B289FB5BFAA",
+          "sourceUrls": [
+            "https://raw.githubusercontent.com/naudio/NAudio/v2.2.1/license.txt"
+          ]
+        }
+      ]
     },
     {
       "componentId": "payload-package-NAudio.Wasapi",
@@ -721,17 +1682,34 @@
       "payloadSourceKind": "package",
       "payloadComponentId": "NAudio.Wasapi",
       "sourceBinding": {
-        "kind": "c0-payload-attribution-catalog",
-        "reference": "package/NAudio.Wasapi@2.2.1",
-        "sha256": "PENDING"
+        "kind": "exact-upstream-tag",
+        "reference": "naudio/NAudio@v2.2.1/NAudio.Wasapi",
+        "path": "files/naudio-2.2.1/LICENSE.txt",
+        "hashProfile": "UTF8_NO_BOM_LF_V1",
+        "sha256": "7C57209555296E73FAA34FE38740AA4A86AA8250D969AB73A6E37DE57C36C0A5",
+        "rawSha256": "303E01786B271EB464B3F43D18A375F2F17D37BC708A37C2FDF45B289FB5BFAA",
+        "sourceUrls": [
+          "https://raw.githubusercontent.com/naudio/NAudio/v2.2.1/license.txt"
+        ]
       },
       "status": {
-        "source": "PARTIAL",
-        "bundling": "PARTIAL",
-        "attribution": "PARTIAL",
-        "notice": "UNKNOWN"
+        "source": "VERIFIED",
+        "bundling": "VERIFIED",
+        "attribution": "VERIFIED",
+        "notice": "VERIFIED"
       },
-      "licenseNoticeFiles": []
+      "licenseNoticeFiles": [
+        {
+          "kind": "LICENSE",
+          "path": "files/naudio-2.2.1/LICENSE.txt",
+          "hashProfile": "UTF8_NO_BOM_LF_V1",
+          "sha256": "7C57209555296E73FAA34FE38740AA4A86AA8250D969AB73A6E37DE57C36C0A5",
+          "rawSha256": "303E01786B271EB464B3F43D18A375F2F17D37BC708A37C2FDF45B289FB5BFAA",
+          "sourceUrls": [
+            "https://raw.githubusercontent.com/naudio/NAudio/v2.2.1/license.txt"
+          ]
+        }
+      ]
     },
     {
       "componentId": "payload-package-NAudio.WinForms",
@@ -740,17 +1718,34 @@
       "payloadSourceKind": "package",
       "payloadComponentId": "NAudio.WinForms",
       "sourceBinding": {
-        "kind": "c0-payload-attribution-catalog",
-        "reference": "package/NAudio.WinForms@2.2.1",
-        "sha256": "PENDING"
+        "kind": "exact-upstream-tag",
+        "reference": "naudio/NAudio@v2.2.1/NAudio.WinForms",
+        "path": "files/naudio-2.2.1/LICENSE.txt",
+        "hashProfile": "UTF8_NO_BOM_LF_V1",
+        "sha256": "7C57209555296E73FAA34FE38740AA4A86AA8250D969AB73A6E37DE57C36C0A5",
+        "rawSha256": "303E01786B271EB464B3F43D18A375F2F17D37BC708A37C2FDF45B289FB5BFAA",
+        "sourceUrls": [
+          "https://raw.githubusercontent.com/naudio/NAudio/v2.2.1/license.txt"
+        ]
       },
       "status": {
-        "source": "PARTIAL",
-        "bundling": "PARTIAL",
-        "attribution": "PARTIAL",
-        "notice": "UNKNOWN"
+        "source": "VERIFIED",
+        "bundling": "VERIFIED",
+        "attribution": "VERIFIED",
+        "notice": "VERIFIED"
       },
-      "licenseNoticeFiles": []
+      "licenseNoticeFiles": [
+        {
+          "kind": "LICENSE",
+          "path": "files/naudio-2.2.1/LICENSE.txt",
+          "hashProfile": "UTF8_NO_BOM_LF_V1",
+          "sha256": "7C57209555296E73FAA34FE38740AA4A86AA8250D969AB73A6E37DE57C36C0A5",
+          "rawSha256": "303E01786B271EB464B3F43D18A375F2F17D37BC708A37C2FDF45B289FB5BFAA",
+          "sourceUrls": [
+            "https://raw.githubusercontent.com/naudio/NAudio/v2.2.1/license.txt"
+          ]
+        }
+      ]
     },
     {
       "componentId": "payload-package-NAudio.WinMM",
@@ -759,17 +1754,34 @@
       "payloadSourceKind": "package",
       "payloadComponentId": "NAudio.WinMM",
       "sourceBinding": {
-        "kind": "c0-payload-attribution-catalog",
-        "reference": "package/NAudio.WinMM@2.2.1",
-        "sha256": "PENDING"
+        "kind": "exact-upstream-tag",
+        "reference": "naudio/NAudio@v2.2.1/NAudio.WinMM",
+        "path": "files/naudio-2.2.1/LICENSE.txt",
+        "hashProfile": "UTF8_NO_BOM_LF_V1",
+        "sha256": "7C57209555296E73FAA34FE38740AA4A86AA8250D969AB73A6E37DE57C36C0A5",
+        "rawSha256": "303E01786B271EB464B3F43D18A375F2F17D37BC708A37C2FDF45B289FB5BFAA",
+        "sourceUrls": [
+          "https://raw.githubusercontent.com/naudio/NAudio/v2.2.1/license.txt"
+        ]
       },
       "status": {
-        "source": "PARTIAL",
-        "bundling": "PARTIAL",
-        "attribution": "PARTIAL",
-        "notice": "UNKNOWN"
+        "source": "VERIFIED",
+        "bundling": "VERIFIED",
+        "attribution": "VERIFIED",
+        "notice": "VERIFIED"
       },
-      "licenseNoticeFiles": []
+      "licenseNoticeFiles": [
+        {
+          "kind": "LICENSE",
+          "path": "files/naudio-2.2.1/LICENSE.txt",
+          "hashProfile": "UTF8_NO_BOM_LF_V1",
+          "sha256": "7C57209555296E73FAA34FE38740AA4A86AA8250D969AB73A6E37DE57C36C0A5",
+          "rawSha256": "303E01786B271EB464B3F43D18A375F2F17D37BC708A37C2FDF45B289FB5BFAA",
+          "sourceUrls": [
+            "https://raw.githubusercontent.com/naudio/NAudio/v2.2.1/license.txt"
+          ]
+        }
+      ]
     },
     {
       "componentId": "payload-package-SQLitePCLRaw.bundle_e_sqlite3",
@@ -778,17 +1790,54 @@
       "payloadSourceKind": "package",
       "payloadComponentId": "SQLitePCLRaw.bundle_e_sqlite3",
       "sourceBinding": {
-        "kind": "c0-payload-attribution-catalog",
-        "reference": "package/SQLitePCLRaw.bundle_e_sqlite3@2.1.12",
-        "sha256": "PENDING"
+        "kind": "exact-upstream-tag",
+        "reference": "ericsink/SQLitePCL.raw@v2.1.12/SQLitePCLRaw.bundle_e_sqlite3",
+        "path": "files/sqlitepclraw-2.1.12/LICENSE.TXT",
+        "hashProfile": "UTF8_NO_BOM_LF_V1",
+        "sha256": "CFC7749B96F63BD31C3C42B5C471BF756814053E847C10F3EB003417BC523D30",
+        "rawSha256": "CFC7749B96F63BD31C3C42B5C471BF756814053E847C10F3EB003417BC523D30",
+        "sourceUrls": [
+          "https://raw.githubusercontent.com/ericsink/SQLitePCL.raw/v2.1.12/LICENSE.TXT"
+        ]
       },
       "status": {
-        "source": "PARTIAL",
-        "bundling": "PARTIAL",
-        "attribution": "PARTIAL",
-        "notice": "UNKNOWN"
+        "source": "VERIFIED",
+        "bundling": "VERIFIED",
+        "attribution": "VERIFIED",
+        "notice": "VERIFIED"
       },
-      "licenseNoticeFiles": []
+      "licenseNoticeFiles": [
+        {
+          "kind": "LICENSE",
+          "path": "files/sqlitepclraw-2.1.12/LICENSE.TXT",
+          "hashProfile": "UTF8_NO_BOM_LF_V1",
+          "sha256": "CFC7749B96F63BD31C3C42B5C471BF756814053E847C10F3EB003417BC523D30",
+          "rawSha256": "CFC7749B96F63BD31C3C42B5C471BF756814053E847C10F3EB003417BC523D30",
+          "sourceUrls": [
+            "https://raw.githubusercontent.com/ericsink/SQLitePCL.raw/v2.1.12/LICENSE.TXT"
+          ]
+        },
+        {
+          "kind": "NOTICE",
+          "path": "files/sqlitepclraw-2.1.12/NOTICE.TXT",
+          "hashProfile": "UTF8_NO_BOM_LF_V1",
+          "sha256": "485B276B3D2BFAA26DF348E1E5C84DF3648981E09B88531A6A53006F0705C24B",
+          "rawSha256": "485B276B3D2BFAA26DF348E1E5C84DF3648981E09B88531A6A53006F0705C24B",
+          "sourceUrls": [
+            "https://raw.githubusercontent.com/ericsink/SQLitePCL.raw/v2.1.12/NOTICE.TXT"
+          ]
+        },
+        {
+          "kind": "TERMS_REFERENCE",
+          "path": "files/sqlitepclraw-2.1.12/TERMS-REFERENCE.txt",
+          "hashProfile": "UTF8_NO_BOM_LF_V1",
+          "sha256": "729BA9D201B5E801167674FD17A79749794420D4A4666867C6CBDA503B66C241",
+          "rawSha256": "729BA9D201B5E801167674FD17A79749794420D4A4666867C6CBDA503B66C241",
+          "sourceUrls": [
+            "https://sqlite.org/copyright.html"
+          ]
+        }
+      ]
     },
     {
       "componentId": "payload-package-SQLitePCLRaw.core",
@@ -797,17 +1846,54 @@
       "payloadSourceKind": "package",
       "payloadComponentId": "SQLitePCLRaw.core",
       "sourceBinding": {
-        "kind": "c0-payload-attribution-catalog",
-        "reference": "package/SQLitePCLRaw.core@2.1.12",
-        "sha256": "PENDING"
+        "kind": "exact-upstream-tag",
+        "reference": "ericsink/SQLitePCL.raw@v2.1.12/SQLitePCLRaw.core",
+        "path": "files/sqlitepclraw-2.1.12/LICENSE.TXT",
+        "hashProfile": "UTF8_NO_BOM_LF_V1",
+        "sha256": "CFC7749B96F63BD31C3C42B5C471BF756814053E847C10F3EB003417BC523D30",
+        "rawSha256": "CFC7749B96F63BD31C3C42B5C471BF756814053E847C10F3EB003417BC523D30",
+        "sourceUrls": [
+          "https://raw.githubusercontent.com/ericsink/SQLitePCL.raw/v2.1.12/LICENSE.TXT"
+        ]
       },
       "status": {
-        "source": "PARTIAL",
-        "bundling": "PARTIAL",
-        "attribution": "PARTIAL",
-        "notice": "UNKNOWN"
+        "source": "VERIFIED",
+        "bundling": "VERIFIED",
+        "attribution": "VERIFIED",
+        "notice": "VERIFIED"
       },
-      "licenseNoticeFiles": []
+      "licenseNoticeFiles": [
+        {
+          "kind": "LICENSE",
+          "path": "files/sqlitepclraw-2.1.12/LICENSE.TXT",
+          "hashProfile": "UTF8_NO_BOM_LF_V1",
+          "sha256": "CFC7749B96F63BD31C3C42B5C471BF756814053E847C10F3EB003417BC523D30",
+          "rawSha256": "CFC7749B96F63BD31C3C42B5C471BF756814053E847C10F3EB003417BC523D30",
+          "sourceUrls": [
+            "https://raw.githubusercontent.com/ericsink/SQLitePCL.raw/v2.1.12/LICENSE.TXT"
+          ]
+        },
+        {
+          "kind": "NOTICE",
+          "path": "files/sqlitepclraw-2.1.12/NOTICE.TXT",
+          "hashProfile": "UTF8_NO_BOM_LF_V1",
+          "sha256": "485B276B3D2BFAA26DF348E1E5C84DF3648981E09B88531A6A53006F0705C24B",
+          "rawSha256": "485B276B3D2BFAA26DF348E1E5C84DF3648981E09B88531A6A53006F0705C24B",
+          "sourceUrls": [
+            "https://raw.githubusercontent.com/ericsink/SQLitePCL.raw/v2.1.12/NOTICE.TXT"
+          ]
+        },
+        {
+          "kind": "TERMS_REFERENCE",
+          "path": "files/sqlitepclraw-2.1.12/TERMS-REFERENCE.txt",
+          "hashProfile": "UTF8_NO_BOM_LF_V1",
+          "sha256": "729BA9D201B5E801167674FD17A79749794420D4A4666867C6CBDA503B66C241",
+          "rawSha256": "729BA9D201B5E801167674FD17A79749794420D4A4666867C6CBDA503B66C241",
+          "sourceUrls": [
+            "https://sqlite.org/copyright.html"
+          ]
+        }
+      ]
     },
     {
       "componentId": "payload-package-SQLitePCLRaw.lib.e_sqlite3",
@@ -816,17 +1902,54 @@
       "payloadSourceKind": "package",
       "payloadComponentId": "SQLitePCLRaw.lib.e_sqlite3",
       "sourceBinding": {
-        "kind": "c0-payload-attribution-catalog",
-        "reference": "package/SQLitePCLRaw.lib.e_sqlite3@2.1.12",
-        "sha256": "PENDING"
+        "kind": "exact-upstream-tag",
+        "reference": "ericsink/SQLitePCL.raw@v2.1.12/SQLitePCLRaw.lib.e_sqlite3",
+        "path": "files/sqlitepclraw-2.1.12/LICENSE.TXT",
+        "hashProfile": "UTF8_NO_BOM_LF_V1",
+        "sha256": "CFC7749B96F63BD31C3C42B5C471BF756814053E847C10F3EB003417BC523D30",
+        "rawSha256": "CFC7749B96F63BD31C3C42B5C471BF756814053E847C10F3EB003417BC523D30",
+        "sourceUrls": [
+          "https://raw.githubusercontent.com/ericsink/SQLitePCL.raw/v2.1.12/LICENSE.TXT"
+        ]
       },
       "status": {
-        "source": "PARTIAL",
-        "bundling": "PARTIAL",
-        "attribution": "PARTIAL",
-        "notice": "UNKNOWN"
+        "source": "VERIFIED",
+        "bundling": "VERIFIED",
+        "attribution": "VERIFIED",
+        "notice": "VERIFIED"
       },
-      "licenseNoticeFiles": []
+      "licenseNoticeFiles": [
+        {
+          "kind": "LICENSE",
+          "path": "files/sqlitepclraw-2.1.12/LICENSE.TXT",
+          "hashProfile": "UTF8_NO_BOM_LF_V1",
+          "sha256": "CFC7749B96F63BD31C3C42B5C471BF756814053E847C10F3EB003417BC523D30",
+          "rawSha256": "CFC7749B96F63BD31C3C42B5C471BF756814053E847C10F3EB003417BC523D30",
+          "sourceUrls": [
+            "https://raw.githubusercontent.com/ericsink/SQLitePCL.raw/v2.1.12/LICENSE.TXT"
+          ]
+        },
+        {
+          "kind": "NOTICE",
+          "path": "files/sqlitepclraw-2.1.12/NOTICE.TXT",
+          "hashProfile": "UTF8_NO_BOM_LF_V1",
+          "sha256": "485B276B3D2BFAA26DF348E1E5C84DF3648981E09B88531A6A53006F0705C24B",
+          "rawSha256": "485B276B3D2BFAA26DF348E1E5C84DF3648981E09B88531A6A53006F0705C24B",
+          "sourceUrls": [
+            "https://raw.githubusercontent.com/ericsink/SQLitePCL.raw/v2.1.12/NOTICE.TXT"
+          ]
+        },
+        {
+          "kind": "TERMS_REFERENCE",
+          "path": "files/sqlitepclraw-2.1.12/TERMS-REFERENCE.txt",
+          "hashProfile": "UTF8_NO_BOM_LF_V1",
+          "sha256": "729BA9D201B5E801167674FD17A79749794420D4A4666867C6CBDA503B66C241",
+          "rawSha256": "729BA9D201B5E801167674FD17A79749794420D4A4666867C6CBDA503B66C241",
+          "sourceUrls": [
+            "https://sqlite.org/copyright.html"
+          ]
+        }
+      ]
     },
     {
       "componentId": "payload-package-SQLitePCLRaw.provider.e_sqlite3",
@@ -835,17 +1958,54 @@
       "payloadSourceKind": "package",
       "payloadComponentId": "SQLitePCLRaw.provider.e_sqlite3",
       "sourceBinding": {
-        "kind": "c0-payload-attribution-catalog",
-        "reference": "package/SQLitePCLRaw.provider.e_sqlite3@2.1.12",
-        "sha256": "PENDING"
+        "kind": "exact-upstream-tag",
+        "reference": "ericsink/SQLitePCL.raw@v2.1.12/SQLitePCLRaw.provider.e_sqlite3",
+        "path": "files/sqlitepclraw-2.1.12/LICENSE.TXT",
+        "hashProfile": "UTF8_NO_BOM_LF_V1",
+        "sha256": "CFC7749B96F63BD31C3C42B5C471BF756814053E847C10F3EB003417BC523D30",
+        "rawSha256": "CFC7749B96F63BD31C3C42B5C471BF756814053E847C10F3EB003417BC523D30",
+        "sourceUrls": [
+          "https://raw.githubusercontent.com/ericsink/SQLitePCL.raw/v2.1.12/LICENSE.TXT"
+        ]
       },
       "status": {
-        "source": "PARTIAL",
-        "bundling": "PARTIAL",
-        "attribution": "PARTIAL",
-        "notice": "UNKNOWN"
+        "source": "VERIFIED",
+        "bundling": "VERIFIED",
+        "attribution": "VERIFIED",
+        "notice": "VERIFIED"
       },
-      "licenseNoticeFiles": []
+      "licenseNoticeFiles": [
+        {
+          "kind": "LICENSE",
+          "path": "files/sqlitepclraw-2.1.12/LICENSE.TXT",
+          "hashProfile": "UTF8_NO_BOM_LF_V1",
+          "sha256": "CFC7749B96F63BD31C3C42B5C471BF756814053E847C10F3EB003417BC523D30",
+          "rawSha256": "CFC7749B96F63BD31C3C42B5C471BF756814053E847C10F3EB003417BC523D30",
+          "sourceUrls": [
+            "https://raw.githubusercontent.com/ericsink/SQLitePCL.raw/v2.1.12/LICENSE.TXT"
+          ]
+        },
+        {
+          "kind": "NOTICE",
+          "path": "files/sqlitepclraw-2.1.12/NOTICE.TXT",
+          "hashProfile": "UTF8_NO_BOM_LF_V1",
+          "sha256": "485B276B3D2BFAA26DF348E1E5C84DF3648981E09B88531A6A53006F0705C24B",
+          "rawSha256": "485B276B3D2BFAA26DF348E1E5C84DF3648981E09B88531A6A53006F0705C24B",
+          "sourceUrls": [
+            "https://raw.githubusercontent.com/ericsink/SQLitePCL.raw/v2.1.12/NOTICE.TXT"
+          ]
+        },
+        {
+          "kind": "TERMS_REFERENCE",
+          "path": "files/sqlitepclraw-2.1.12/TERMS-REFERENCE.txt",
+          "hashProfile": "UTF8_NO_BOM_LF_V1",
+          "sha256": "729BA9D201B5E801167674FD17A79749794420D4A4666867C6CBDA503B66C241",
+          "rawSha256": "729BA9D201B5E801167674FD17A79749794420D4A4666867C6CBDA503B66C241",
+          "sourceUrls": [
+            "https://sqlite.org/copyright.html"
+          ]
+        }
+      ]
     },
     {
       "componentId": "payload-package-System.Speech",
@@ -854,17 +2014,44 @@
       "payloadSourceKind": "package",
       "payloadComponentId": "System.Speech",
       "sourceBinding": {
-        "kind": "c0-payload-attribution-catalog",
-        "reference": "package/System.Speech@10.0.10",
-        "sha256": "PENDING"
+        "kind": "exact-package-source-commit",
+        "reference": "dotnet/dotnet@f7d90799ce4ef09a0bb257852a57248d2a8fb8dd/System.Speech@10.0.10",
+        "path": "files/system-speech-10.0.10-f7d90799ce4ef09a0bb257852a57248d2a8fb8dd/LICENSE.TXT",
+        "hashProfile": "UTF8_NO_BOM_LF_V1",
+        "sha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+        "rawSha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+        "sourceUrls": [
+          "https://raw.githubusercontent.com/dotnet/dotnet/f7d90799ce4ef09a0bb257852a57248d2a8fb8dd/LICENSE.TXT"
+        ]
       },
       "status": {
-        "source": "PARTIAL",
-        "bundling": "PARTIAL",
-        "attribution": "PARTIAL",
-        "notice": "UNKNOWN"
+        "source": "VERIFIED",
+        "bundling": "VERIFIED",
+        "attribution": "VERIFIED",
+        "notice": "VERIFIED"
       },
-      "licenseNoticeFiles": []
+      "licenseNoticeFiles": [
+        {
+          "kind": "LICENSE",
+          "path": "files/system-speech-10.0.10-f7d90799ce4ef09a0bb257852a57248d2a8fb8dd/LICENSE.TXT",
+          "hashProfile": "UTF8_NO_BOM_LF_V1",
+          "sha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+          "rawSha256": "AE48DF11A335DC1A615F4F938B69CBA73BCF4485C4F97AF49B38EFB0F216353B",
+          "sourceUrls": [
+            "https://raw.githubusercontent.com/dotnet/dotnet/f7d90799ce4ef09a0bb257852a57248d2a8fb8dd/LICENSE.TXT"
+          ]
+        },
+        {
+          "kind": "NOTICE",
+          "path": "files/system-speech-10.0.10-f7d90799ce4ef09a0bb257852a57248d2a8fb8dd/THIRD-PARTY-NOTICES.txt",
+          "hashProfile": "UTF8_NO_BOM_LF_V1",
+          "sha256": "4BEF6A7E7B359869D751C9FF70274A80A0F626927AFA5A0681583C1B1861267B",
+          "rawSha256": "4BEF6A7E7B359869D751C9FF70274A80A0F626927AFA5A0681583C1B1861267B",
+          "sourceUrls": [
+            "https://raw.githubusercontent.com/dotnet/dotnet/f7d90799ce4ef09a0bb257852a57248d2a8fb8dd/THIRD-PARTY-NOTICES.txt"
+          ]
+        }
+      ]
     },
     {
       "componentId": "payload-package-org.k2fsa.sherpa.onnx",
@@ -873,17 +2060,34 @@
       "payloadSourceKind": "package",
       "payloadComponentId": "org.k2fsa.sherpa.onnx",
       "sourceBinding": {
-        "kind": "c0-payload-attribution-catalog",
-        "reference": "package/org.k2fsa.sherpa.onnx@1.13.4",
-        "sha256": "PENDING"
+        "kind": "exact-upstream-commit",
+        "reference": "k2-fsa/sherpa-onnx@142807252687d81b40d6315f23470a1512a00de3",
+        "path": "files/sherpa-onnx-1.13.4/LICENSE",
+        "hashProfile": "UTF8_NO_BOM_LF_V1",
+        "sha256": "CFC7749B96F63BD31C3C42B5C471BF756814053E847C10F3EB003417BC523D30",
+        "rawSha256": "CFC7749B96F63BD31C3C42B5C471BF756814053E847C10F3EB003417BC523D30",
+        "sourceUrls": [
+          "https://raw.githubusercontent.com/k2-fsa/sherpa-onnx/142807252687d81b40d6315f23470a1512a00de3/LICENSE"
+        ]
       },
       "status": {
-        "source": "PARTIAL",
-        "bundling": "PARTIAL",
-        "attribution": "PARTIAL",
-        "notice": "UNKNOWN"
+        "source": "VERIFIED",
+        "bundling": "VERIFIED",
+        "attribution": "VERIFIED",
+        "notice": "VERIFIED"
       },
-      "licenseNoticeFiles": []
+      "licenseNoticeFiles": [
+        {
+          "kind": "LICENSE",
+          "path": "files/sherpa-onnx-1.13.4/LICENSE",
+          "hashProfile": "UTF8_NO_BOM_LF_V1",
+          "sha256": "CFC7749B96F63BD31C3C42B5C471BF756814053E847C10F3EB003417BC523D30",
+          "rawSha256": "CFC7749B96F63BD31C3C42B5C471BF756814053E847C10F3EB003417BC523D30",
+          "sourceUrls": [
+            "https://raw.githubusercontent.com/k2-fsa/sherpa-onnx/142807252687d81b40d6315f23470a1512a00de3/LICENSE"
+          ]
+        }
+      ]
     },
     {
       "componentId": "payload-package-org.k2fsa.sherpa.onnx.runtime.win-x64",
@@ -892,17 +2096,54 @@
       "payloadSourceKind": "package",
       "payloadComponentId": "org.k2fsa.sherpa.onnx.runtime.win-x64",
       "sourceBinding": {
-        "kind": "c0-payload-attribution-catalog",
-        "reference": "package/org.k2fsa.sherpa.onnx.runtime.win-x64@1.13.4",
-        "sha256": "PENDING"
+        "kind": "exact-upstream-commit",
+        "reference": "k2-fsa/sherpa-onnx@142807252687d81b40d6315f23470a1512a00de3+onnxruntime@v1.27.0",
+        "path": "files/sherpa-onnx-1.13.4/LICENSE",
+        "hashProfile": "UTF8_NO_BOM_LF_V1",
+        "sha256": "CFC7749B96F63BD31C3C42B5C471BF756814053E847C10F3EB003417BC523D30",
+        "rawSha256": "CFC7749B96F63BD31C3C42B5C471BF756814053E847C10F3EB003417BC523D30",
+        "sourceUrls": [
+          "https://raw.githubusercontent.com/k2-fsa/sherpa-onnx/142807252687d81b40d6315f23470a1512a00de3/LICENSE"
+        ]
       },
       "status": {
-        "source": "PARTIAL",
-        "bundling": "PARTIAL",
-        "attribution": "PARTIAL",
-        "notice": "UNKNOWN"
+        "source": "VERIFIED",
+        "bundling": "VERIFIED",
+        "attribution": "VERIFIED",
+        "notice": "VERIFIED"
       },
-      "licenseNoticeFiles": []
+      "licenseNoticeFiles": [
+        {
+          "kind": "LICENSE",
+          "path": "files/sherpa-onnx-1.13.4/LICENSE",
+          "hashProfile": "UTF8_NO_BOM_LF_V1",
+          "sha256": "CFC7749B96F63BD31C3C42B5C471BF756814053E847C10F3EB003417BC523D30",
+          "rawSha256": "CFC7749B96F63BD31C3C42B5C471BF756814053E847C10F3EB003417BC523D30",
+          "sourceUrls": [
+            "https://raw.githubusercontent.com/k2-fsa/sherpa-onnx/142807252687d81b40d6315f23470a1512a00de3/LICENSE"
+          ]
+        },
+        {
+          "kind": "LICENSE",
+          "path": "files/onnxruntime-1.27.0/LICENSE",
+          "hashProfile": "UTF8_NO_BOM_LF_V1",
+          "sha256": "2F07C72751AED99790B8A4869CF2311DF85A860B22DED05FA22803587A48922C",
+          "rawSha256": "2F07C72751AED99790B8A4869CF2311DF85A860B22DED05FA22803587A48922C",
+          "sourceUrls": [
+            "https://raw.githubusercontent.com/microsoft/onnxruntime/v1.27.0/LICENSE"
+          ]
+        },
+        {
+          "kind": "NOTICE",
+          "path": "files/onnxruntime-1.27.0/ThirdPartyNotices.txt",
+          "hashProfile": "UTF8_NO_BOM_LF_V1",
+          "sha256": "0E07B95F3A8D6230037707C5C4A2B554D12C4CB67369669AC255635528FFCEE2",
+          "rawSha256": "0E07B95F3A8D6230037707C5C4A2B554D12C4CB67369669AC255635528FFCEE2",
+          "sourceUrls": [
+            "https://raw.githubusercontent.com/microsoft/onnxruntime/v1.27.0/ThirdPartyNotices.txt"
+          ]
+        }
+      ]
     },
     {
       "componentId": "payload-project-ScreenGuide.AI.Core",
@@ -911,17 +2152,34 @@
       "payloadSourceKind": "project",
       "payloadComponentId": "ScreenGuide.AI.Core",
       "sourceBinding": {
-        "kind": "c0-payload-attribution-catalog",
-        "reference": "project/ScreenGuide.AI.Core@0.6.0",
-        "sha256": "PENDING"
+        "kind": "owner-declared-project-source",
+        "reference": "C0/project/ScreenGuide.AI.Core@0.6.0",
+        "path": "files/yuanshu-v0.6.0/PROPRIETARY-NOTICE.txt",
+        "hashProfile": "UTF8_NO_BOM_LF_V1",
+        "sha256": "596C52BC74985F0066D97CE89C13375D0B294FD25625839997210279892250F9",
+        "rawSha256": "596C52BC74985F0066D97CE89C13375D0B294FD25625839997210279892250F9",
+        "sourceUrls": [
+          "PROJECT_AUTHORED"
+        ]
       },
       "status": {
-        "source": "PARTIAL",
-        "bundling": "PARTIAL",
-        "attribution": "PARTIAL",
-        "notice": "UNKNOWN"
+        "source": "VERIFIED",
+        "bundling": "VERIFIED",
+        "attribution": "VERIFIED",
+        "notice": "VERIFIED"
       },
-      "licenseNoticeFiles": []
+      "licenseNoticeFiles": [
+        {
+          "kind": "NOTICE",
+          "path": "files/yuanshu-v0.6.0/PROPRIETARY-NOTICE.txt",
+          "hashProfile": "UTF8_NO_BOM_LF_V1",
+          "sha256": "596C52BC74985F0066D97CE89C13375D0B294FD25625839997210279892250F9",
+          "rawSha256": "596C52BC74985F0066D97CE89C13375D0B294FD25625839997210279892250F9",
+          "sourceUrls": [
+            "PROJECT_AUTHORED"
+          ]
+        }
+      ]
     },
     {
       "componentId": "payload-project-ScreenGuide.AI.DeepSeek",
@@ -930,17 +2188,34 @@
       "payloadSourceKind": "project",
       "payloadComponentId": "ScreenGuide.AI.DeepSeek",
       "sourceBinding": {
-        "kind": "c0-payload-attribution-catalog",
-        "reference": "project/ScreenGuide.AI.DeepSeek@0.6.0",
-        "sha256": "PENDING"
+        "kind": "owner-declared-project-source",
+        "reference": "C0/project/ScreenGuide.AI.DeepSeek@0.6.0",
+        "path": "files/yuanshu-v0.6.0/PROPRIETARY-NOTICE.txt",
+        "hashProfile": "UTF8_NO_BOM_LF_V1",
+        "sha256": "596C52BC74985F0066D97CE89C13375D0B294FD25625839997210279892250F9",
+        "rawSha256": "596C52BC74985F0066D97CE89C13375D0B294FD25625839997210279892250F9",
+        "sourceUrls": [
+          "PROJECT_AUTHORED"
+        ]
       },
       "status": {
-        "source": "PARTIAL",
-        "bundling": "PARTIAL",
-        "attribution": "PARTIAL",
-        "notice": "UNKNOWN"
+        "source": "VERIFIED",
+        "bundling": "VERIFIED",
+        "attribution": "VERIFIED",
+        "notice": "VERIFIED"
       },
-      "licenseNoticeFiles": []
+      "licenseNoticeFiles": [
+        {
+          "kind": "NOTICE",
+          "path": "files/yuanshu-v0.6.0/PROPRIETARY-NOTICE.txt",
+          "hashProfile": "UTF8_NO_BOM_LF_V1",
+          "sha256": "596C52BC74985F0066D97CE89C13375D0B294FD25625839997210279892250F9",
+          "rawSha256": "596C52BC74985F0066D97CE89C13375D0B294FD25625839997210279892250F9",
+          "sourceUrls": [
+            "PROJECT_AUTHORED"
+          ]
+        }
+      ]
     },
     {
       "componentId": "payload-project-ScreenGuide.AI.Qwen",
@@ -949,17 +2224,34 @@
       "payloadSourceKind": "project",
       "payloadComponentId": "ScreenGuide.AI.Qwen",
       "sourceBinding": {
-        "kind": "c0-payload-attribution-catalog",
-        "reference": "project/ScreenGuide.AI.Qwen@0.6.0",
-        "sha256": "PENDING"
+        "kind": "owner-declared-project-source",
+        "reference": "C0/project/ScreenGuide.AI.Qwen@0.6.0",
+        "path": "files/yuanshu-v0.6.0/PROPRIETARY-NOTICE.txt",
+        "hashProfile": "UTF8_NO_BOM_LF_V1",
+        "sha256": "596C52BC74985F0066D97CE89C13375D0B294FD25625839997210279892250F9",
+        "rawSha256": "596C52BC74985F0066D97CE89C13375D0B294FD25625839997210279892250F9",
+        "sourceUrls": [
+          "PROJECT_AUTHORED"
+        ]
       },
       "status": {
-        "source": "PARTIAL",
-        "bundling": "PARTIAL",
-        "attribution": "PARTIAL",
-        "notice": "UNKNOWN"
+        "source": "VERIFIED",
+        "bundling": "VERIFIED",
+        "attribution": "VERIFIED",
+        "notice": "VERIFIED"
       },
-      "licenseNoticeFiles": []
+      "licenseNoticeFiles": [
+        {
+          "kind": "NOTICE",
+          "path": "files/yuanshu-v0.6.0/PROPRIETARY-NOTICE.txt",
+          "hashProfile": "UTF8_NO_BOM_LF_V1",
+          "sha256": "596C52BC74985F0066D97CE89C13375D0B294FD25625839997210279892250F9",
+          "rawSha256": "596C52BC74985F0066D97CE89C13375D0B294FD25625839997210279892250F9",
+          "sourceUrls": [
+            "PROJECT_AUTHORED"
+          ]
+        }
+      ]
     },
     {
       "componentId": "payload-project-ScreenGuide.Agent.Abstractions",
@@ -968,17 +2260,34 @@
       "payloadSourceKind": "project",
       "payloadComponentId": "ScreenGuide.Agent.Abstractions",
       "sourceBinding": {
-        "kind": "c0-payload-attribution-catalog",
-        "reference": "project/ScreenGuide.Agent.Abstractions@0.6.0",
-        "sha256": "PENDING"
+        "kind": "owner-declared-project-source",
+        "reference": "C0/project/ScreenGuide.Agent.Abstractions@0.6.0",
+        "path": "files/yuanshu-v0.6.0/PROPRIETARY-NOTICE.txt",
+        "hashProfile": "UTF8_NO_BOM_LF_V1",
+        "sha256": "596C52BC74985F0066D97CE89C13375D0B294FD25625839997210279892250F9",
+        "rawSha256": "596C52BC74985F0066D97CE89C13375D0B294FD25625839997210279892250F9",
+        "sourceUrls": [
+          "PROJECT_AUTHORED"
+        ]
       },
       "status": {
-        "source": "PARTIAL",
-        "bundling": "PARTIAL",
-        "attribution": "PARTIAL",
-        "notice": "UNKNOWN"
+        "source": "VERIFIED",
+        "bundling": "VERIFIED",
+        "attribution": "VERIFIED",
+        "notice": "VERIFIED"
       },
-      "licenseNoticeFiles": []
+      "licenseNoticeFiles": [
+        {
+          "kind": "NOTICE",
+          "path": "files/yuanshu-v0.6.0/PROPRIETARY-NOTICE.txt",
+          "hashProfile": "UTF8_NO_BOM_LF_V1",
+          "sha256": "596C52BC74985F0066D97CE89C13375D0B294FD25625839997210279892250F9",
+          "rawSha256": "596C52BC74985F0066D97CE89C13375D0B294FD25625839997210279892250F9",
+          "sourceUrls": [
+            "PROJECT_AUTHORED"
+          ]
+        }
+      ]
     },
     {
       "componentId": "payload-project-ScreenGuide.Agent.Codex",
@@ -987,17 +2296,34 @@
       "payloadSourceKind": "project",
       "payloadComponentId": "ScreenGuide.Agent.Codex",
       "sourceBinding": {
-        "kind": "c0-payload-attribution-catalog",
-        "reference": "project/ScreenGuide.Agent.Codex@0.6.0",
-        "sha256": "PENDING"
+        "kind": "owner-declared-project-source",
+        "reference": "C0/project/ScreenGuide.Agent.Codex@0.6.0",
+        "path": "files/yuanshu-v0.6.0/PROPRIETARY-NOTICE.txt",
+        "hashProfile": "UTF8_NO_BOM_LF_V1",
+        "sha256": "596C52BC74985F0066D97CE89C13375D0B294FD25625839997210279892250F9",
+        "rawSha256": "596C52BC74985F0066D97CE89C13375D0B294FD25625839997210279892250F9",
+        "sourceUrls": [
+          "PROJECT_AUTHORED"
+        ]
       },
       "status": {
-        "source": "PARTIAL",
-        "bundling": "PARTIAL",
-        "attribution": "PARTIAL",
-        "notice": "UNKNOWN"
+        "source": "VERIFIED",
+        "bundling": "VERIFIED",
+        "attribution": "VERIFIED",
+        "notice": "VERIFIED"
       },
-      "licenseNoticeFiles": []
+      "licenseNoticeFiles": [
+        {
+          "kind": "NOTICE",
+          "path": "files/yuanshu-v0.6.0/PROPRIETARY-NOTICE.txt",
+          "hashProfile": "UTF8_NO_BOM_LF_V1",
+          "sha256": "596C52BC74985F0066D97CE89C13375D0B294FD25625839997210279892250F9",
+          "rawSha256": "596C52BC74985F0066D97CE89C13375D0B294FD25625839997210279892250F9",
+          "sourceUrls": [
+            "PROJECT_AUTHORED"
+          ]
+        }
+      ]
     },
     {
       "componentId": "payload-project-ScreenGuide.Core",
@@ -1006,17 +2332,34 @@
       "payloadSourceKind": "project",
       "payloadComponentId": "ScreenGuide.Core",
       "sourceBinding": {
-        "kind": "c0-payload-attribution-catalog",
-        "reference": "project/ScreenGuide.Core@0.6.0",
-        "sha256": "PENDING"
+        "kind": "owner-declared-project-source",
+        "reference": "C0/project/ScreenGuide.Core@0.6.0",
+        "path": "files/yuanshu-v0.6.0/PROPRIETARY-NOTICE.txt",
+        "hashProfile": "UTF8_NO_BOM_LF_V1",
+        "sha256": "596C52BC74985F0066D97CE89C13375D0B294FD25625839997210279892250F9",
+        "rawSha256": "596C52BC74985F0066D97CE89C13375D0B294FD25625839997210279892250F9",
+        "sourceUrls": [
+          "PROJECT_AUTHORED"
+        ]
       },
       "status": {
-        "source": "PARTIAL",
-        "bundling": "PARTIAL",
-        "attribution": "PARTIAL",
-        "notice": "UNKNOWN"
+        "source": "VERIFIED",
+        "bundling": "VERIFIED",
+        "attribution": "VERIFIED",
+        "notice": "VERIFIED"
       },
-      "licenseNoticeFiles": []
+      "licenseNoticeFiles": [
+        {
+          "kind": "NOTICE",
+          "path": "files/yuanshu-v0.6.0/PROPRIETARY-NOTICE.txt",
+          "hashProfile": "UTF8_NO_BOM_LF_V1",
+          "sha256": "596C52BC74985F0066D97CE89C13375D0B294FD25625839997210279892250F9",
+          "rawSha256": "596C52BC74985F0066D97CE89C13375D0B294FD25625839997210279892250F9",
+          "sourceUrls": [
+            "PROJECT_AUTHORED"
+          ]
+        }
+      ]
     },
     {
       "componentId": "payload-project-ScreenGuide.DesktopClient",
@@ -1025,17 +2368,34 @@
       "payloadSourceKind": "project",
       "payloadComponentId": "ScreenGuide.DesktopClient",
       "sourceBinding": {
-        "kind": "c0-payload-attribution-catalog",
-        "reference": "project/ScreenGuide.DesktopClient@0.6.0",
-        "sha256": "PENDING"
+        "kind": "owner-declared-project-source",
+        "reference": "C0/project/ScreenGuide.DesktopClient@0.6.0",
+        "path": "files/yuanshu-v0.6.0/PROPRIETARY-NOTICE.txt",
+        "hashProfile": "UTF8_NO_BOM_LF_V1",
+        "sha256": "596C52BC74985F0066D97CE89C13375D0B294FD25625839997210279892250F9",
+        "rawSha256": "596C52BC74985F0066D97CE89C13375D0B294FD25625839997210279892250F9",
+        "sourceUrls": [
+          "PROJECT_AUTHORED"
+        ]
       },
       "status": {
-        "source": "PARTIAL",
-        "bundling": "PARTIAL",
-        "attribution": "PARTIAL",
-        "notice": "UNKNOWN"
+        "source": "VERIFIED",
+        "bundling": "VERIFIED",
+        "attribution": "VERIFIED",
+        "notice": "VERIFIED"
       },
-      "licenseNoticeFiles": []
+      "licenseNoticeFiles": [
+        {
+          "kind": "NOTICE",
+          "path": "files/yuanshu-v0.6.0/PROPRIETARY-NOTICE.txt",
+          "hashProfile": "UTF8_NO_BOM_LF_V1",
+          "sha256": "596C52BC74985F0066D97CE89C13375D0B294FD25625839997210279892250F9",
+          "rawSha256": "596C52BC74985F0066D97CE89C13375D0B294FD25625839997210279892250F9",
+          "sourceUrls": [
+            "PROJECT_AUTHORED"
+          ]
+        }
+      ]
     },
     {
       "componentId": "payload-project-ScreenGuide.DesktopHost",
@@ -1044,17 +2404,34 @@
       "payloadSourceKind": "project",
       "payloadComponentId": "ScreenGuide.DesktopHost",
       "sourceBinding": {
-        "kind": "c0-payload-attribution-catalog",
-        "reference": "project/ScreenGuide.DesktopHost@0.6.0",
-        "sha256": "PENDING"
+        "kind": "owner-declared-project-source",
+        "reference": "C0/project/ScreenGuide.DesktopHost@0.6.0",
+        "path": "files/yuanshu-v0.6.0/PROPRIETARY-NOTICE.txt",
+        "hashProfile": "UTF8_NO_BOM_LF_V1",
+        "sha256": "596C52BC74985F0066D97CE89C13375D0B294FD25625839997210279892250F9",
+        "rawSha256": "596C52BC74985F0066D97CE89C13375D0B294FD25625839997210279892250F9",
+        "sourceUrls": [
+          "PROJECT_AUTHORED"
+        ]
       },
       "status": {
-        "source": "PARTIAL",
-        "bundling": "PARTIAL",
-        "attribution": "PARTIAL",
-        "notice": "UNKNOWN"
+        "source": "VERIFIED",
+        "bundling": "VERIFIED",
+        "attribution": "VERIFIED",
+        "notice": "VERIFIED"
       },
-      "licenseNoticeFiles": []
+      "licenseNoticeFiles": [
+        {
+          "kind": "NOTICE",
+          "path": "files/yuanshu-v0.6.0/PROPRIETARY-NOTICE.txt",
+          "hashProfile": "UTF8_NO_BOM_LF_V1",
+          "sha256": "596C52BC74985F0066D97CE89C13375D0B294FD25625839997210279892250F9",
+          "rawSha256": "596C52BC74985F0066D97CE89C13375D0B294FD25625839997210279892250F9",
+          "sourceUrls": [
+            "PROJECT_AUTHORED"
+          ]
+        }
+      ]
     },
     {
       "componentId": "payload-project-ScreenGuide.DesktopProtocol",
@@ -1063,17 +2440,34 @@
       "payloadSourceKind": "project",
       "payloadComponentId": "ScreenGuide.DesktopProtocol",
       "sourceBinding": {
-        "kind": "c0-payload-attribution-catalog",
-        "reference": "project/ScreenGuide.DesktopProtocol@0.6.0",
-        "sha256": "PENDING"
+        "kind": "owner-declared-project-source",
+        "reference": "C0/project/ScreenGuide.DesktopProtocol@0.6.0",
+        "path": "files/yuanshu-v0.6.0/PROPRIETARY-NOTICE.txt",
+        "hashProfile": "UTF8_NO_BOM_LF_V1",
+        "sha256": "596C52BC74985F0066D97CE89C13375D0B294FD25625839997210279892250F9",
+        "rawSha256": "596C52BC74985F0066D97CE89C13375D0B294FD25625839997210279892250F9",
+        "sourceUrls": [
+          "PROJECT_AUTHORED"
+        ]
       },
       "status": {
-        "source": "PARTIAL",
-        "bundling": "PARTIAL",
-        "attribution": "PARTIAL",
-        "notice": "UNKNOWN"
+        "source": "VERIFIED",
+        "bundling": "VERIFIED",
+        "attribution": "VERIFIED",
+        "notice": "VERIFIED"
       },
-      "licenseNoticeFiles": []
+      "licenseNoticeFiles": [
+        {
+          "kind": "NOTICE",
+          "path": "files/yuanshu-v0.6.0/PROPRIETARY-NOTICE.txt",
+          "hashProfile": "UTF8_NO_BOM_LF_V1",
+          "sha256": "596C52BC74985F0066D97CE89C13375D0B294FD25625839997210279892250F9",
+          "rawSha256": "596C52BC74985F0066D97CE89C13375D0B294FD25625839997210279892250F9",
+          "sourceUrls": [
+            "PROJECT_AUTHORED"
+          ]
+        }
+      ]
     },
     {
       "componentId": "payload-project-ScreenGuide.Evidence",
@@ -1082,17 +2476,34 @@
       "payloadSourceKind": "project",
       "payloadComponentId": "ScreenGuide.Evidence",
       "sourceBinding": {
-        "kind": "c0-payload-attribution-catalog",
-        "reference": "project/ScreenGuide.Evidence@0.6.0",
-        "sha256": "PENDING"
+        "kind": "owner-declared-project-source",
+        "reference": "C0/project/ScreenGuide.Evidence@0.6.0",
+        "path": "files/yuanshu-v0.6.0/PROPRIETARY-NOTICE.txt",
+        "hashProfile": "UTF8_NO_BOM_LF_V1",
+        "sha256": "596C52BC74985F0066D97CE89C13375D0B294FD25625839997210279892250F9",
+        "rawSha256": "596C52BC74985F0066D97CE89C13375D0B294FD25625839997210279892250F9",
+        "sourceUrls": [
+          "PROJECT_AUTHORED"
+        ]
       },
       "status": {
-        "source": "PARTIAL",
-        "bundling": "PARTIAL",
-        "attribution": "PARTIAL",
-        "notice": "UNKNOWN"
+        "source": "VERIFIED",
+        "bundling": "VERIFIED",
+        "attribution": "VERIFIED",
+        "notice": "VERIFIED"
       },
-      "licenseNoticeFiles": []
+      "licenseNoticeFiles": [
+        {
+          "kind": "NOTICE",
+          "path": "files/yuanshu-v0.6.0/PROPRIETARY-NOTICE.txt",
+          "hashProfile": "UTF8_NO_BOM_LF_V1",
+          "sha256": "596C52BC74985F0066D97CE89C13375D0B294FD25625839997210279892250F9",
+          "rawSha256": "596C52BC74985F0066D97CE89C13375D0B294FD25625839997210279892250F9",
+          "sourceUrls": [
+            "PROJECT_AUTHORED"
+          ]
+        }
+      ]
     },
     {
       "componentId": "payload-project-ScreenGuide.Persistence",
@@ -1101,17 +2512,34 @@
       "payloadSourceKind": "project",
       "payloadComponentId": "ScreenGuide.Persistence",
       "sourceBinding": {
-        "kind": "c0-payload-attribution-catalog",
-        "reference": "project/ScreenGuide.Persistence@0.6.0",
-        "sha256": "PENDING"
+        "kind": "owner-declared-project-source",
+        "reference": "C0/project/ScreenGuide.Persistence@0.6.0",
+        "path": "files/yuanshu-v0.6.0/PROPRIETARY-NOTICE.txt",
+        "hashProfile": "UTF8_NO_BOM_LF_V1",
+        "sha256": "596C52BC74985F0066D97CE89C13375D0B294FD25625839997210279892250F9",
+        "rawSha256": "596C52BC74985F0066D97CE89C13375D0B294FD25625839997210279892250F9",
+        "sourceUrls": [
+          "PROJECT_AUTHORED"
+        ]
       },
       "status": {
-        "source": "PARTIAL",
-        "bundling": "PARTIAL",
-        "attribution": "PARTIAL",
-        "notice": "UNKNOWN"
+        "source": "VERIFIED",
+        "bundling": "VERIFIED",
+        "attribution": "VERIFIED",
+        "notice": "VERIFIED"
       },
-      "licenseNoticeFiles": []
+      "licenseNoticeFiles": [
+        {
+          "kind": "NOTICE",
+          "path": "files/yuanshu-v0.6.0/PROPRIETARY-NOTICE.txt",
+          "hashProfile": "UTF8_NO_BOM_LF_V1",
+          "sha256": "596C52BC74985F0066D97CE89C13375D0B294FD25625839997210279892250F9",
+          "rawSha256": "596C52BC74985F0066D97CE89C13375D0B294FD25625839997210279892250F9",
+          "sourceUrls": [
+            "PROJECT_AUTHORED"
+          ]
+        }
+      ]
     },
     {
       "componentId": "payload-project-ScreenGuide.Skills.Abstractions",
@@ -1120,17 +2548,34 @@
       "payloadSourceKind": "project",
       "payloadComponentId": "ScreenGuide.Skills.Abstractions",
       "sourceBinding": {
-        "kind": "c0-payload-attribution-catalog",
-        "reference": "project/ScreenGuide.Skills.Abstractions@0.6.0",
-        "sha256": "PENDING"
+        "kind": "owner-declared-project-source",
+        "reference": "C0/project/ScreenGuide.Skills.Abstractions@0.6.0",
+        "path": "files/yuanshu-v0.6.0/PROPRIETARY-NOTICE.txt",
+        "hashProfile": "UTF8_NO_BOM_LF_V1",
+        "sha256": "596C52BC74985F0066D97CE89C13375D0B294FD25625839997210279892250F9",
+        "rawSha256": "596C52BC74985F0066D97CE89C13375D0B294FD25625839997210279892250F9",
+        "sourceUrls": [
+          "PROJECT_AUTHORED"
+        ]
       },
       "status": {
-        "source": "PARTIAL",
-        "bundling": "PARTIAL",
-        "attribution": "PARTIAL",
-        "notice": "UNKNOWN"
+        "source": "VERIFIED",
+        "bundling": "VERIFIED",
+        "attribution": "VERIFIED",
+        "notice": "VERIFIED"
       },
-      "licenseNoticeFiles": []
+      "licenseNoticeFiles": [
+        {
+          "kind": "NOTICE",
+          "path": "files/yuanshu-v0.6.0/PROPRIETARY-NOTICE.txt",
+          "hashProfile": "UTF8_NO_BOM_LF_V1",
+          "sha256": "596C52BC74985F0066D97CE89C13375D0B294FD25625839997210279892250F9",
+          "rawSha256": "596C52BC74985F0066D97CE89C13375D0B294FD25625839997210279892250F9",
+          "sourceUrls": [
+            "PROJECT_AUTHORED"
+          ]
+        }
+      ]
     },
     {
       "componentId": "payload-project-ScreenGuide.Skills.Windows",
@@ -1139,17 +2584,34 @@
       "payloadSourceKind": "project",
       "payloadComponentId": "ScreenGuide.Skills.Windows",
       "sourceBinding": {
-        "kind": "c0-payload-attribution-catalog",
-        "reference": "project/ScreenGuide.Skills.Windows@0.6.0",
-        "sha256": "PENDING"
+        "kind": "owner-declared-project-source",
+        "reference": "C0/project/ScreenGuide.Skills.Windows@0.6.0",
+        "path": "files/yuanshu-v0.6.0/PROPRIETARY-NOTICE.txt",
+        "hashProfile": "UTF8_NO_BOM_LF_V1",
+        "sha256": "596C52BC74985F0066D97CE89C13375D0B294FD25625839997210279892250F9",
+        "rawSha256": "596C52BC74985F0066D97CE89C13375D0B294FD25625839997210279892250F9",
+        "sourceUrls": [
+          "PROJECT_AUTHORED"
+        ]
       },
       "status": {
-        "source": "PARTIAL",
-        "bundling": "PARTIAL",
-        "attribution": "PARTIAL",
-        "notice": "UNKNOWN"
+        "source": "VERIFIED",
+        "bundling": "VERIFIED",
+        "attribution": "VERIFIED",
+        "notice": "VERIFIED"
       },
-      "licenseNoticeFiles": []
+      "licenseNoticeFiles": [
+        {
+          "kind": "NOTICE",
+          "path": "files/yuanshu-v0.6.0/PROPRIETARY-NOTICE.txt",
+          "hashProfile": "UTF8_NO_BOM_LF_V1",
+          "sha256": "596C52BC74985F0066D97CE89C13375D0B294FD25625839997210279892250F9",
+          "rawSha256": "596C52BC74985F0066D97CE89C13375D0B294FD25625839997210279892250F9",
+          "sourceUrls": [
+            "PROJECT_AUTHORED"
+          ]
+        }
+      ]
     },
     {
       "componentId": "payload-project-ScreenGuide.Vision.Abstractions",
@@ -1158,17 +2620,34 @@
       "payloadSourceKind": "project",
       "payloadComponentId": "ScreenGuide.Vision.Abstractions",
       "sourceBinding": {
-        "kind": "c0-payload-attribution-catalog",
-        "reference": "project/ScreenGuide.Vision.Abstractions@0.6.0",
-        "sha256": "PENDING"
+        "kind": "owner-declared-project-source",
+        "reference": "C0/project/ScreenGuide.Vision.Abstractions@0.6.0",
+        "path": "files/yuanshu-v0.6.0/PROPRIETARY-NOTICE.txt",
+        "hashProfile": "UTF8_NO_BOM_LF_V1",
+        "sha256": "596C52BC74985F0066D97CE89C13375D0B294FD25625839997210279892250F9",
+        "rawSha256": "596C52BC74985F0066D97CE89C13375D0B294FD25625839997210279892250F9",
+        "sourceUrls": [
+          "PROJECT_AUTHORED"
+        ]
       },
       "status": {
-        "source": "PARTIAL",
-        "bundling": "PARTIAL",
-        "attribution": "PARTIAL",
-        "notice": "UNKNOWN"
+        "source": "VERIFIED",
+        "bundling": "VERIFIED",
+        "attribution": "VERIFIED",
+        "notice": "VERIFIED"
       },
-      "licenseNoticeFiles": []
+      "licenseNoticeFiles": [
+        {
+          "kind": "NOTICE",
+          "path": "files/yuanshu-v0.6.0/PROPRIETARY-NOTICE.txt",
+          "hashProfile": "UTF8_NO_BOM_LF_V1",
+          "sha256": "596C52BC74985F0066D97CE89C13375D0B294FD25625839997210279892250F9",
+          "rawSha256": "596C52BC74985F0066D97CE89C13375D0B294FD25625839997210279892250F9",
+          "sourceUrls": [
+            "PROJECT_AUTHORED"
+          ]
+        }
+      ]
     },
     {
       "componentId": "payload-project-ScreenGuide.Vision.Windows",
@@ -1177,17 +2656,34 @@
       "payloadSourceKind": "project",
       "payloadComponentId": "ScreenGuide.Vision.Windows",
       "sourceBinding": {
-        "kind": "c0-payload-attribution-catalog",
-        "reference": "project/ScreenGuide.Vision.Windows@0.6.0",
-        "sha256": "PENDING"
+        "kind": "owner-declared-project-source",
+        "reference": "C0/project/ScreenGuide.Vision.Windows@0.6.0",
+        "path": "files/yuanshu-v0.6.0/PROPRIETARY-NOTICE.txt",
+        "hashProfile": "UTF8_NO_BOM_LF_V1",
+        "sha256": "596C52BC74985F0066D97CE89C13375D0B294FD25625839997210279892250F9",
+        "rawSha256": "596C52BC74985F0066D97CE89C13375D0B294FD25625839997210279892250F9",
+        "sourceUrls": [
+          "PROJECT_AUTHORED"
+        ]
       },
       "status": {
-        "source": "PARTIAL",
-        "bundling": "PARTIAL",
-        "attribution": "PARTIAL",
-        "notice": "UNKNOWN"
+        "source": "VERIFIED",
+        "bundling": "VERIFIED",
+        "attribution": "VERIFIED",
+        "notice": "VERIFIED"
       },
-      "licenseNoticeFiles": []
+      "licenseNoticeFiles": [
+        {
+          "kind": "NOTICE",
+          "path": "files/yuanshu-v0.6.0/PROPRIETARY-NOTICE.txt",
+          "hashProfile": "UTF8_NO_BOM_LF_V1",
+          "sha256": "596C52BC74985F0066D97CE89C13375D0B294FD25625839997210279892250F9",
+          "rawSha256": "596C52BC74985F0066D97CE89C13375D0B294FD25625839997210279892250F9",
+          "sourceUrls": [
+            "PROJECT_AUTHORED"
+          ]
+        }
+      ]
     },
     {
       "componentId": "payload-project-ScreenGuide.Voice.Windows",
@@ -1196,17 +2692,34 @@
       "payloadSourceKind": "project",
       "payloadComponentId": "ScreenGuide.Voice.Windows",
       "sourceBinding": {
-        "kind": "c0-payload-attribution-catalog",
-        "reference": "project/ScreenGuide.Voice.Windows@0.6.0",
-        "sha256": "PENDING"
+        "kind": "owner-declared-project-source",
+        "reference": "C0/project/ScreenGuide.Voice.Windows@0.6.0",
+        "path": "files/yuanshu-v0.6.0/PROPRIETARY-NOTICE.txt",
+        "hashProfile": "UTF8_NO_BOM_LF_V1",
+        "sha256": "596C52BC74985F0066D97CE89C13375D0B294FD25625839997210279892250F9",
+        "rawSha256": "596C52BC74985F0066D97CE89C13375D0B294FD25625839997210279892250F9",
+        "sourceUrls": [
+          "PROJECT_AUTHORED"
+        ]
       },
       "status": {
-        "source": "PARTIAL",
-        "bundling": "PARTIAL",
-        "attribution": "PARTIAL",
-        "notice": "UNKNOWN"
+        "source": "VERIFIED",
+        "bundling": "VERIFIED",
+        "attribution": "VERIFIED",
+        "notice": "VERIFIED"
       },
-      "licenseNoticeFiles": []
+      "licenseNoticeFiles": [
+        {
+          "kind": "NOTICE",
+          "path": "files/yuanshu-v0.6.0/PROPRIETARY-NOTICE.txt",
+          "hashProfile": "UTF8_NO_BOM_LF_V1",
+          "sha256": "596C52BC74985F0066D97CE89C13375D0B294FD25625839997210279892250F9",
+          "rawSha256": "596C52BC74985F0066D97CE89C13375D0B294FD25625839997210279892250F9",
+          "sourceUrls": [
+            "PROJECT_AUTHORED"
+          ]
+        }
+      ]
     },
     {
       "componentId": "payload-project-runtime-prompts",
@@ -1215,53 +2728,106 @@
       "payloadSourceKind": "project",
       "payloadComponentId": "runtime-prompts",
       "sourceBinding": {
-        "kind": "c0-payload-attribution-catalog",
-        "reference": "project/runtime-prompts@0.6.0",
-        "sha256": "PENDING"
+        "kind": "owner-declared-project-source",
+        "reference": "C0/project/runtime-prompts@0.6.0",
+        "path": "files/yuanshu-v0.6.0/PROPRIETARY-NOTICE.txt",
+        "hashProfile": "UTF8_NO_BOM_LF_V1",
+        "sha256": "596C52BC74985F0066D97CE89C13375D0B294FD25625839997210279892250F9",
+        "rawSha256": "596C52BC74985F0066D97CE89C13375D0B294FD25625839997210279892250F9",
+        "sourceUrls": [
+          "PROJECT_AUTHORED"
+        ]
       },
       "status": {
-        "source": "PARTIAL",
-        "bundling": "PARTIAL",
-        "attribution": "PARTIAL",
-        "notice": "UNKNOWN"
+        "source": "VERIFIED",
+        "bundling": "VERIFIED",
+        "attribution": "VERIFIED",
+        "notice": "VERIFIED"
       },
-      "licenseNoticeFiles": []
+      "licenseNoticeFiles": [
+        {
+          "kind": "NOTICE",
+          "path": "files/yuanshu-v0.6.0/PROPRIETARY-NOTICE.txt",
+          "hashProfile": "UTF8_NO_BOM_LF_V1",
+          "sha256": "596C52BC74985F0066D97CE89C13375D0B294FD25625839997210279892250F9",
+          "rawSha256": "596C52BC74985F0066D97CE89C13375D0B294FD25625839997210279892250F9",
+          "sourceUrls": [
+            "PROJECT_AUTHORED"
+          ]
+        }
+      ]
     },
     {
       "componentId": "inno-installer-engine",
-      "version": "EXACT_VERSION_OPEN",
+      "version": "6.7.3",
       "artifactScope": "installerContainer",
       "payloadComponentId": "inno-installer-engine",
       "sourceBinding": {
-        "kind": "official-default-branch-license-evidence",
-        "reference": "jrsoftware/issrc",
-        "sha256": "PENDING"
+        "kind": "exact-upstream-tag",
+        "reference": "jrsoftware/issrc@is-6_7_3",
+        "path": "files/inno-setup-6.7.3/LICENSE.txt",
+        "hashProfile": "UTF8_NO_BOM_LF_V1",
+        "sha256": "3DF23505B7EC00DC007A1E1E9BA32EE3895E7CE90043BCD1AC1B9B47155921A7",
+        "rawSha256": "2E5346868C2A18434489824E11D65C3031620F792FEFC415D05F19CD441ABF5C",
+        "sourceUrls": [
+          "https://raw.githubusercontent.com/jrsoftware/issrc/is-6_7_3/license.txt"
+        ]
       },
       "status": {
-        "source": "PARTIAL",
-        "bundling": "PARTIAL",
-        "attribution": "UNKNOWN",
-        "notice": "UNKNOWN"
+        "source": "VERIFIED",
+        "bundling": "VERIFIED",
+        "attribution": "VERIFIED",
+        "notice": "VERIFIED"
       },
-      "licenseNoticeFiles": []
+      "licenseNoticeFiles": [
+        {
+          "kind": "LICENSE",
+          "path": "files/inno-setup-6.7.3/LICENSE.txt",
+          "hashProfile": "UTF8_NO_BOM_LF_V1",
+          "sha256": "3DF23505B7EC00DC007A1E1E9BA32EE3895E7CE90043BCD1AC1B9B47155921A7",
+          "rawSha256": "2E5346868C2A18434489824E11D65C3031620F792FEFC415D05F19CD441ABF5C",
+          "sourceUrls": [
+            "https://raw.githubusercontent.com/jrsoftware/issrc/is-6_7_3/license.txt"
+          ]
+        }
+      ],
+      "containerEntry": "installer/inno-engine-6.7.3"
     },
     {
       "componentId": "inno-chinese-simplified-translation",
-      "version": "EXACT_PROVENANCE_OPEN",
+      "version": "6da09d23e14443d4cf8f07b1c5fd821bfe459788",
       "artifactScope": "installerContainer",
       "payloadComponentId": "inno-chinese-simplified-translation",
       "sourceBinding": {
-        "kind": "c0-blob-only-upstream-open",
-        "reference": "30d997321197c7c96d8e111e9ddd6c0ca8da5f09",
-        "sha256": "BF0751FA176569C6FAA2F6E17ED2734617BEF325D5CC06EAE030FDD0258EE778"
+        "kind": "exact-upstream-commit",
+        "reference": "kira-96/Inno-Setup-Chinese-Simplified-Translation@6da09d23e14443d4cf8f07b1c5fd821bfe459788",
+        "path": "files/inno-chinese-simplified-6da09d23e14443d4cf8f07b1c5fd821bfe459788/ChineseSimplified.isl",
+        "hashProfile": "UTF8_NO_BOM_LF_V1",
+        "sha256": "869E43E7C7B8D20C7E4397C8E98F7D1B7CF0528803ACDF019AD350143EC85469",
+        "rawSha256": "869E43E7C7B8D20C7E4397C8E98F7D1B7CF0528803ACDF019AD350143EC85469",
+        "sourceUrls": [
+          "https://raw.githubusercontent.com/kira-96/Inno-Setup-Chinese-Simplified-Translation/6da09d23e14443d4cf8f07b1c5fd821bfe459788/ChineseSimplified.isl"
+        ]
       },
       "status": {
-        "source": "PARTIAL",
+        "source": "VERIFIED",
         "bundling": "VERIFIED",
-        "attribution": "PARTIAL",
-        "notice": "UNKNOWN"
+        "attribution": "VERIFIED",
+        "notice": "VERIFIED"
       },
-      "licenseNoticeFiles": []
+      "licenseNoticeFiles": [
+        {
+          "kind": "LICENSE",
+          "path": "files/inno-chinese-simplified-6da09d23e14443d4cf8f07b1c5fd821bfe459788/LICENSE",
+          "hashProfile": "UTF8_NO_BOM_LF_V1",
+          "sha256": "02F0DD3B98833040147D01DAF91243C24392A33DDCED674152220B5216782C6A",
+          "rawSha256": "02F0DD3B98833040147D01DAF91243C24392A33DDCED674152220B5216782C6A",
+          "sourceUrls": [
+            "https://raw.githubusercontent.com/kira-96/Inno-Setup-Chinese-Simplified-Translation/6da09d23e14443d4cf8f07b1c5fd821bfe459788/LICENSE"
+          ]
+        }
+      ],
+      "containerEntry": "installer/ChineseSimplified.isl"
     }
   ],
   "exclusions": {
@@ -1278,15 +2844,11 @@
       "models/sherpa-onnx-streaming-zipformer-zh-int8-2025-06-30/"
     ]
   },
-  "remainingBlockers": [
-    "owner_root_license_decision_open",
-    "icon_external_distribution_clearance_open",
-    "exact_license_notice_files_not_bundled",
-    "payload_notice_license_paths_open",
-    "dotnet_runtime_notice_placement_open",
-    "sqlite_native_notice_placement_open",
-    "sherpa_onnx_notice_placement_open",
-    "winsdk_terms_and_notice_implementation_open",
-    "inno_exact_version_and_translation_provenance_open"
-  ]
+  "remainingBlockers": [],
+  "rootNotice": {
+    "path": "THIRD-PARTY-NOTICES.txt",
+    "hashProfile": "UTF8_NO_BOM_LF_V1",
+    "sha256": "098CB7377F3DCDB0E665C94180A0E05819AA990EF5CCD8F81D96E785C92B9C6D",
+    "rawSha256": "098CB7377F3DCDB0E665C94180A0E05819AA990EF5CCD8F81D96E785C92B9C6D"
+  }
 }

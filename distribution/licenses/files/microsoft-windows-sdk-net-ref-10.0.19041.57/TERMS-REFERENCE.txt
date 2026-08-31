@@ -1,0 +1,11 @@
+TERMS-REFERENCE — this file is not an open-source license copy.
+
+Component: Microsoft.Windows.SDK.NET.Ref 10.0.19041.57.
+Frozen payload file: Microsoft.Windows.SDK.NET.dll.
+Official package reference: https://www.nuget.org/packages/Microsoft.Windows.SDK.NET.Ref/10.0.19041.57
+Official redistribution reference: https://learn.microsoft.com/en-us/legal/windows-sdk/redist
+REDIST-listed relative path verified on 2026-08-31: ./lib/net8.0/Microsoft.Windows.SDK.NET.dll
+
+The product owner states that they personally read and accept the applicable Microsoft Windows SDK license and REDIST conditions. This records the owner's declaration and the exact reference-only evidence; it does not copy or rename Microsoft terms as an open-source LICENSE, does not determine legal compliance, and does not authorize release.
+
+Microsoft.Windows.SDK.BuildTools 10.0.26100.4948 is build-only and is not an installed-payload component in this bundle.

@@ -33,6 +33,7 @@ function New-PassFixture([string]$root) {
     $licensePath = Join-Path $bundleRoot 'files\alpha\LICENSE.txt'
     $betaLicensePath = Join-Path $bundleRoot 'files\beta-installer\LICENSE.txt'
     $noticeIndexPath = Join-Path $bundleRoot 'notice-index.json'
+    $rootNoticePath = Join-Path $bundleRoot 'THIRD-PARTY-NOTICES.txt'
     $manifestPath = Join-Path $bundleRoot 'bundle-manifest.json'
     $payloadPath = Join-Path $root 'payload-manifest.json'
     $stagingRoot = Join-Path $root 'approved-staging'
@@ -42,6 +43,7 @@ function New-PassFixture([string]$root) {
     [IO.File]::WriteAllText($licensePath, "FAKE LICENSE FOR TESTS ONLY`n", [Text.UTF8Encoding]::new($false))
     [IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($betaLicensePath)) | Out-Null
     [IO.File]::WriteAllText($betaLicensePath, "FAKE BETA LICENSE FOR TESTS ONLY`n", [Text.UTF8Encoding]::new($false))
+    [IO.File]::WriteAllText($rootNoticePath, "FAKE THIRD-PARTY NOTICE INDEX FOR TESTS ONLY`n", [Text.UTF8Encoding]::new($false))
 
     $payload = [ordered]@{
         schemaVersion = 1
@@ -89,6 +91,12 @@ function New-PassFixture([string]$root) {
             hashProfile = 'UTF8_NO_BOM_LF_V1'
             sha256 = (Get-Sha256 $noticeIndexPath)
         }
+        rootNotice = [ordered]@{
+            path = 'THIRD-PARTY-NOTICES.txt'
+            hashProfile = 'UTF8_NO_BOM_LF_V1'
+            sha256 = (Get-Sha256 $rootNoticePath)
+            rawSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $rootNoticePath).Hash
+        }
         components = @(
             [ordered]@{
                 componentId = 'alpha'
@@ -99,7 +107,11 @@ function New-PassFixture([string]$root) {
                 sourceBinding = [ordered]@{
                     kind = 'test-fixture'
                     reference = 'fake-alpha-source@1.0.0'
-                    sha256 = ('B' * 64)
+                    path = 'files/alpha/LICENSE.txt'
+                    hashProfile = 'UTF8_NO_BOM_LF_V1'
+                    sha256 = (Get-Sha256 $licensePath)
+                    rawSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $licensePath).Hash
+                    sourceUrls = @('PROJECT_AUTHORED')
                 }
                 status = [ordered]@{
                     source = 'VERIFIED'
@@ -113,6 +125,8 @@ function New-PassFixture([string]$root) {
                         path = 'files/alpha/LICENSE.txt'
                         hashProfile = 'UTF8_NO_BOM_LF_V1'
                         sha256 = (Get-Sha256 $licensePath)
+                        rawSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $licensePath).Hash
+                        sourceUrls = @('PROJECT_AUTHORED')
                     }
                 )
             },
@@ -124,7 +138,11 @@ function New-PassFixture([string]$root) {
                 sourceBinding = [ordered]@{
                     kind = 'test-fixture'
                     reference = 'fake-beta-source@2.0.0'
-                    sha256 = ('C' * 64)
+                    path = 'files/beta-installer/LICENSE.txt'
+                    hashProfile = 'UTF8_NO_BOM_LF_V1'
+                    sha256 = (Get-Sha256 $betaLicensePath)
+                    rawSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $betaLicensePath).Hash
+                    sourceUrls = @('PROJECT_AUTHORED')
                 }
                 status = [ordered]@{
                     source = 'VERIFIED'
@@ -138,6 +156,8 @@ function New-PassFixture([string]$root) {
                         path = 'files/beta-installer/LICENSE.txt'
                         hashProfile = 'UTF8_NO_BOM_LF_V1'
                         sha256 = (Get-Sha256 $betaLicensePath)
+                        rawSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $betaLicensePath).Hash
+                        sourceUrls = @('PROJECT_AUTHORED')
                     }
                 )
             }
@@ -320,11 +340,11 @@ try {
         IncludePath = $currentInclude
     }
     $currentRun = Invoke-Validator $currentFixture
-    Assert-True ($currentRun.ExitCode -ne 0) 'The current real bundle must remain blocked.'
+    Assert-Equal 0 $currentRun.ExitCode 'The current exact real bundle must pass.'
     $currentResult = $currentRun.Output | ConvertFrom-Json
-    Assert-Equal 'distribution_notice_bundle_incomplete' $currentResult.errorCode 'The current bundle must use the stable incomplete code.'
-    Assert-True (@($currentResult.blockers) -contains 'declared_blocker:exact_license_notice_files_not_bundled') 'The current blocker must identify missing exact files.'
-    Assert-True (-not (Test-Path -LiteralPath $currentInclude)) 'The current blocked bundle must not emit an Inno include.'
+    Assert-True $currentResult.passed 'The current exact bundle must report passed=true.'
+    Assert-Equal 539 $currentResult.payloadCount 'The current exact bundle must reconcile all payload rows.'
+    Assert-True (Test-Path -LiteralPath $currentInclude -PathType Leaf) 'The verified bundle must emit its deterministic Inno include.'
     Assert-Equal $sentinelHashBefore (Get-FileHash -Algorithm SHA256 -LiteralPath $sentinelInstaller).Hash 'Validation must not mutate an existing installer output.'
     Assert-True (-not $currentRun.Output.Contains($repoRoot)) 'Structured gate evidence must not contain an absolute repository path.'
 
@@ -344,7 +364,7 @@ try {
     Assert-True ($iss.Contains('#include "..\artifacts\staging\distribution-notice-files.iss"')) 'Inno must require the validated generated include.'
     Assert-True (-not $iss.Contains('distribution-notice-files.iss"; Flags: skipifsourcedoesntexist')) 'The distribution include must never be optional.'
 
-    Write-Host 'CURRENT bundle: blocked before installer mutation'
+    Write-Host 'CURRENT exact bundle: verified without installer mutation'
     Write-Host 'RELEASE wiring: passed'
     Write-Host 'TOTAL: 17 targeted cases passed'
 }
