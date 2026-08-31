@@ -16,6 +16,7 @@ $databasePath = Join-Path $dataRoot 'state\tasking.db'
 $existingUninstallKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\{E2B9C242-2965-48BC-B2C6-CF83A2B11953}_is1'
 $contractScript = Join-Path $inputRoot 'Test-Stage5SandboxLifecycleContract.ps1'
 $budgetScript = Join-Path $inputRoot 'Stage5LifecycleExecutionBudget.ps1'
+$diagnosticsScript = Join-Path $inputRoot 'Stage5LifecycleFailureDiagnostics.ps1'
 $probeValidator = Join-Path $inputRoot 'Test-Stage5LifecycleProbeBundle.ps1'
 $probeExecutable = $null
 $errorCode = 's5_lifecycle_unexpected_failure'
@@ -23,6 +24,9 @@ $hostExecutions = 0
 $exitCodes = [Collections.Generic.List[int]]::new()
 $installerExitCodes = [Collections.Generic.List[int]]::new()
 $installerBudget = $null
+if (-not (Test-Path -LiteralPath $diagnosticsScript -PathType Leaf)) { throw 's5_lifecycle_diagnostics_missing' }
+. $diagnosticsScript
+$diagnostics = New-Stage5LifecycleDiagnosticState
 
 function Throw-Code([string]$code) {
     $script:errorCode = $code
@@ -44,22 +48,9 @@ function Has-ReparsePoint([string]$path) {
 
 function Write-SafeFailure([string]$code) {
     $budgetSnapshot = if ($null -eq $installerBudget) { $null } else { Get-Stage5LifecycleExecutionBudgetSnapshot -Budget $installerBudget }
-    $result = [ordered]@{
-        contractVersion = 1
-        status = 'BLOCKED'
-        errorCode = $code
-        finalized = $true
-        networkRequests = 0
-        providerRequests = 0
-        credentialReads = 0
-        installerExecutionBudget = $budgetSnapshot
-        hostExecutions = $hostExecutions
-    }
-    [IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($EvidencePath)) | Out-Null
-    [IO.File]::WriteAllText(
-        $EvidencePath,
-        (($result | ConvertTo-Json -Depth 10).Replace("`r`n", "`n") + "`n"),
-        [Text.UTF8Encoding]::new($false))
+    $presence = Get-Stage5LifecycleSafePresence -InstallRoot $installRoot -UninstallKey $existingUninstallKey
+    [void](Write-Stage5LifecycleFailureEvidence -EvidencePath $EvidencePath -ErrorCode $code `
+        -State $diagnostics -InstallerExecutionBudget $budgetSnapshot -Presence $presence)
 }
 
 function Invoke-Hidden(
@@ -67,18 +58,19 @@ function Invoke-Hidden(
     [string[]]$arguments,
     [ValidateSet('installer', 'host', 'probe')] [string]$kind,
     [ValidateSet('InstallOrUpgrade', 'Uninstall')] [string]$installerKind) {
-    if ($kind -eq 'installer') {
-        if ($null -eq $installerBudget -or [string]::IsNullOrWhiteSpace($installerKind)) {
-            Throw-Code 's5_lifecycle_installer_execution_count_mismatch'
-        }
-        try { Enter-Stage5LifecycleInstallerExecution -Budget $installerBudget -Kind $installerKind }
-        catch { Throw-Code $_.Exception.Message }
+    try {
+        $exitCode = Invoke-Stage5LifecycleObservedProcess -State $diagnostics -Budget $installerBudget `
+            -FilePath $file -Arguments $arguments -Kind $kind -InstallerKind $installerKind
     }
-    $process = Start-Process -FilePath $file -ArgumentList $arguments -Wait -PassThru -WindowStyle Hidden
-    $exitCodes.Add($process.ExitCode)
-    if ($kind -eq 'installer') { $installerExitCodes.Add($process.ExitCode) }
+    catch {
+        if ([string]$_.Exception.Message -cmatch '^s5_lifecycle_[a-z0-9_]+$') {
+            $script:errorCode = [string]$_.Exception.Message
+        }
+        throw
+    }
+    $exitCodes.Add($exitCode)
+    if ($kind -eq 'installer') { $installerExitCodes.Add($exitCode) }
     if ($kind -eq 'host') { $script:hostExecutions++ }
-    if ($process.ExitCode -ne 0) { Throw-Code ('s5_lifecycle_' + $kind + '_failed') }
 }
 
 function Assert-Hash([string]$path, [string]$expected, [string]$code) {
@@ -158,6 +150,7 @@ function Get-MatchingBackup([string]$directory) {
 }
 
 try {
+    Set-Stage5LifecyclePhase $diagnostics 'plan-validation'
     $resolvedPlan = [IO.Path]::GetFullPath($PlanPath)
     $resolvedEvidence = [IO.Path]::GetFullPath($EvidencePath)
     if (-not $resolvedPlan.StartsWith($inputRoot + '\', [StringComparison]::OrdinalIgnoreCase) -or
@@ -185,9 +178,11 @@ try {
     }
     catch { Throw-Code $_.Exception.Message }
     [IO.Directory]::CreateDirectory($runtimeRoot) | Out-Null
+    Set-Stage5LifecyclePhase $diagnostics 'sandbox-clean-validation'
     if ((Test-Path -LiteralPath $installRoot) -or (Test-Path -LiteralPath $existingUninstallKey) -or (Test-Path -LiteralPath $dataRoot)) {
         Throw-Code 's5_lifecycle_sandbox_not_clean'
     }
+    Set-Stage5LifecyclePhase $diagnostics 'artifact-validation'
     $oldInstaller = Join-Path $inputRoot ([string]$plan.oldInstaller.fileName)
     $candidateInstaller = Join-Path $inputRoot ([string]$plan.candidateInstaller.fileName)
     $probe = Join-Path $inputRoot ([string]$plan.lifecycleProbe.fileName).Replace('/', '\')
@@ -197,6 +192,7 @@ try {
     if (-not (Test-Path -LiteralPath $probeValidator -PathType Leaf) -or (Has-ReparsePoint $probeValidator)) {
         Throw-Code 's5_lifecycle_probe_bundle_invalid'
     }
+    Set-Stage5LifecyclePhase $diagnostics 'probe-bundle-validation'
     $probeValidationPath = Join-Path $runtimeRoot 'probe-bundle-validation.json'
     $probeValidationOutput = @(& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $probeValidator `
         -BundleRoot (Join-Path $inputRoot 'probe') -ResultPath $probeValidationPath 2>&1)
@@ -211,25 +207,36 @@ try {
         Throw-Code 's5_lifecycle_probe_bundle_invalid'
     }
 
+    Set-Stage5LifecyclePhase $diagnostics 'old-install'
     Install $oldInstaller 'install-v0.5.log'
+    Set-Stage5LifecyclePhase $diagnostics 'old-pair-validation'
     $oldPair = Get-PairIdentity
     Assert-Pair $oldPair $plan.oldIdentity
+    Set-Stage5LifecyclePhase $diagnostics 'old-host-start'
     Invoke-HostOnce ('Yuanshu.Stage5.Old.' + [Guid]::NewGuid().ToString('N'))
+    Set-Stage5LifecyclePhase $diagnostics 'old-schema-validation'
     $oldSchema = Invoke-Probe $databasePath 10 'schema-v10-before-upgrade'
+    Set-Stage5LifecyclePhase $diagnostics 'canary-create'
     $canaryPath = Join-Path $dataRoot 'stage5-lifecycle-canary.txt'
     [IO.File]::WriteAllText($canaryPath, 'yuanshu-stage5-lifecycle-canary-v1', [Text.UTF8Encoding]::new($false))
     $canaryHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $canaryPath).Hash
 
+    Set-Stage5LifecyclePhase $diagnostics 'candidate-upgrade'
     Install $candidateInstaller 'upgrade-v0.6.log'
+    Set-Stage5LifecyclePhase $diagnostics 'candidate-pair-validation'
     $newPair = Get-PairIdentity
     Assert-Pair $newPair $plan.candidateIdentity
+    Set-Stage5LifecyclePhase $diagnostics 'candidate-host-start'
     Invoke-HostOnce ('Yuanshu.Stage5.New.' + [Guid]::NewGuid().ToString('N'))
+    Set-Stage5LifecyclePhase $diagnostics 'candidate-schema-validation'
     $newSchema = Invoke-Probe $databasePath 11 'schema-v11-after-upgrade'
+    Set-Stage5LifecyclePhase $diagnostics 'backup-validation'
     $backup = Get-MatchingBackup (Split-Path -Parent $databasePath)
     $backupSchema = Invoke-Probe $backup 10 'schema-v10-backup'
     if ((Get-FileHash -Algorithm SHA256 -LiteralPath $canaryPath).Hash -cne $canaryHash) {
         Throw-Code 's5_lifecycle_canary_changed'
     }
+    Set-Stage5LifecyclePhase $diagnostics 'notice-validation'
     $requiredNoticeFiles = @(
         'THIRD-PARTY-NOTICES.txt',
         'distribution/bundle-manifest.json',
@@ -243,6 +250,7 @@ try {
         if (-not (Test-Path -LiteralPath $noticePath -PathType Leaf)) { Throw-Code 's5_lifecycle_notice_missing' }
     }
 
+    Set-Stage5LifecyclePhase $diagnostics 'rollback-refusal-validation'
     $v11HashBeforeMissing = (Get-FileHash -Algorithm SHA256 -LiteralPath $databasePath).Hash
     $emptyBackupRoot = Join-Path $runtimeRoot 'missing-backup-case'
     [IO.Directory]::CreateDirectory($emptyBackupRoot) | Out-Null
@@ -255,29 +263,38 @@ try {
     $v11HashAfterMissing = (Get-FileHash -Algorithm SHA256 -LiteralPath $databasePath).Hash
     if (-not $missingRefused -or $v11HashBeforeMissing -cne $v11HashAfterMissing) { Throw-Code 's5_lifecycle_v11_hash_changed' }
 
+    Set-Stage5LifecyclePhase $diagnostics 'preserve-v11'
     $preservedRoot = Join-Path $dataRoot 'stage5-preserved-v11'
     [IO.Directory]::CreateDirectory($preservedRoot) | Out-Null
     $preservedV11 = Join-Path $preservedRoot 'tasking.v11.preserved.db'
     Copy-Item -LiteralPath $databasePath -Destination $preservedV11
     $preservedBefore = (Get-FileHash -Algorithm SHA256 -LiteralPath $preservedV11).Hash
+    Set-Stage5LifecyclePhase $diagnostics 'candidate-uninstall'
     Uninstall
+    Set-Stage5LifecyclePhase $diagnostics 'restore-v10-backup'
     Copy-Item -LiteralPath $backup -Destination $databasePath -Force
     [void](Invoke-Probe $databasePath 10 'schema-v10-restored')
+    Set-Stage5LifecyclePhase $diagnostics 'rollback-install'
     Install $oldInstaller 'rollback-v0.5.log'
+    Set-Stage5LifecyclePhase $diagnostics 'rollback-pair-validation'
     $rollbackPair = Get-PairIdentity
     Assert-Pair $rollbackPair $plan.oldIdentity
+    Set-Stage5LifecyclePhase $diagnostics 'rollback-host-start'
     Invoke-HostOnce ('Yuanshu.Stage5.Rollback.' + [Guid]::NewGuid().ToString('N'))
+    Set-Stage5LifecyclePhase $diagnostics 'rollback-schema-validation'
     [void](Invoke-Probe $databasePath 10 'schema-v10-after-rollback')
     $preservedAfter = (Get-FileHash -Algorithm SHA256 -LiteralPath $preservedV11).Hash
     if ($preservedBefore -cne $preservedAfter -or (Get-FileHash -Algorithm SHA256 -LiteralPath $canaryPath).Hash -cne $canaryHash) {
         Throw-Code 's5_lifecycle_v11_hash_changed'
     }
 
+    Set-Stage5LifecyclePhase $diagnostics 'final-uninstall'
     Uninstall
     $programRemoved = -not (Test-Path -LiteralPath $installRoot)
     $registrationRemoved = -not (Test-Path -LiteralPath $existingUninstallKey)
     $dataRetained = (Test-Path -LiteralPath $databasePath) -and (Test-Path -LiteralPath $preservedV11)
 
+    Set-Stage5LifecyclePhase $diagnostics 'terminal-validation'
     $executionBudget = Get-Stage5LifecycleExecutionBudgetSnapshot -Budget $installerBudget
     if ([int]$executionBudget.installerExecutions -ne 5 -or
         [int]$executionBudget.installOrUpgradeExecutions -ne 3 -or
@@ -315,20 +332,24 @@ try {
             exitCodes = $exitCodes.ToArray()
         }
     }
+    Set-Stage5LifecyclePhase $diagnostics 'evidence-validation'
     $factsPath = Join-Path $runtimeRoot 'lifecycle-facts.json'
     [IO.File]::WriteAllText($factsPath, (($facts | ConvertTo-Json -Depth 30).Replace("`r`n", "`n") + "`n"), [Text.UTF8Encoding]::new($false))
     & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $contractScript -Mode Evidence -FactsPath $factsPath -ResultPath $resolvedEvidence
     exit $LASTEXITCODE
 }
 catch {
+    if ($errorCode -ceq 's5_lifecycle_unexpected_failure') {
+        if ([string]$_.Exception.Message -cmatch '^s5_lifecycle_[a-z0-9_]+$') {
+            $errorCode = [string]$_.Exception.Message
+        } else {
+            $errorCode = Get-Stage5LifecyclePhaseFailureCode ([string]$diagnostics.CurrentPhase)
+        }
+    }
     Write-SafeFailure $errorCode
     exit 1
 }
 finally {
-    $resolvedRuntime = [IO.Path]::GetFullPath($runtimeRoot)
-    $tempPrefix = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\') + '\'
-    if ($resolvedRuntime.StartsWith($tempPrefix, [StringComparison]::OrdinalIgnoreCase) -and
-        [IO.Path]::GetFileName($resolvedRuntime).StartsWith('YuanshuStage5Lifecycle-', [StringComparison]::Ordinal)) {
-        if (Test-Path -LiteralPath $resolvedRuntime) { Remove-Item -LiteralPath $resolvedRuntime -Recurse -Force }
-    }
+    try { Remove-Stage5LifecycleOwnedRuntime $runtimeRoot }
+    catch { }
 }

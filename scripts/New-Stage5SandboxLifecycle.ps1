@@ -111,6 +111,7 @@ Copy-Item -LiteralPath $candidateInstaller -Destination $candidateCopy
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'Invoke-Stage5SandboxLifecycle.ps1') -Destination (Join-Path $inputRoot 'Invoke-Stage5SandboxLifecycle.ps1')
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'Test-Stage5SandboxLifecycleContract.ps1') -Destination (Join-Path $inputRoot 'Test-Stage5SandboxLifecycleContract.ps1')
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'Stage5LifecycleExecutionBudget.ps1') -Destination (Join-Path $inputRoot 'Stage5LifecycleExecutionBudget.ps1')
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'Stage5LifecycleFailureDiagnostics.ps1') -Destination (Join-Path $inputRoot 'Stage5LifecycleFailureDiagnostics.ps1')
 Copy-Item -LiteralPath $probeValidator -Destination (Join-Path $inputRoot 'Test-Stage5LifecycleProbeBundle.ps1')
 Copy-Item -LiteralPath $probeRoot -Destination (Join-Path $inputRoot 'probe') -Recurse
 

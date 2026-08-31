@@ -5,6 +5,7 @@ $contractScript = Join-Path $repoRoot 'scripts\Test-Stage5SandboxLifecycleContra
 $hostScript = Join-Path $repoRoot 'scripts\New-Stage5SandboxLifecycle.ps1'
 $bootstrapScript = Join-Path $repoRoot 'scripts\Invoke-Stage5SandboxLifecycle.ps1'
 $budgetScript = Join-Path $repoRoot 'scripts\Stage5LifecycleExecutionBudget.ps1'
+$diagnosticsScript = Join-Path $repoRoot 'scripts\Stage5LifecycleFailureDiagnostics.ps1'
 $testRoot = Join-Path ([IO.Path]::GetTempPath()) ('YuanshuStage5Lifecycle-Tests-' + [Guid]::NewGuid().ToString('N'))
 
 function Assert-True([bool]$condition, [string]$message) {
@@ -55,6 +56,7 @@ function Assert-Failure($run, [string]$code) {
 
 try {
     [IO.Directory]::CreateDirectory($testRoot) | Out-Null
+    Assert-True (Test-Path -LiteralPath $diagnosticsScript -PathType Leaf) 'Shared lifecycle failure diagnostics must exist.'
     $inputRoot = Join-Path $testRoot 'OwnedInput'
     $evidenceRoot = Join-Path $testRoot 'OwnedEvidence'
     $cleanupRoot = Join-Path $testRoot 'OwnedRuntime'
@@ -248,7 +250,89 @@ try {
     Assert-Equal 3 $budgetSnapshot.installOrUpgradeExecutions 'Rejected sixth attempt must not increment install/upgrade count.'
     Assert-Equal 2 $budgetSnapshot.uninstallExecutions 'Rejected sixth attempt must not increment uninstall count.'
 
-    foreach ($script in @($hostScript, $bootstrapScript)) {
+    . $diagnosticsScript
+    $emptyPresence = [ordered]@{
+        installRootPresent = $false
+        clientPresent = $false
+        hostPresent = $false
+        uninstallRegistrationPresent = $false
+    }
+
+    $launchState = New-Stage5LifecycleDiagnosticState
+    Set-Stage5LifecyclePhase $launchState 'old-install'
+    $launchBudget = New-Stage5LifecycleExecutionBudget -InstallerExecutions 5 -InstallOrUpgradeExecutions 3 -UninstallExecutions 2
+    $launchCode = $null
+    try {
+        [void](Invoke-Stage5LifecycleObservedProcess -State $launchState -Budget $launchBudget `
+            -FilePath 'C:\fixture\installer.exe' -Arguments @('/fixture', 'SUPER_SECRET_ARGUMENT') `
+            -Kind installer -InstallerKind InstallOrUpgrade -StartProcessCommand { throw 'RAW_EXCEPTION_SENTINEL' })
+    }
+    catch { $launchCode = $_.Exception.Message }
+    Assert-Equal 's5_lifecycle_installer_launch_failed' $launchCode 'Start-Process exception must map to a stable launch failure.'
+    $launchEvidencePath = Join-Path $testRoot 'diagnostics-launch-failure.json'
+    [void](Write-Stage5LifecycleFailureEvidence -EvidencePath $launchEvidencePath -ErrorCode $launchCode `
+        -State $launchState -InstallerExecutionBudget (Get-Stage5LifecycleExecutionBudgetSnapshot $launchBudget) -Presence $emptyPresence)
+    $launchEvidence = Get-Content -Raw -LiteralPath $launchEvidencePath | ConvertFrom-Json
+    Assert-Equal 1 $launchEvidence.installerExecutionBudget.installerExecutions 'Launch failure must preserve the pre-start installer attempt.'
+    Assert-Equal 'old-install' $launchEvidence.processes[0].phase 'Launch failure process evidence must retain the stable phase.'
+    Assert-Equal 'installer' $launchEvidence.processes[0].processKind 'Launch failure process evidence must retain the safe process kind.'
+    Assert-Equal 'InstallOrUpgrade' $launchEvidence.processes[0].installerKind 'Launch failure process evidence must retain the installer kind.'
+    Assert-True (-not [bool]$launchEvidence.processes[0].processStarted -and -not [bool]$launchEvidence.processes[0].processExited) 'Launch failure must not claim process start or exit.'
+    Assert-True ($null -eq $launchEvidence.processes[0].exitCode) 'Launch failure must not invent an exit code.'
+
+    $nonzeroState = New-Stage5LifecycleDiagnosticState
+    Set-Stage5LifecyclePhase $nonzeroState 'old-install'
+    $nonzeroBudget = New-Stage5LifecycleExecutionBudget -InstallerExecutions 5 -InstallOrUpgradeExecutions 3 -UninstallExecutions 2
+    $nonzeroCode = $null
+    try {
+        [void](Invoke-Stage5LifecycleObservedProcess -State $nonzeroState -Budget $nonzeroBudget `
+            -FilePath 'C:\fixture\installer.exe' -Arguments @('/fixture') -Kind installer -InstallerKind InstallOrUpgrade `
+            -StartProcessCommand { return [pscustomobject]@{ ExitCode = 23 } })
+    }
+    catch { $nonzeroCode = $_.Exception.Message }
+    Assert-Equal 's5_lifecycle_installer_failed' $nonzeroCode 'Nonzero installer exit must use a stable installer failure.'
+    $nonzeroEvidencePath = Join-Path $testRoot 'diagnostics-nonzero.json'
+    [void](Write-Stage5LifecycleFailureEvidence -EvidencePath $nonzeroEvidencePath -ErrorCode $nonzeroCode `
+        -State $nonzeroState -InstallerExecutionBudget (Get-Stage5LifecycleExecutionBudgetSnapshot $nonzeroBudget) -Presence $emptyPresence)
+    $nonzeroEvidence = Get-Content -Raw -LiteralPath $nonzeroEvidencePath | ConvertFrom-Json
+    Assert-True ([bool]$nonzeroEvidence.processes[0].processStarted -and [bool]$nonzeroEvidence.processes[0].processExited) 'Nonzero exit must prove process start and exit.'
+    Assert-Equal 23 $nonzeroEvidence.processes[0].exitCode 'Nonzero exit evidence must retain only the numeric exit code.'
+
+    $pairState = New-Stage5LifecycleDiagnosticState
+    Set-Stage5LifecyclePhase $pairState 'old-install'
+    $pairBudget = New-Stage5LifecycleExecutionBudget -InstallerExecutions 5 -InstallOrUpgradeExecutions 3 -UninstallExecutions 2
+    [void](Invoke-Stage5LifecycleObservedProcess -State $pairState -Budget $pairBudget `
+        -FilePath 'C:\fixture\installer.exe' -Arguments @('/fixture') -Kind installer -InstallerKind InstallOrUpgrade `
+        -StartProcessCommand { return [pscustomobject]@{ ExitCode = 0 } })
+    Set-Stage5LifecyclePhase $pairState 'old-pair-validation'
+    $pairCode = Get-Stage5LifecyclePhaseFailureCode $pairState.CurrentPhase
+    Assert-Equal 's5_lifecycle_old_pair_validation_failed' $pairCode 'Unclassified post-install pair failure must retain a stable stage code.'
+    $fixtureInstallRoot = Join-Path $testRoot 'fixture-installed-product'
+    [IO.Directory]::CreateDirectory($fixtureInstallRoot) | Out-Null
+    [IO.File]::WriteAllText((Join-Path $fixtureInstallRoot 'ScreenGuide.DesktopClient.exe'), 'fake-client')
+    $pairPresence = Get-Stage5LifecycleSafePresence -InstallRoot $fixtureInstallRoot `
+        -UninstallKey 'HKCU:\Software\YuanshuStage5LifecycleTests\Missing'
+    $pairEvidencePath = Join-Path $testRoot 'diagnostics-pair-failure.json'
+    [void](Write-Stage5LifecycleFailureEvidence -EvidencePath $pairEvidencePath -ErrorCode $pairCode `
+        -State $pairState -InstallerExecutionBudget (Get-Stage5LifecycleExecutionBudgetSnapshot $pairBudget) -Presence $pairPresence)
+    $pairEvidence = Get-Content -Raw -LiteralPath $pairEvidencePath | ConvertFrom-Json
+    Assert-Equal 'old-pair-validation' $pairEvidence.phase 'Pair failure evidence must identify the stable phase.'
+    Assert-True ([bool]$pairEvidence.presence.installRootPresent -and [bool]$pairEvidence.presence.clientPresent) 'Pair failure evidence must retain safe presence booleans.'
+    Assert-True (-not [bool]$pairEvidence.presence.hostPresent -and -not [bool]$pairEvidence.presence.uninstallRegistrationPresent) 'Pair failure evidence must expose missing pair state without paths.'
+    Assert-Equal 0 $pairEvidence.processes[0].exitCode 'Pair failure must preserve the successful installer exit before validation failed.'
+
+    $diagnosticText = (Get-Content -Raw $launchEvidencePath) + (Get-Content -Raw $nonzeroEvidencePath) + (Get-Content -Raw $pairEvidencePath)
+    foreach ($sensitive in @($testRoot, 'C:\fixture\installer.exe', 'SUPER_SECRET_ARGUMENT', 'RAW_EXCEPTION_SENTINEL')) {
+        Assert-True (-not $diagnosticText.Contains($sensitive)) 'Failure evidence must not contain paths, arguments, secrets, or raw exceptions.'
+    }
+    $cleanupFixture = Join-Path ([IO.Path]::GetTempPath()) ('YuanshuStage5Lifecycle-' + [Guid]::NewGuid().ToString('N'))
+    [IO.Directory]::CreateDirectory($cleanupFixture) | Out-Null
+    [IO.File]::WriteAllText((Join-Path $cleanupFixture 'temporary.txt'), 'temporary')
+    Remove-Stage5LifecycleOwnedRuntime $cleanupFixture
+    Assert-True (-not (Test-Path -LiteralPath $cleanupFixture)) 'Owned runtime cleanup must remove only the owned runtime root.'
+    Assert-True (Test-Path -LiteralPath $pairEvidencePath -PathType Leaf) 'Failure evidence must be finalized before owned runtime cleanup.'
+
+    foreach ($script in @($hostScript, $bootstrapScript, $diagnosticsScript)) {
         $text = Get-Content -Raw -LiteralPath $script
         Assert-True (-not $text.Contains('Start-Process WindowsSandbox')) 'Developer harness must not auto-launch Windows Sandbox.'
         Assert-True (-not $text.Contains('http://') -and -not $text.Contains('https://')) 'Lifecycle scripts must not contain network endpoints.'
@@ -258,19 +342,24 @@ try {
     Assert-True ($hostText.Contains('protectedHostInstall')) 'Host preflight must record an existing same-AppId installation as protected informational state.'
     Assert-Equal 0 ([regex]::Matches($hostText, 'Start-Process').Count) 'Host harness must execute zero installer or Sandbox processes.'
     Assert-True ($hostText.Contains("'Stage5LifecycleExecutionBudget.ps1'")) 'Host preflight must place the shared budget guard in the read-only input mapping.'
+    Assert-True ($hostText.Contains("'Stage5LifecycleFailureDiagnostics.ps1'")) 'Host preflight must place shared failure diagnostics in the read-only input mapping.'
     Assert-True ($hostText.Contains("'Test-Stage5LifecycleProbeBundle.ps1'")) 'Host preflight must validate the complete probe bundle before and after copy.'
     $contractText = Get-Content -Raw -LiteralPath $contractScript
     Assert-True (-not $contractText.Contains('s5_lifecycle_existing_host_install')) 'Existing Host installation must not remain a preflight blocker.'
     $bootstrapText = Get-Content -Raw -LiteralPath $bootstrapScript
     Assert-True ($bootstrapText.Contains('tasking.pre-v11-from-v10-*.backup.db')) 'Bootstrap must require the matching migration backup.'
     Assert-True ($bootstrapText.Contains('THIRD-PARTY-NOTICES.txt')) 'Bootstrap must verify NOTICE layout.'
-    Assert-True ($bootstrapText.Contains('Enter-Stage5LifecycleInstallerExecution -Budget $installerBudget -Kind $installerKind')) 'Installer process entry must invoke the shared budget guard before Start-Process.'
+    Assert-True ($bootstrapText.Contains('Invoke-Stage5LifecycleObservedProcess')) 'Every lifecycle process must use the shared observed process seam.'
+    Assert-True ($bootstrapText.Contains('Get-Stage5LifecyclePhaseFailureCode')) 'Bootstrap must normalize unclassified failures through the stable phase code.'
+    Assert-True ($bootstrapText.IndexOf('Write-SafeFailure $errorCode', [StringComparison]::Ordinal) -lt $bootstrapText.LastIndexOf('finally {', [StringComparison]::Ordinal)) 'Failure evidence must be finalized before cleanup begins.'
     Assert-True ($bootstrapText.Contains('installer InstallOrUpgrade')) 'Every install/upgrade wrapper must identify its budget kind.'
     Assert-True ($bootstrapText.Contains('installer Uninstall')) 'Every uninstall wrapper must identify its budget kind.'
     Assert-True ($bootstrapText.Contains('probe-bundle-validation.json')) 'Sandbox bootstrap must validate the complete probe bundle before execution.'
-    Assert-Equal 1 ([regex]::Matches($bootstrapText, 'Start-Process').Count) 'Bootstrap must retain one counted process-start seam.'
+    Assert-Equal 0 ([regex]::Matches($bootstrapText, 'Start-Process').Count) 'Bootstrap must not bypass the shared observed process seam.'
+    $diagnosticsText = Get-Content -Raw -LiteralPath $diagnosticsScript
+    Assert-Equal 1 ([regex]::Matches($diagnosticsText, 'Start-Process').Count) 'Diagnostics must own the single process-start seam.'
 
-    Write-Host 'Stage5 Sandbox lifecycle contract: 2 preflight passes + 11 preflight failures + 1 evidence pass + 10 evidence failures + sixth-attempt budget guard + static safety checks passed'
+    Write-Host 'Stage5 Sandbox lifecycle contract: 25 existing scenarios + 3 process-diagnostic failures + evidence-before-cleanup + static safety checks passed'
 }
 finally {
     $resolved = [IO.Path]::GetFullPath($testRoot)
