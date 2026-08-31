@@ -108,10 +108,16 @@ try {
     $output = [IO.Path]::GetFullPath($OutputRoot).TrimEnd('\')
     $result = [IO.Path]::GetFullPath($ResultPath)
     $tempPrefix = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\') + '\'
-    foreach ($path in @($intermediate, $output, $result)) {
+    $ownedRoot = [IO.Directory]::GetParent($intermediate).FullName.TrimEnd('\')
+    foreach ($path in @($ownedRoot, $intermediate, $output, $result)) {
         if (-not $path.StartsWith($tempPrefix, [StringComparison]::OrdinalIgnoreCase) -or (Has-ReparsePoint $path)) {
             Complete 'BLOCKED' 's5_lifecycle_probe_output_root_invalid' 1 ([ordered]@{ phase = 'path' })
         }
+    }
+    if ([IO.Directory]::GetParent($output).FullName -cne $ownedRoot -or
+        [IO.Path]::GetDirectoryName($result) -cne $ownedRoot -or
+        $intermediate -ceq $output) {
+        Complete 'BLOCKED' 's5_lifecycle_probe_output_root_invalid' 1 ([ordered]@{ phase = 'owned-root' })
     }
     if (-not (Test-Path -LiteralPath $project -PathType Leaf) -or
         -not (Test-Path -LiteralPath (Join-Path (Split-Path -Parent $project) 'packages.lock.json') -PathType Leaf)) {
@@ -136,13 +142,22 @@ try {
     [IO.Directory]::CreateDirectory($intermediate) | Out-Null
     [IO.Directory]::CreateDirectory($output) | Out-Null
     $intermediateProperty = $intermediate.TrimEnd('\') + '\'
+    $compileOutput = Join-Path $intermediate 'bin'
+    [IO.Directory]::CreateDirectory($compileOutput) | Out-Null
+    $compileOutputProperty = $compileOutput.TrimEnd('\') + '\'
+    $publishProperty = $output.TrimEnd('\') + '\'
+    $redirectedBuildProperties = @(
+        "-p:BaseIntermediateOutputPath=$intermediateProperty",
+        "-p:MSBuildProjectExtensionsPath=$intermediateProperty",
+        "-p:BaseOutputPath=$compileOutputProperty",
+        "-p:OutputPath=$compileOutputProperty",
+        "-p:PublishDir=$publishProperty")
     $restoreArguments = @(
         'restore', $project,
         '--locked-mode', '--runtime', 'win-x64', '--packages', $cache, '--source', $cache,
         '--disable-parallel', '--nologo',
-        '-p:NuGetAudit=false', '-p:RestoreIgnoreFailedSources=false', '-p:RestorePackagesWithLockFile=true',
-        "-p:BaseIntermediateOutputPath=$intermediateProperty",
-        "-p:MSBuildProjectExtensionsPath=$intermediateProperty")
+        '-p:NuGetAudit=false', '-p:RestoreIgnoreFailedSources=false', '-p:RestorePackagesWithLockFile=true') +
+        $redirectedBuildProperties
     $restoreOutput = @(& dotnet @restoreArguments 2>&1)
     if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath (Join-Path $intermediate 'project.assets.json') -PathType Leaf)) {
         Complete 'BLOCKED' 's5_lifecycle_probe_locked_restore_failed' 1 ([ordered]@{ phase = 'restore' })
@@ -150,9 +165,7 @@ try {
     $publishArguments = @(
         'publish', $project,
         '--configuration', 'Release', '--runtime', 'win-x64', '--self-contained', 'true', '--no-restore',
-        '--output', $output, '--nologo',
-        "-p:BaseIntermediateOutputPath=$intermediateProperty",
-        "-p:MSBuildProjectExtensionsPath=$intermediateProperty")
+        '--nologo') + $redirectedBuildProperties
     $publishOutput = @(& dotnet @publishArguments 2>&1)
     if ($LASTEXITCODE -ne 0) {
         Complete 'BLOCKED' 's5_lifecycle_probe_publish_failed' 1 ([ordered]@{ phase = 'publish' })

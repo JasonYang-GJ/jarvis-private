@@ -1,13 +1,30 @@
 $ErrorActionPreference = 'Stop'
 
 $repoRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
-$project = Join-Path $repoRoot 'tests\ScreenGuide.Stage5LifecycleProbe\ScreenGuide.Stage5LifecycleProbe.csproj'
+$projectRoot = Join-Path $repoRoot 'tests\ScreenGuide.Stage5LifecycleProbe'
 $prepareScript = Join-Path $repoRoot 'scripts\New-Stage5LifecycleProbeBundle.ps1'
 $validateScript = Join-Path $repoRoot 'scripts\Test-Stage5LifecycleProbeBundle.ps1'
 $testRoot = Join-Path ([IO.Path]::GetTempPath()) ('YuanshuStage5ProbeTests-' + [Guid]::NewGuid().ToString('N'))
 
 function Assert-True([bool]$condition, [string]$message) {
     if (-not $condition) { throw $message }
+}
+
+function Get-TreeFingerprint([string]$path) {
+    if (-not (Test-Path -LiteralPath $path)) { return 'ABSENT' }
+    $root = [IO.Path]::GetFullPath($path).TrimEnd('\')
+    $rows = @(
+        Get-ChildItem -LiteralPath $root -Recurse -Force |
+            Sort-Object FullName |
+            ForEach-Object {
+                $relative = $_.FullName.Substring($root.Length).TrimStart('\').Replace('\', '/')
+                if ($_.PSIsContainer) { "D|$relative|$($_.LastWriteTimeUtc.Ticks)" }
+                else { "F|$relative|$($_.Length)|$($_.LastWriteTimeUtc.Ticks)|$((Get-FileHash -Algorithm SHA256 -LiteralPath $_.FullName).Hash)" }
+            })
+    $bytes = [Text.Encoding]::UTF8.GetBytes(($rows -join "`n"))
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try { return ([BitConverter]::ToString($sha.ComputeHash($bytes))).Replace('-', '') }
+    finally { $sha.Dispose() }
 }
 
 function Invoke-Validator([string]$bundleRoot, [string]$resultPath) {
@@ -25,18 +42,50 @@ try {
     Assert-True (Test-Path -LiteralPath $prepareScript -PathType Leaf) 'Offline probe bundle preparation script must exist.'
     Assert-True (Test-Path -LiteralPath $validateScript -PathType Leaf) 'Probe bundle validator must exist.'
 
+    $repoObjBefore = Get-TreeFingerprint (Join-Path $projectRoot 'obj')
+    $repoBinBefore = Get-TreeFingerprint (Join-Path $projectRoot 'bin')
+    $readOnlySourceRoot = Join-Path $testRoot 'read-only-source'
+    [IO.Directory]::CreateDirectory($readOnlySourceRoot) | Out-Null
+    foreach ($name in @('ScreenGuide.Stage5LifecycleProbe.csproj', 'Program.cs', 'packages.lock.json')) {
+        Copy-Item -LiteralPath (Join-Path $projectRoot $name) -Destination (Join-Path $readOnlySourceRoot $name)
+    }
+    $readOnlyProject = Join-Path $readOnlySourceRoot 'ScreenGuide.Stage5LifecycleProbe.csproj'
+    $sourceAcl = Get-Acl -LiteralPath $readOnlySourceRoot
+    $denyWrite = [Security.AccessControl.FileSystemAccessRule]::new(
+        [Security.Principal.WindowsIdentity]::GetCurrent().User,
+        [Security.AccessControl.FileSystemRights]::Write,
+        [Security.AccessControl.InheritanceFlags]'ContainerInherit, ObjectInherit',
+        [Security.AccessControl.PropagationFlags]::None,
+        [Security.AccessControl.AccessControlType]::Deny)
+    $readOnlyAcl = Get-Acl -LiteralPath $readOnlySourceRoot
+    [void]$readOnlyAcl.AddAccessRule($denyWrite)
+    Set-Acl -LiteralPath $readOnlySourceRoot -AclObject $readOnlyAcl
+    $sourceWriteDenied = $false
+    try { [IO.File]::WriteAllText((Join-Path $readOnlySourceRoot 'write-probe.tmp'), 'must fail') }
+    catch [UnauthorizedAccessException] { $sourceWriteDenied = $true }
+    Assert-True $sourceWriteDenied 'Test source checkout must actually reject writes before preparation starts.'
+
     $intermediateRoot = Join-Path $testRoot 'fresh-intermediate'
     $bundleRoot = Join-Path $testRoot 'self-contained-bundle'
     $prepareResultPath = Join-Path $testRoot 'prepare-result.json'
-    $prepareOutput = @(& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $prepareScript `
-        -ProjectPath $project -IntermediateRoot $intermediateRoot -OutputRoot $bundleRoot `
-        -ResultPath $prepareResultPath 2>&1)
+    try {
+        $prepareOutput = @(& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $prepareScript `
+            -ProjectPath $readOnlyProject -IntermediateRoot $intermediateRoot -OutputRoot $bundleRoot `
+            -ResultPath $prepareResultPath 2>&1)
+    }
+    finally {
+        Set-Acl -LiteralPath $readOnlySourceRoot -AclObject $sourceAcl
+    }
     Assert-True ($LASTEXITCODE -eq 0) ('Fresh offline self-contained preparation must pass. ' + ($prepareOutput -join "`n"))
     $prepare = Get-Content -Raw -LiteralPath $prepareResultPath | ConvertFrom-Json
     Assert-True ($prepare.status -eq 'PASS' -and $prepare.selfContained -and $prepare.runtimeIdentifier -eq 'win-x64') 'Preparation evidence must prove a self-contained win-x64 bundle.'
     Assert-True ($prepare.networkRequests -eq 0 -and $prepare.remoteSources -eq 0) 'Preparation must prove no network or remote NuGet source.'
     Assert-True ($prepare.fileCount -gt 6) 'Self-contained bundle must contain the runtime, not only one executable.'
     Assert-True (Test-Path -LiteralPath (Join-Path $intermediateRoot 'project.assets.json') -PathType Leaf) 'Fresh locked restore must create project.assets.json in the owned intermediate root.'
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $readOnlySourceRoot 'obj'))) 'Preparation must not create obj under the read-only source checkout.'
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $readOnlySourceRoot 'bin'))) 'Preparation must not create bin under the read-only source checkout.'
+    Assert-True ((Get-TreeFingerprint (Join-Path $projectRoot 'obj')) -ceq $repoObjBefore) 'Preparation must not change the repository obj fingerprint.'
+    Assert-True ((Get-TreeFingerprint (Join-Path $projectRoot 'bin')) -ceq $repoBinBefore) 'Preparation must not change the repository bin fingerprint.'
     foreach ($required in @('ScreenGuide.Stage5LifecycleProbe.exe', 'hostfxr.dll', 'hostpolicy.dll', 'coreclr.dll', 'System.Private.CoreLib.dll', 'e_sqlite3.dll', 'lifecycle-probe-bundle.json')) {
         Assert-True (Test-Path -LiteralPath (Join-Path $bundleRoot $required) -PathType Leaf) "Self-contained bundle is missing $required."
     }
@@ -75,7 +124,7 @@ try {
     [IO.Directory]::CreateDirectory($emptyCache) | Out-Null
     $missingCacheResult = Join-Path $testRoot 'missing-cache.json'
     $missingCacheOutput = @(& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $prepareScript `
-        -ProjectPath $project -IntermediateRoot (Join-Path $testRoot 'missing-cache-intermediate') `
+        -ProjectPath $readOnlyProject -IntermediateRoot (Join-Path $testRoot 'missing-cache-intermediate') `
         -OutputRoot (Join-Path $testRoot 'missing-cache-output') -ResultPath $missingCacheResult `
         -OfflinePackageCache $emptyCache 2>&1)
     $missingCache = Get-Content -Raw -LiteralPath $missingCacheResult | ConvertFrom-Json
