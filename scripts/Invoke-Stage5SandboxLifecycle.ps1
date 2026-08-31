@@ -15,10 +15,12 @@ $dataRoot = Join-Path $env:LOCALAPPDATA 'ScreenGuideTeacher'
 $databasePath = Join-Path $dataRoot 'state\tasking.db'
 $existingUninstallKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\{E2B9C242-2965-48BC-B2C6-CF83A2B11953}_is1'
 $contractScript = Join-Path $inputRoot 'Test-Stage5SandboxLifecycleContract.ps1'
+$budgetScript = Join-Path $inputRoot 'Stage5LifecycleExecutionBudget.ps1'
 $errorCode = 's5_lifecycle_unexpected_failure'
-$installerExecutions = 0
 $hostExecutions = 0
 $exitCodes = [Collections.Generic.List[int]]::new()
+$installerExitCodes = [Collections.Generic.List[int]]::new()
+$installerBudget = $null
 
 function Throw-Code([string]$code) {
     $script:errorCode = $code
@@ -39,6 +41,7 @@ function Has-ReparsePoint([string]$path) {
 }
 
 function Write-SafeFailure([string]$code) {
+    $budgetSnapshot = if ($null -eq $installerBudget) { $null } else { Get-Stage5LifecycleExecutionBudgetSnapshot -Budget $installerBudget }
     $result = [ordered]@{
         contractVersion = 1
         status = 'BLOCKED'
@@ -47,7 +50,7 @@ function Write-SafeFailure([string]$code) {
         networkRequests = 0
         providerRequests = 0
         credentialReads = 0
-        installerExecutions = $installerExecutions
+        installerExecutionBudget = $budgetSnapshot
         hostExecutions = $hostExecutions
     }
     [IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($EvidencePath)) | Out-Null
@@ -57,10 +60,21 @@ function Write-SafeFailure([string]$code) {
         [Text.UTF8Encoding]::new($false))
 }
 
-function Invoke-Hidden([string]$file, [string[]]$arguments, [ValidateSet('installer', 'host', 'probe')] [string]$kind) {
+function Invoke-Hidden(
+    [string]$file,
+    [string[]]$arguments,
+    [ValidateSet('installer', 'host', 'probe')] [string]$kind,
+    [ValidateSet('InstallOrUpgrade', 'Uninstall')] [string]$installerKind) {
+    if ($kind -eq 'installer') {
+        if ($null -eq $installerBudget -or [string]::IsNullOrWhiteSpace($installerKind)) {
+            Throw-Code 's5_lifecycle_installer_execution_count_mismatch'
+        }
+        try { Enter-Stage5LifecycleInstallerExecution -Budget $installerBudget -Kind $installerKind }
+        catch { Throw-Code $_.Exception.Message }
+    }
     $process = Start-Process -FilePath $file -ArgumentList $arguments -Wait -PassThru -WindowStyle Hidden
     $exitCodes.Add($process.ExitCode)
-    if ($kind -eq 'installer') { $script:installerExecutions++ }
+    if ($kind -eq 'installer') { $installerExitCodes.Add($process.ExitCode) }
     if ($kind -eq 'host') { $script:hostExecutions++ }
     if ($process.ExitCode -ne 0) { Throw-Code ('s5_lifecycle_' + $kind + '_failed') }
 }
@@ -125,13 +139,13 @@ function Invoke-Probe([string]$database, [int]$expectedSchema, [string]$label) {
 function Install([string]$installer, [string]$logName) {
     Invoke-Hidden $installer @(
         '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART',
-        "/DIR=$installRoot", "/LOG=$(Join-Path $runtimeRoot $logName)") installer
+        "/DIR=$installRoot", "/LOG=$(Join-Path $runtimeRoot $logName)") installer InstallOrUpgrade
 }
 
 function Uninstall {
     $uninstaller = Join-Path $installRoot 'unins000.exe'
     if (-not (Test-Path -LiteralPath $uninstaller -PathType Leaf)) { Throw-Code 's5_lifecycle_uninstaller_missing' }
-    Invoke-Hidden $uninstaller @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART') installer
+    Invoke-Hidden $uninstaller @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART') installer Uninstall
 }
 
 function Get-MatchingBackup([string]$directory) {
@@ -151,9 +165,23 @@ try {
     }
     $plan = Get-Content -Raw -LiteralPath $resolvedPlan | ConvertFrom-Json
     if ($plan.contractVersion -ne 1 -or [string]$plan.mode -cne 'native' -or
+        $plan.budgets.installerExecutions -ne 5 -or
+        $plan.budgets.installOrUpgradeExecutions -ne 3 -or
+        $plan.budgets.uninstallExecutions -ne 2 -or
         $plan.budgets.retries -ne 0 -or $plan.budgets.resends -ne 0) {
         Throw-Code 's5_lifecycle_plan_invalid'
     }
+    if (-not (Test-Path -LiteralPath $budgetScript -PathType Leaf) -or (Has-ReparsePoint $budgetScript)) {
+        Throw-Code 's5_lifecycle_plan_invalid'
+    }
+    . $budgetScript
+    try {
+        $installerBudget = New-Stage5LifecycleExecutionBudget `
+            -InstallerExecutions ([int]$plan.budgets.installerExecutions) `
+            -InstallOrUpgradeExecutions ([int]$plan.budgets.installOrUpgradeExecutions) `
+            -UninstallExecutions ([int]$plan.budgets.uninstallExecutions)
+    }
+    catch { Throw-Code $_.Exception.Message }
     [IO.Directory]::CreateDirectory($runtimeRoot) | Out-Null
     if ((Test-Path -LiteralPath $installRoot) -or (Test-Path -LiteralPath $existingUninstallKey) -or (Test-Path -LiteralPath $dataRoot)) {
         Throw-Code 's5_lifecycle_sandbox_not_clean'
@@ -232,6 +260,14 @@ try {
     $registrationRemoved = -not (Test-Path -LiteralPath $existingUninstallKey)
     $dataRetained = (Test-Path -LiteralPath $databasePath) -and (Test-Path -LiteralPath $preservedV11)
 
+    $executionBudget = Get-Stage5LifecycleExecutionBudgetSnapshot -Budget $installerBudget
+    if ([int]$executionBudget.installerExecutions -ne 5 -or
+        [int]$executionBudget.installOrUpgradeExecutions -ne 3 -or
+        [int]$executionBudget.uninstallExecutions -ne 2 -or
+        $installerExitCodes.Count -ne 5) {
+        Throw-Code 's5_lifecycle_installer_execution_count_mismatch'
+    }
+    $executionBudget.installerExitCodeCount = $installerExitCodes.Count
     $facts = [ordered]@{
         contractVersion = 1
         coordinatorInstance = 'sandbox-lifecycle-v1'
@@ -249,7 +285,17 @@ try {
         newPair = [ordered]@{ clientProductVersion = $newPair.clientProductVersion; hostProductVersion = $newPair.hostProductVersion; fileVersion = $newPair.clientFileVersion }
         terminal = [ordered]@{ status = 'PASS'; finalized = $true }
         counters = [ordered]@{ networkRequests = 0; providerRequests = 0; credentialReads = 0; retries = 0; resends = 0 }
-        execution = [ordered]@{ installerExecutions = $installerExecutions; hostExecutions = $hostExecutions; exitCodes = $exitCodes.ToArray() }
+        execution = [ordered]@{
+            installerExecutions = $executionBudget.installerExecutions
+            installOrUpgradeExecutions = $executionBudget.installOrUpgradeExecutions
+            uninstallExecutions = $executionBudget.uninstallExecutions
+            plannedInstallerExecutions = $executionBudget.plannedInstallerExecutions
+            plannedInstallOrUpgradeExecutions = $executionBudget.plannedInstallOrUpgradeExecutions
+            plannedUninstallExecutions = $executionBudget.plannedUninstallExecutions
+            installerExitCodeCount = $executionBudget.installerExitCodeCount
+            hostExecutions = $hostExecutions
+            exitCodes = $exitCodes.ToArray()
+        }
     }
     $factsPath = Join-Path $runtimeRoot 'lifecycle-facts.json'
     [IO.File]::WriteAllText($factsPath, (($facts | ConvertTo-Json -Depth 30).Replace("`r`n", "`n") + "`n"), [Text.UTF8Encoding]::new($false))

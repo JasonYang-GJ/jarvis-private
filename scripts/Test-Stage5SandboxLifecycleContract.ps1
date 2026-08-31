@@ -150,7 +150,14 @@ if ($Mode -eq 'Preflight') {
             'distribution/bundle-manifest.json',
             'distribution/notice-index.json'
         )
-        budgets = [ordered]@{ installerExecutions = 4; hostExecutions = 3; retries = 0; resends = 0 }
+        budgets = [ordered]@{
+            installerExecutions = 5
+            installOrUpgradeExecutions = 3
+            uninstallExecutions = 2
+            hostExecutions = 3
+            retries = 0
+            resends = 0
+        }
     }
     Write-Json $PlanOutputPath $plan
 
@@ -222,6 +229,36 @@ foreach ($counter in @('networkRequests', 'providerRequests', 'credentialReads',
     if ([int]$facts.counters.$counter -ne 0) {
         Complete 'BLOCKED' 's5_lifecycle_external_activity_detected' 1 ([ordered]@{ phase = 'counters' })
     }
+}
+
+$requiredExecutionProperties = @(
+    'installerExecutions',
+    'installOrUpgradeExecutions',
+    'uninstallExecutions',
+    'plannedInstallerExecutions',
+    'plannedInstallOrUpgradeExecutions',
+    'plannedUninstallExecutions',
+    'installerExitCodeCount')
+$executionPropertyNames = @($facts.execution.PSObject.Properties.Name)
+foreach ($requiredProperty in $requiredExecutionProperties) {
+    if ($executionPropertyNames -cnotcontains $requiredProperty) {
+        Complete 'BLOCKED' 's5_lifecycle_installer_execution_count_mismatch' 1 ([ordered]@{ phase = 'execution-budget' })
+    }
+}
+if ([int]$facts.execution.installerExecutions -gt 5 -or
+    [int]$facts.execution.installOrUpgradeExecutions -gt 3 -or
+    [int]$facts.execution.uninstallExecutions -gt 2) {
+    Complete 'BLOCKED' 's5_lifecycle_installer_execution_budget_exceeded' 1 ([ordered]@{ phase = 'execution-budget' })
+}
+if ([int]$facts.execution.installerExecutions -ne 5 -or
+    [int]$facts.execution.installOrUpgradeExecutions -ne 3 -or
+    [int]$facts.execution.uninstallExecutions -ne 2 -or
+    [int]$facts.execution.installerExecutions -ne ([int]$facts.execution.installOrUpgradeExecutions + [int]$facts.execution.uninstallExecutions) -or
+    [int]$facts.execution.plannedInstallerExecutions -ne 5 -or
+    [int]$facts.execution.plannedInstallOrUpgradeExecutions -ne 3 -or
+    [int]$facts.execution.plannedUninstallExecutions -ne 2 -or
+    [int]$facts.execution.installerExitCodeCount -ne [int]$facts.execution.installerExecutions) {
+    Complete 'BLOCKED' 's5_lifecycle_installer_execution_count_mismatch' 1 ([ordered]@{ phase = 'execution-budget' })
 }
 
 Complete 'PASS' $null 0 ([ordered]@{

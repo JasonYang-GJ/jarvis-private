@@ -4,6 +4,7 @@ $repoRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
 $contractScript = Join-Path $repoRoot 'scripts\Test-Stage5SandboxLifecycleContract.ps1'
 $hostScript = Join-Path $repoRoot 'scripts\New-Stage5SandboxLifecycle.ps1'
 $bootstrapScript = Join-Path $repoRoot 'scripts\Invoke-Stage5SandboxLifecycle.ps1'
+$budgetScript = Join-Path $repoRoot 'scripts\Stage5LifecycleExecutionBudget.ps1'
 $testRoot = Join-Path ([IO.Path]::GetTempPath()) ('YuanshuStage5Lifecycle-Tests-' + [Guid]::NewGuid().ToString('N'))
 
 function Assert-True([bool]$condition, [string]$message) {
@@ -93,6 +94,10 @@ try {
     Assert-Equal 'PASS' $positive.Result.status 'Valid preflight result must be PASS.'
     Assert-True (Test-Path -LiteralPath $positive.WsbPath -PathType Leaf) 'Valid preflight must emit a .wsb.'
     Assert-True (Test-Path -LiteralPath $positive.PlanPath -PathType Leaf) 'Valid preflight must emit a lifecycle plan.'
+    $plan = Get-Content -Raw -LiteralPath $positive.PlanPath | ConvertFrom-Json
+    Assert-Equal 5 $plan.budgets.installerExecutions 'Lifecycle plan must declare all five installer/uninstaller process starts.'
+    Assert-Equal 3 $plan.budgets.installOrUpgradeExecutions 'Lifecycle plan must declare three install/upgrade starts.'
+    Assert-Equal 2 $plan.budgets.uninstallExecutions 'Lifecycle plan must declare two uninstall starts.'
     $wsb = Get-Content -Raw -LiteralPath $positive.WsbPath
     foreach ($element in @('Networking', 'ClipboardRedirection', 'AudioInput', 'VideoInput', 'PrinterRedirection')) {
         Assert-True ($wsb.Contains("<$element>Disable</$element>")) "$element must be disabled."
@@ -160,6 +165,15 @@ try {
         newPair = [ordered]@{ clientProductVersion = '0.6.0+919fef805010395c272f72033c7e653f9b26e768'; hostProductVersion = '0.6.0+919fef805010395c272f72033c7e653f9b26e768'; fileVersion = '0.6.0.0' }
         terminal = [ordered]@{ status = 'PASS'; finalized = $true }
         counters = [ordered]@{ networkRequests = 0; providerRequests = 0; credentialReads = 0; retries = 0; resends = 0 }
+        execution = [ordered]@{
+            installerExecutions = 5
+            installOrUpgradeExecutions = 3
+            uninstallExecutions = 2
+            plannedInstallerExecutions = 5
+            plannedInstallOrUpgradeExecutions = 3
+            plannedUninstallExecutions = 2
+            installerExitCodeCount = 5
+        }
     }
     $evidencePass = Invoke-Contract Evidence $evidence 'evidence-pass'
     Assert-Equal 0 $evidencePass.ExitCode 'Valid lifecycle evidence must pass.'
@@ -173,7 +187,11 @@ try {
         @('s5_lifecycle_mixed_version_pair', { param($x) $x.newPair.hostProductVersion = '0.5.0+wrong' }),
         @('s5_lifecycle_notice_missing', { param($x) $x.phases.noticeLayoutVerified = $false }),
         @('s5_lifecycle_v11_hash_changed', { param($x) $x.phases.v11HashAfterMissingBackup = 'C' * 64 }),
-        @('s5_lifecycle_cleanup_failed', { param($x) $x.phases.uninstallProgramRemoved = $false })
+        @('s5_lifecycle_cleanup_failed', { param($x) $x.phases.uninstallProgramRemoved = $false }),
+        @('s5_lifecycle_installer_execution_count_mismatch', { param($x) $x.execution.installerExecutions = 4; $x.execution.installOrUpgradeExecutions = 2 }),
+        @('s5_lifecycle_installer_execution_budget_exceeded', { param($x) $x.execution.installerExecutions = 6; $x.execution.installOrUpgradeExecutions = 4; $x.execution.installerExitCodeCount = 6 }),
+        @('s5_lifecycle_installer_execution_count_mismatch', { param($x) $x.execution.installOrUpgradeExecutions = $null }),
+        @('s5_lifecycle_installer_execution_count_mismatch', { param($x) $x.execution.plannedInstallerExecutions = 4 })
     )
     $case = 0
     foreach ($mutation in $evidenceMutations) {
@@ -181,6 +199,20 @@ try {
         & $mutation[1] $copy
         Assert-Failure (Invoke-Contract Evidence $copy ('evidence-fail-' + (++$case))) $mutation[0]
     }
+
+    Assert-True (Test-Path -LiteralPath $budgetScript -PathType Leaf) 'Shared installer execution budget guard must exist.'
+    . $budgetScript
+    $budget = New-Stage5LifecycleExecutionBudget -InstallerExecutions 5 -InstallOrUpgradeExecutions 3 -UninstallExecutions 2
+    1..3 | ForEach-Object { Enter-Stage5LifecycleInstallerExecution -Budget $budget -Kind InstallOrUpgrade }
+    1..2 | ForEach-Object { Enter-Stage5LifecycleInstallerExecution -Budget $budget -Kind Uninstall }
+    $sixthAttemptCode = $null
+    try { Enter-Stage5LifecycleInstallerExecution -Budget $budget -Kind InstallOrUpgrade }
+    catch { $sixthAttemptCode = $_.Exception.Message }
+    Assert-Equal 's5_lifecycle_installer_execution_budget_exceeded' $sixthAttemptCode 'Sixth installer process attempt must fail before start.'
+    $budgetSnapshot = Get-Stage5LifecycleExecutionBudgetSnapshot -Budget $budget
+    Assert-Equal 5 $budgetSnapshot.installerExecutions 'Rejected sixth attempt must not increment total.'
+    Assert-Equal 3 $budgetSnapshot.installOrUpgradeExecutions 'Rejected sixth attempt must not increment install/upgrade count.'
+    Assert-Equal 2 $budgetSnapshot.uninstallExecutions 'Rejected sixth attempt must not increment uninstall count.'
 
     foreach ($script in @($hostScript, $bootstrapScript)) {
         $text = Get-Content -Raw -LiteralPath $script
@@ -190,11 +222,16 @@ try {
     $hostText = Get-Content -Raw -LiteralPath $hostScript
     Assert-True ($hostText.Contains('Get-WindowsOptionalFeature')) 'Host preflight must verify Windows Sandbox availability.'
     Assert-True ($hostText.Contains('existingUninstallKey')) 'Host preflight must reject an existing same-AppId installation.'
+    Assert-True ($hostText.Contains("'Stage5LifecycleExecutionBudget.ps1'")) 'Host preflight must place the shared budget guard in the read-only input mapping.'
     $bootstrapText = Get-Content -Raw -LiteralPath $bootstrapScript
     Assert-True ($bootstrapText.Contains('tasking.pre-v11-from-v10-*.backup.db')) 'Bootstrap must require the matching migration backup.'
     Assert-True ($bootstrapText.Contains('THIRD-PARTY-NOTICES.txt')) 'Bootstrap must verify NOTICE layout.'
+    Assert-True ($bootstrapText.Contains('Enter-Stage5LifecycleInstallerExecution -Budget $installerBudget -Kind $installerKind')) 'Installer process entry must invoke the shared budget guard before Start-Process.'
+    Assert-True ($bootstrapText.Contains('installer InstallOrUpgrade')) 'Every install/upgrade wrapper must identify its budget kind.'
+    Assert-True ($bootstrapText.Contains('installer Uninstall')) 'Every uninstall wrapper must identify its budget kind.'
+    Assert-Equal 1 ([regex]::Matches($bootstrapText, 'Start-Process').Count) 'Bootstrap must retain one counted process-start seam.'
 
-    Write-Host 'Stage5 Sandbox lifecycle contract: 1 preflight pass + 12 preflight failures + 1 evidence pass + 6 evidence failures + static safety checks passed'
+    Write-Host 'Stage5 Sandbox lifecycle contract: 1 preflight pass + 12 preflight failures + 1 evidence pass + 10 evidence failures + sixth-attempt budget guard + static safety checks passed'
 }
 finally {
     $resolved = [IO.Path]::GetFullPath($testRoot)
