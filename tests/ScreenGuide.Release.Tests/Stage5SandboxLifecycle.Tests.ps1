@@ -72,7 +72,11 @@ try {
         actualSourceSha = '919fef805010395c272f72033c7e653f9b26e768'
         sourceClean = $true
         sandboxAvailable = $true
-        existingHostInstall = $false
+        protectedHostInstall = [ordered]@{
+            present = $false
+            productRootPresent = $false
+            uninstallRegistrationPresent = $false
+        }
         oldInstaller = [ordered]@{ fileName = 'old-installer.fake'; expectedSha256 = (Get-FileHash $oldInstaller -Algorithm SHA256).Hash; actualSha256 = (Get-FileHash $oldInstaller -Algorithm SHA256).Hash }
         candidateInstaller = [ordered]@{ fileName = 'new-installer.fake'; expectedSha256 = (Get-FileHash $newInstaller -Algorithm SHA256).Hash; actualSha256 = (Get-FileHash $newInstaller -Algorithm SHA256).Hash }
         lifecycleProbe = [ordered]@{
@@ -112,6 +116,30 @@ try {
     Assert-True ($wsb.Contains('<ReadOnly>true</ReadOnly>')) 'Input mapping must be read-only.'
     Assert-True ($wsb.Contains('<ReadOnly>false</ReadOnly>')) 'Evidence mapping must be the only writable mapping.'
     Assert-True (-not $wsb.Contains($repoRoot)) 'The repository must never be mapped into Sandbox.'
+    Assert-Equal 2 ([regex]::Matches($wsb, '<MappedFolder>').Count) 'Sandbox must contain only the owned input and evidence mappings.'
+    foreach ($forbiddenHostState in @('Programs\YuanshuDesktop', 'ScreenGuideTeacher', '{E2B9C242-2965-48BC-B2C6-CF83A2B11953}_is1')) {
+        Assert-True (-not $wsb.Contains($forbiddenHostState)) 'Host product, data, and uninstall state must never be mapped into Sandbox.'
+    }
+
+    $protectedHostFacts = Copy-Json $preflight
+    $protectedHostFacts.protectedHostInstall.present = $true
+    $protectedHostFacts.protectedHostInstall.productRootPresent = $true
+    $protectedHostFacts.protectedHostInstall.uninstallRegistrationPresent = $true
+    $protectedHostFacts | Add-Member -NotePropertyName existingHostInstall -NotePropertyValue $true
+    $protectedHost = Invoke-Contract Preflight $protectedHostFacts 'preflight-protected-host-install'
+    Assert-Equal 0 $protectedHost.ExitCode 'An existing protected Host installation must not block isolated Sandbox preflight.'
+    Assert-Equal 'PASS' $protectedHost.Result.status 'Protected Host installation must remain informational.'
+    Assert-True (-not [bool]$positive.Result.details.protectedHostInstall.present) 'Absent Host installation must be recorded as protected informational state.'
+    Assert-Equal 0 $positive.Result.details.hostInstallerExecutions 'Host preflight must execute zero installers.'
+    Assert-True ([bool]$protectedHost.Result.details.protectedHostInstall.present) 'Protected Host installation presence must be recorded without paths or contents.'
+    Assert-Equal 0 $protectedHost.Result.details.hostInstallerExecutions 'Protected Host preflight must execute zero installers.'
+    $protectedHostWsb = Get-Content -Raw -LiteralPath $protectedHost.WsbPath
+    $protectedHostPlan = Get-Content -Raw -LiteralPath $protectedHost.PlanPath
+    Assert-True (-not $protectedHostPlan.Contains('protectedHostInstall')) 'Protected Host state must not enter the Sandbox lifecycle plan.'
+    Assert-Equal 2 ([regex]::Matches($protectedHostWsb, '<MappedFolder>').Count) 'Protected Host preflight must retain exactly two owned mappings.'
+    foreach ($forbiddenHostState in @('Programs\YuanshuDesktop', 'ScreenGuideTeacher', '{E2B9C242-2965-48BC-B2C6-CF83A2B11953}_is1')) {
+        Assert-True (-not $protectedHostWsb.Contains($forbiddenHostState)) 'Protected Host state must not enter the generated Sandbox configuration.'
+    }
 
     $mutations = @(
         @('s5_lifecycle_source_sha_mismatch', { param($x) $x.actualSourceSha = '0' * 40 }),
@@ -120,7 +148,6 @@ try {
         @('s5_lifecycle_candidate_installer_hash_mismatch', { param($x) $x.candidateInstaller.actualSha256 = '0' * 64 }),
         @('s5_lifecycle_probe_hash_mismatch', { param($x) $x.lifecycleProbe.actualSha256 = '0' * 64 }),
         @('s5_lifecycle_sandbox_unavailable', { param($x) $x.sandboxAvailable = $false }),
-        @('s5_lifecycle_existing_host_install', { param($x) $x.existingHostInstall = $true }),
         @('s5_lifecycle_network_policy_invalid', { param($x) $x.sandboxPolicy.networking = 'Enable' }),
         @('s5_lifecycle_input_mapping_writable', { param($x) $x.mappings.inputReadOnly = $false }),
         @('s5_lifecycle_evidence_mapping_invalid', { param($x) $x.mappings.evidenceReadOnly = $true }),
@@ -228,9 +255,12 @@ try {
     }
     $hostText = Get-Content -Raw -LiteralPath $hostScript
     Assert-True ($hostText.Contains('Get-WindowsOptionalFeature')) 'Host preflight must verify Windows Sandbox availability.'
-    Assert-True ($hostText.Contains('existingUninstallKey')) 'Host preflight must reject an existing same-AppId installation.'
+    Assert-True ($hostText.Contains('protectedHostInstall')) 'Host preflight must record an existing same-AppId installation as protected informational state.'
+    Assert-Equal 0 ([regex]::Matches($hostText, 'Start-Process').Count) 'Host harness must execute zero installer or Sandbox processes.'
     Assert-True ($hostText.Contains("'Stage5LifecycleExecutionBudget.ps1'")) 'Host preflight must place the shared budget guard in the read-only input mapping.'
     Assert-True ($hostText.Contains("'Test-Stage5LifecycleProbeBundle.ps1'")) 'Host preflight must validate the complete probe bundle before and after copy.'
+    $contractText = Get-Content -Raw -LiteralPath $contractScript
+    Assert-True (-not $contractText.Contains('s5_lifecycle_existing_host_install')) 'Existing Host installation must not remain a preflight blocker.'
     $bootstrapText = Get-Content -Raw -LiteralPath $bootstrapScript
     Assert-True ($bootstrapText.Contains('tasking.pre-v11-from-v10-*.backup.db')) 'Bootstrap must require the matching migration backup.'
     Assert-True ($bootstrapText.Contains('THIRD-PARTY-NOTICES.txt')) 'Bootstrap must verify NOTICE layout.'
@@ -240,7 +270,7 @@ try {
     Assert-True ($bootstrapText.Contains('probe-bundle-validation.json')) 'Sandbox bootstrap must validate the complete probe bundle before execution.'
     Assert-Equal 1 ([regex]::Matches($bootstrapText, 'Start-Process').Count) 'Bootstrap must retain one counted process-start seam.'
 
-    Write-Host 'Stage5 Sandbox lifecycle contract: 1 preflight pass + 12 preflight failures + 1 evidence pass + 10 evidence failures + sixth-attempt budget guard + static safety checks passed'
+    Write-Host 'Stage5 Sandbox lifecycle contract: 2 preflight passes + 11 preflight failures + 1 evidence pass + 10 evidence failures + sixth-attempt budget guard + static safety checks passed'
 }
 finally {
     $resolved = [IO.Path]::GetFullPath($testRoot)

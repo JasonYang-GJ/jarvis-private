@@ -28,8 +28,8 @@ $ownedRoot = if ([string]::IsNullOrWhiteSpace($OutputRoot)) {
     [IO.Path]::GetFullPath($OutputRoot)
 }
 $oldInstallerExpectedSha = '4683E10CD6C5317EB537681978DB8A77E2DC15041838EF3DCE2DEE47C7C16F95'
-$existingProductRoot = Join-Path $env:LOCALAPPDATA 'Programs\YuanshuDesktop'
-$existingUninstallKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\{E2B9C242-2965-48BC-B2C6-CF83A2B11953}_is1'
+$protectedHostProductRoot = Join-Path $env:LOCALAPPDATA 'Programs\YuanshuDesktop'
+$protectedHostUninstallKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\{E2B9C242-2965-48BC-B2C6-CF83A2B11953}_is1'
 $sandboxExecutable = Join-Path $env:WINDIR 'System32\WindowsSandbox.exe'
 
 function Has-ReparsePoint([string]$path) {
@@ -82,7 +82,9 @@ foreach ($path in @($oldInstaller, $candidateInstaller, $probeExecutable, $probe
 $sandboxFeature = Get-WindowsOptionalFeature -Online -FeatureName 'Containers-DisposableClientVM' -ErrorAction SilentlyContinue
 $sandboxAvailable = (Test-Path -LiteralPath $sandboxExecutable -PathType Leaf) -and
     $null -ne $sandboxFeature -and [string]$sandboxFeature.State -eq 'Enabled'
-$existingHostInstall = (Test-Path -LiteralPath $existingProductRoot) -or (Test-Path -LiteralPath $existingUninstallKey)
+$protectedHostProductRootPresent = Test-Path -LiteralPath $protectedHostProductRoot
+$protectedHostUninstallRegistrationPresent = Test-Path -LiteralPath $protectedHostUninstallKey
+$protectedHostInstallPresent = $protectedHostProductRootPresent -or $protectedHostUninstallRegistrationPresent
 
 [IO.Directory]::CreateDirectory($ownedRoot) | Out-Null
 $inputRoot = Join-Path $ownedRoot 'input'
@@ -132,7 +134,11 @@ $facts = [ordered]@{
     actualSourceSha = $actualSourceSha
     sourceClean = $sourceClean
     sandboxAvailable = $sandboxAvailable
-    existingHostInstall = $existingHostInstall
+    protectedHostInstall = [ordered]@{
+        present = $protectedHostInstallPresent
+        productRootPresent = $protectedHostProductRootPresent
+        uninstallRegistrationPresent = $protectedHostUninstallRegistrationPresent
+    }
     oldInstaller = [ordered]@{ fileName = [IO.Path]::GetFileName($oldCopy); expectedSha256 = $oldInstallerExpectedSha; actualSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $oldCopy).Hash }
     candidateInstaller = [ordered]@{ fileName = [IO.Path]::GetFileName($candidateCopy); expectedSha256 = $CandidateInstallerSha256.ToUpperInvariant(); actualSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $candidateCopy).Hash }
     lifecycleProbe = [ordered]@{

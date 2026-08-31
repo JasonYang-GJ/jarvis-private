@@ -107,8 +107,16 @@ if ($Mode -eq 'Preflight') {
     if (-not [bool]$facts.sandboxAvailable) {
         Complete 'BLOCKED' 's5_lifecycle_sandbox_unavailable' 1 ([ordered]@{ phase = 'host' })
     }
-    if ([bool]$facts.existingHostInstall) {
-        Complete 'BLOCKED' 's5_lifecycle_existing_host_install' 1 ([ordered]@{ phase = 'host' })
+    $protectedHostProperties = @($facts.protectedHostInstall.PSObject.Properties.Name)
+    foreach ($requiredProperty in @('present', 'productRootPresent', 'uninstallRegistrationPresent')) {
+        if ($protectedHostProperties -cnotcontains $requiredProperty -or
+            $facts.protectedHostInstall.$requiredProperty -isnot [bool]) {
+            Complete 'BLOCKED' 's5_lifecycle_contract_invalid' 1 ([ordered]@{ phase = 'protected-host' })
+        }
+    }
+    if ([bool]$facts.protectedHostInstall.present -ne
+        ([bool]$facts.protectedHostInstall.productRootPresent -or [bool]$facts.protectedHostInstall.uninstallRegistrationPresent)) {
+        Complete 'BLOCKED' 's5_lifecycle_contract_invalid' 1 ([ordered]@{ phase = 'protected-host' })
     }
     foreach ($name in @('networking', 'clipboard', 'audioInput', 'videoInput', 'printer')) {
         if ([string]$facts.sandboxPolicy.$name -cne 'Disable') {
@@ -191,7 +199,17 @@ if ($Mode -eq 'Preflight') {
 "@
     [IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($WsbOutputPath))) | Out-Null
     [IO.File]::WriteAllText([IO.Path]::GetFullPath($WsbOutputPath), $wsb.Replace("`r`n", "`n"), [Text.UTF8Encoding]::new($false))
-    Complete 'PASS' $null 0 ([ordered]@{ wsbGenerated = $true; planGenerated = $true; mappings = 2 })
+    Complete 'PASS' $null 0 ([ordered]@{
+        wsbGenerated = $true
+        planGenerated = $true
+        mappings = 2
+        hostInstallerExecutions = 0
+        protectedHostInstall = [ordered]@{
+            present = [bool]$facts.protectedHostInstall.present
+            productRootPresent = [bool]$facts.protectedHostInstall.productRootPresent
+            uninstallRegistrationPresent = [bool]$facts.protectedHostInstall.uninstallRegistrationPresent
+        }
+    })
 }
 
 $phases = $facts.phases
