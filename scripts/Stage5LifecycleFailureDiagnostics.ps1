@@ -4,6 +4,7 @@ function New-Stage5LifecycleDiagnosticState {
     return [pscustomobject]@{
         CurrentPhase = 'initializing'
         Processes = [Collections.Generic.List[object]]::new()
+        PairIdentities = [Collections.Generic.List[object]]::new()
     }
 }
 
@@ -19,6 +20,117 @@ function Get-Stage5LifecyclePhaseFailureCode([string]$Phase) {
         return 's5_lifecycle_phase_failed'
     }
     return 's5_lifecycle_' + $Phase.Replace('-', '_') + '_failed'
+}
+
+function ConvertTo-Stage5LifecycleSafeProductVersion($Value) {
+    $text = [string]$Value
+    if ([string]::IsNullOrWhiteSpace($text)) { return $null }
+    $text = $text.Trim()
+    if ($text -cnotmatch '^[0-9]+\.[0-9]+\.[0-9]+(?:\.[0-9]+)?(?:\+[0-9a-f]{40})?$') { return $null }
+    return $text
+}
+
+function ConvertTo-Stage5LifecycleSafeFileVersion($Value) {
+    $text = [string]$Value
+    if ([string]::IsNullOrWhiteSpace($text)) { return $null }
+    $text = $text.Trim()
+    if ($text -cnotmatch '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$') { return $null }
+    return $text
+}
+
+function New-Stage5LifecyclePairComponentEvidence {
+    return [pscustomobject][ordered]@{
+        filePresent = $false
+        metadataRead = $false
+        productVersionPresent = $false
+        productVersionValid = $false
+        productVersion = $null
+        fileVersionPresent = $false
+        fileVersionValid = $false
+        fileVersion = $null
+    }
+}
+
+function Get-Stage5LifecyclePairIdentity(
+    $State,
+    [string]$InstallRoot,
+    [scriptblock]$VersionReader) {
+    if ($null -eq $State -or $null -eq $State.PairIdentities) {
+        throw [InvalidOperationException]::new('s5_lifecycle_diagnostics_invalid')
+    }
+    $record = [pscustomobject][ordered]@{
+        phase = [string]$State.CurrentPhase
+        client = New-Stage5LifecyclePairComponentEvidence
+        host = New-Stage5LifecyclePairComponentEvidence
+    }
+    $State.PairIdentities.Add($record)
+
+    $components = @(
+        [pscustomobject]@{ evidence = $record.client; path = Join-Path $InstallRoot 'ScreenGuide.DesktopClient.exe' },
+        [pscustomobject]@{ evidence = $record.host; path = Join-Path $InstallRoot 'ScreenGuide.DesktopHost.exe' })
+    foreach ($component in $components) {
+        try { $component.evidence.filePresent = Test-Path -LiteralPath $component.path -PathType Leaf -ErrorAction Stop }
+        catch { $component.evidence.filePresent = $false }
+        if (-not $component.evidence.filePresent) { continue }
+
+        try {
+            $info = if ($null -eq $VersionReader) {
+                [Diagnostics.FileVersionInfo]::GetVersionInfo($component.path)
+            } else {
+                & $VersionReader $component.path
+            }
+            if ($null -eq $info) { throw [InvalidOperationException]::new('metadata unavailable') }
+            $component.evidence.metadataRead = $true
+            $productText = [string]$info.ProductVersion
+            $fileText = [string]$info.FileVersion
+            $component.evidence.productVersionPresent = -not [string]::IsNullOrWhiteSpace($productText)
+            $component.evidence.fileVersionPresent = -not [string]::IsNullOrWhiteSpace($fileText)
+            $component.evidence.productVersion = ConvertTo-Stage5LifecycleSafeProductVersion $productText
+            $component.evidence.fileVersion = ConvertTo-Stage5LifecycleSafeFileVersion $fileText
+            $component.evidence.productVersionValid = $null -ne $component.evidence.productVersion
+            $component.evidence.fileVersionValid = $null -ne $component.evidence.fileVersion
+        }
+        catch {
+            $component.evidence.metadataRead = $false
+        }
+    }
+
+    $all = @($record.client, $record.host)
+    if (@($all | Where-Object { -not $_.filePresent }).Count -gt 0) {
+        throw [InvalidOperationException]::new('s5_lifecycle_mixed_version_pair')
+    }
+    if (@($all | Where-Object { -not $_.metadataRead }).Count -gt 0) {
+        throw [InvalidOperationException]::new('s5_lifecycle_pair_metadata_unreadable')
+    }
+    if (@($all | Where-Object { -not $_.productVersionPresent }).Count -gt 0) {
+        throw [InvalidOperationException]::new('s5_lifecycle_pair_product_version_missing')
+    }
+    if (@($all | Where-Object { -not $_.fileVersionPresent }).Count -gt 0) {
+        throw [InvalidOperationException]::new('s5_lifecycle_pair_file_version_missing')
+    }
+    if (@($all | Where-Object { -not $_.productVersionValid -or -not $_.fileVersionValid }).Count -gt 0) {
+        throw [InvalidOperationException]::new('s5_lifecycle_pair_identity_invalid')
+    }
+    return [ordered]@{
+        clientProductVersion = [string]$record.client.productVersion
+        hostProductVersion = [string]$record.host.productVersion
+        clientFileVersion = [string]$record.client.fileVersion
+        hostFileVersion = [string]$record.host.fileVersion
+    }
+}
+
+function Assert-Stage5LifecyclePairIdentity($Actual, $Expected) {
+    $expectedProductVersion = ConvertTo-Stage5LifecycleSafeProductVersion $Expected.productVersion
+    $expectedFileVersion = ConvertTo-Stage5LifecycleSafeFileVersion $Expected.fileVersion
+    if ($null -eq $expectedProductVersion -or $null -eq $expectedFileVersion) {
+        throw [InvalidOperationException]::new('s5_lifecycle_pair_expected_identity_invalid')
+    }
+    if ([string]$Actual.clientProductVersion -cne $expectedProductVersion -or
+        [string]$Actual.hostProductVersion -cne $expectedProductVersion -or
+        [string]$Actual.clientFileVersion -cne $expectedFileVersion -or
+        [string]$Actual.hostFileVersion -cne $expectedFileVersion) {
+        throw [InvalidOperationException]::new('s5_lifecycle_mixed_version_pair')
+    }
 }
 
 function Invoke-Stage5LifecycleObservedProcess(
@@ -105,6 +217,36 @@ function Write-Stage5LifecycleFailureEvidence(
                 exitCode = if ($null -eq $_.exitCode) { $null } else { [int]$_.exitCode }
             }
         })
+    $pairIdentities = @(
+        $State.PairIdentities | ForEach-Object {
+            $clientProduct = ConvertTo-Stage5LifecycleSafeProductVersion $_.client.productVersion
+            $clientFile = ConvertTo-Stage5LifecycleSafeFileVersion $_.client.fileVersion
+            $hostProduct = ConvertTo-Stage5LifecycleSafeProductVersion $_.host.productVersion
+            $hostFile = ConvertTo-Stage5LifecycleSafeFileVersion $_.host.fileVersion
+            [ordered]@{
+                phase = [string]$_.phase
+                client = [ordered]@{
+                    filePresent = [bool]$_.client.filePresent
+                    metadataRead = [bool]$_.client.metadataRead
+                    productVersionPresent = [bool]$_.client.productVersionPresent
+                    productVersionValid = $null -ne $clientProduct
+                    productVersion = $clientProduct
+                    fileVersionPresent = [bool]$_.client.fileVersionPresent
+                    fileVersionValid = $null -ne $clientFile
+                    fileVersion = $clientFile
+                }
+                host = [ordered]@{
+                    filePresent = [bool]$_.host.filePresent
+                    metadataRead = [bool]$_.host.metadataRead
+                    productVersionPresent = [bool]$_.host.productVersionPresent
+                    productVersionValid = $null -ne $hostProduct
+                    productVersion = $hostProduct
+                    fileVersionPresent = [bool]$_.host.fileVersionPresent
+                    fileVersionValid = $null -ne $hostFile
+                    fileVersion = $hostFile
+                }
+            }
+        })
     $result = [ordered]@{
         contractVersion = 1
         status = 'BLOCKED'
@@ -117,6 +259,7 @@ function Write-Stage5LifecycleFailureEvidence(
         installerExecutionBudget = $InstallerExecutionBudget
         hostExecutions = @($processes | Where-Object { $_.processKind -ceq 'host' -and $_.processStarted }).Count
         processes = $processes
+        pairIdentities = $pairIdentities
         presence = [ordered]@{
             installRootPresent = [bool]$Presence.installRootPresent
             clientPresent = [bool]$Presence.clientPresent

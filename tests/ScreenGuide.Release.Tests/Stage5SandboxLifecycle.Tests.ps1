@@ -258,6 +258,122 @@ try {
         uninstallRegistrationPresent = $false
     }
 
+    $identityRoot = Join-Path $testRoot 'identity-fixture'
+    [IO.Directory]::CreateDirectory($identityRoot) | Out-Null
+    [IO.File]::WriteAllText((Join-Path $identityRoot 'ScreenGuide.DesktopClient.exe'), 'fake-client')
+    [IO.File]::WriteAllText((Join-Path $identityRoot 'ScreenGuide.DesktopHost.exe'), 'fake-host')
+    $expectedPair = [ordered]@{
+        productVersion = '0.5.0+d553e7e9d606037df87d98e99250de5498f5934a'
+        fileVersion = '0.5.0.0'
+    }
+    $validVersionReader = {
+        param([string]$path)
+        return [pscustomobject]@{
+            ProductVersion = '0.5.0+d553e7e9d606037df87d98e99250de5498f5934a'
+            FileVersion = '0.5.0.0'
+        }
+    }
+    $identityBudget = New-Stage5LifecycleExecutionBudget -InstallerExecutions 5 -InstallOrUpgradeExecutions 3 -UninstallExecutions 2
+    $identityState = New-Stage5LifecycleDiagnosticState
+    Set-Stage5LifecyclePhase $identityState 'old-pair-validation'
+    $validPair = Get-Stage5LifecyclePairIdentity -State $identityState -InstallRoot $identityRoot -VersionReader $validVersionReader
+    Assert-Stage5LifecyclePairIdentity -Actual $validPair -Expected $expectedPair
+    Assert-Equal $expectedPair.productVersion $validPair.clientProductVersion 'Expected Client ProductVersion must remain exact.'
+    Assert-Equal $expectedPair.productVersion $validPair.hostProductVersion 'Expected Host ProductVersion must remain exact.'
+    Assert-Equal $expectedPair.fileVersion $validPair.clientFileVersion 'Expected Client FileVersion must remain exact.'
+    Assert-Equal $expectedPair.fileVersion $validPair.hostFileVersion 'Expected Host FileVersion must remain exact.'
+    $identityBudgetAfterRead = Get-Stage5LifecycleExecutionBudgetSnapshot $identityBudget
+    Assert-Equal 0 $identityBudgetAfterRead.installerExecutions 'Pair identity inspection must not consume installer execution budget.'
+
+    $missingProductState = New-Stage5LifecycleDiagnosticState
+    Set-Stage5LifecyclePhase $missingProductState 'old-pair-validation'
+    $missingProductCode = $null
+    try {
+        [void](Get-Stage5LifecyclePairIdentity -State $missingProductState -InstallRoot $identityRoot -VersionReader {
+            param([string]$path)
+            return [pscustomobject]@{ ProductVersion = $null; FileVersion = '0.5.0.0' }
+        })
+    }
+    catch { $missingProductCode = $_.Exception.Message }
+    Assert-Equal 's5_lifecycle_pair_product_version_missing' $missingProductCode 'Missing ProductVersion must fail closed without a raw null exception.'
+
+    $missingFileState = New-Stage5LifecycleDiagnosticState
+    Set-Stage5LifecyclePhase $missingFileState 'old-pair-validation'
+    $missingFileCode = $null
+    try {
+        [void](Get-Stage5LifecyclePairIdentity -State $missingFileState -InstallRoot $identityRoot -VersionReader {
+            param([string]$path)
+            return [pscustomobject]@{ ProductVersion = '0.5.0+d553e7e9d606037df87d98e99250de5498f5934a'; FileVersion = $null }
+        })
+    }
+    catch { $missingFileCode = $_.Exception.Message }
+    Assert-Equal 's5_lifecycle_pair_file_version_missing' $missingFileCode 'Missing FileVersion must fail closed without a raw null exception.'
+
+    $invalidIdentityState = New-Stage5LifecycleDiagnosticState
+    Set-Stage5LifecyclePhase $invalidIdentityState 'old-pair-validation'
+    $invalidIdentityCode = $null
+    try {
+        [void](Get-Stage5LifecyclePairIdentity -State $invalidIdentityState -InstallRoot $identityRoot -VersionReader {
+            param([string]$path)
+            return [pscustomobject]@{ ProductVersion = 'RAW_INVALID_VERSION_SENTINEL'; FileVersion = '0.5.0.0' }
+        })
+    }
+    catch { $invalidIdentityCode = $_.Exception.Message }
+    Assert-Equal 's5_lifecycle_pair_identity_invalid' $invalidIdentityCode 'Invalid version text must fail closed without entering evidence.'
+
+    $mismatchState = New-Stage5LifecycleDiagnosticState
+    Set-Stage5LifecyclePhase $mismatchState 'old-pair-validation'
+    $mismatchPair = Get-Stage5LifecyclePairIdentity -State $mismatchState -InstallRoot $identityRoot -VersionReader {
+        param([string]$path)
+        $product = if ([IO.Path]::GetFileName($path) -ceq 'ScreenGuide.DesktopHost.exe') {
+            '0.5.0+aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+        } else {
+            '0.5.0+d553e7e9d606037df87d98e99250de5498f5934a'
+        }
+        return [pscustomobject]@{ ProductVersion = $product; FileVersion = '0.5.0.0' }
+    }
+    $mismatchCode = $null
+    try { Assert-Stage5LifecyclePairIdentity -Actual $mismatchPair -Expected $expectedPair }
+    catch { $mismatchCode = $_.Exception.Message }
+    Assert-Equal 's5_lifecycle_mixed_version_pair' $mismatchCode 'Strict pair mismatch must retain the existing stable error.'
+
+    $readerFailureState = New-Stage5LifecycleDiagnosticState
+    Set-Stage5LifecyclePhase $readerFailureState 'old-pair-validation'
+    $readerFailureCode = $null
+    try {
+        [void](Get-Stage5LifecyclePairIdentity -State $readerFailureState -InstallRoot $identityRoot -VersionReader {
+            param([string]$path)
+            throw 'RAW_VERSION_READER_SENTINEL'
+        })
+    }
+    catch { $readerFailureCode = $_.Exception.Message }
+    Assert-Equal 's5_lifecycle_pair_metadata_unreadable' $readerFailureCode 'Version reader exception must map to a stable safe failure.'
+
+    $pairDiagnosticPaths = [Collections.Generic.List[string]]::new()
+    foreach ($pairFailure in @(
+        @($missingProductState, $missingProductCode),
+        @($missingFileState, $missingFileCode),
+        @($invalidIdentityState, $invalidIdentityCode),
+        @($mismatchState, $mismatchCode),
+        @($readerFailureState, $readerFailureCode))) {
+        $pairDiagnosticPath = Join-Path $testRoot ('pair-' + [Guid]::NewGuid().ToString('N') + '.json')
+        [void](Write-Stage5LifecycleFailureEvidence -EvidencePath $pairDiagnosticPath -ErrorCode ([string]$pairFailure[1]) `
+            -State $pairFailure[0] -InstallerExecutionBudget (Get-Stage5LifecycleExecutionBudgetSnapshot $identityBudget) -Presence $emptyPresence)
+        $pairDiagnosticPaths.Add($pairDiagnosticPath)
+    }
+    $pairDiagnosticText = ($pairDiagnosticPaths | ForEach-Object { Get-Content -Raw -LiteralPath $_ }) -join ''
+    foreach ($sensitive in @($identityRoot, 'RAW_INVALID_VERSION_SENTINEL', 'RAW_VERSION_READER_SENTINEL')) {
+        Assert-True (-not $pairDiagnosticText.Contains($sensitive)) 'Pair evidence must not contain paths, invalid metadata, or raw exceptions.'
+    }
+    $missingProductEvidence = Get-Content -Raw -LiteralPath $pairDiagnosticPaths[0] | ConvertFrom-Json
+    Assert-Equal $false $missingProductEvidence.pairIdentities[0].client.productVersionPresent 'Missing ProductVersion must be represented only as a safe boolean.'
+    Assert-Equal '0.5.0.0' $missingProductEvidence.pairIdentities[0].client.fileVersion 'A valid safe FileVersion may remain in failure evidence.'
+    $mismatchEvidence = Get-Content -Raw -LiteralPath $pairDiagnosticPaths[3] | ConvertFrom-Json
+    Assert-Equal $expectedPair.productVersion $mismatchEvidence.pairIdentities[0].client.productVersion 'Failure evidence may retain only a strictly valid Client ProductVersion.'
+    Assert-Equal '0.5.0+aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' $mismatchEvidence.pairIdentities[0].host.productVersion 'Failure evidence may retain only a strictly valid Host ProductVersion.'
+    Assert-Equal $expectedPair.fileVersion $mismatchEvidence.pairIdentities[0].client.fileVersion 'Failure evidence may retain only a strictly valid Client FileVersion.'
+    Assert-Equal $expectedPair.fileVersion $mismatchEvidence.pairIdentities[0].host.fileVersion 'Failure evidence may retain only a strictly valid Host FileVersion.'
+
     $launchState = New-Stage5LifecycleDiagnosticState
     Set-Stage5LifecyclePhase $launchState 'old-install'
     $launchBudget = New-Stage5LifecycleExecutionBudget -InstallerExecutions 5 -InstallOrUpgradeExecutions 3 -UninstallExecutions 2
@@ -350,6 +466,9 @@ try {
     Assert-True ($bootstrapText.Contains('tasking.pre-v11-from-v10-*.backup.db')) 'Bootstrap must require the matching migration backup.'
     Assert-True ($bootstrapText.Contains('THIRD-PARTY-NOTICES.txt')) 'Bootstrap must verify NOTICE layout.'
     Assert-True ($bootstrapText.Contains('Invoke-Stage5LifecycleObservedProcess')) 'Every lifecycle process must use the shared observed process seam.'
+    Assert-True ($bootstrapText.Contains('Get-Stage5LifecyclePairIdentity')) 'Every lifecycle pair check must use the null-safe identity seam.'
+    Assert-True ($bootstrapText.Contains('Assert-Stage5LifecyclePairIdentity')) 'Every lifecycle pair comparison must use the strict identity seam.'
+    Assert-True (-not $bootstrapText.Contains('ProductVersion.Trim()') -and -not $bootstrapText.Contains('FileVersion.Trim()')) 'Bootstrap must not call Trim on nullable version metadata.'
     Assert-True ($bootstrapText.Contains('Get-Stage5LifecyclePhaseFailureCode')) 'Bootstrap must normalize unclassified failures through the stable phase code.'
     Assert-True ($bootstrapText.IndexOf('Write-SafeFailure $errorCode', [StringComparison]::Ordinal) -lt $bootstrapText.LastIndexOf('finally {', [StringComparison]::Ordinal)) 'Failure evidence must be finalized before cleanup begins.'
     Assert-True ($bootstrapText.Contains('installer InstallOrUpgrade')) 'Every install/upgrade wrapper must identify its budget kind.'
@@ -359,7 +478,7 @@ try {
     $diagnosticsText = Get-Content -Raw -LiteralPath $diagnosticsScript
     Assert-Equal 1 ([regex]::Matches($diagnosticsText, 'Start-Process').Count) 'Diagnostics must own the single process-start seam.'
 
-    Write-Host 'Stage5 Sandbox lifecycle contract: 25 existing scenarios + 3 process-diagnostic failures + evidence-before-cleanup + static safety checks passed'
+    Write-Host 'Stage5 Sandbox lifecycle contract: 25 existing scenarios + 3 process diagnostics + 6 pair-identity cases + evidence-before-cleanup + static safety checks passed'
 }
 finally {
     $resolved = [IO.Path]::GetFullPath($testRoot)

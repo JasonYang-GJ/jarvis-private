@@ -81,28 +81,12 @@ function Assert-Hash([string]$path, [string]$expected, [string]$code) {
 }
 
 function Get-PairIdentity {
-    $client = Join-Path $installRoot 'ScreenGuide.DesktopClient.exe'
-    $host = Join-Path $installRoot 'ScreenGuide.DesktopHost.exe'
-    foreach ($path in @($client, $host)) {
-        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { Throw-Code 's5_lifecycle_mixed_version_pair' }
-    }
-    $clientInfo = [Diagnostics.FileVersionInfo]::GetVersionInfo($client)
-    $hostInfo = [Diagnostics.FileVersionInfo]::GetVersionInfo($host)
-    return [ordered]@{
-        clientProductVersion = $clientInfo.ProductVersion.Trim()
-        hostProductVersion = $hostInfo.ProductVersion.Trim()
-        clientFileVersion = $clientInfo.FileVersion.Trim()
-        hostFileVersion = $hostInfo.FileVersion.Trim()
-    }
+    return Get-Stage5LifecyclePairIdentity -State $diagnostics -InstallRoot $installRoot
 }
 
 function Assert-Pair($actual, $expected) {
-    if ([string]$actual.clientProductVersion -cne [string]$expected.productVersion -or
-        [string]$actual.hostProductVersion -cne [string]$expected.productVersion -or
-        [string]$actual.clientFileVersion -cne [string]$expected.fileVersion -or
-        [string]$actual.hostFileVersion -cne [string]$expected.fileVersion) {
-        Throw-Code 's5_lifecycle_mixed_version_pair'
-    }
+    try { Assert-Stage5LifecyclePairIdentity -Actual $actual -Expected $expected }
+    catch { Throw-Code ([string]$_.Exception.Message) }
 }
 
 function Invoke-HostOnce([string]$pipeName) {
