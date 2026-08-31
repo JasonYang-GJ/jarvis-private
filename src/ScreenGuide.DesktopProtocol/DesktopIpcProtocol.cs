@@ -63,6 +63,8 @@ public static class DesktopApiMethods
     public const string UpdateMemory = "memory.update";
     public const string SetMemoryEnabled = "memory.set-enabled";
     public const string DeleteMemory = "memory.delete";
+    public const string BridgeHandshake = "bridge.handshake";
+    public const string BridgeSnapshotGet = "bridge.snapshot.get";
     public const string Shutdown = "system.shutdown";
 }
 

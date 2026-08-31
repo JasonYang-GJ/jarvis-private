@@ -192,6 +192,9 @@ public static class DesktopHostFactory
             services.GetServices<ISessionMemoryConsentPublicationObserver>(),
             services.GetRequiredService<IForegroundWindowContextProvider>(),
             services.GetRequiredService<TimeProvider>()));
+        builder.Services.AddSingleton<BridgeServerInstance>();
+        builder.Services.AddSingleton<BridgeSnapshotProjection>();
+        builder.Services.AddSingleton<BridgeProtocolService>();
         builder.Services.AddSingleton<DesktopActionEntryService>();
         builder.Services.AddSingleton<AssistantCommandService>();
         builder.Services.AddSingleton<ProjectInspector>();

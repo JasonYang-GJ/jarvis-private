@@ -22,6 +22,7 @@ public sealed class DesktopApiDispatcher(
     AssistantCommandService assistantCommands,
     ConversationService conversations,
     SessionCoordinator sessions,
+    BridgeProtocolService bridge,
     AiSettingsService aiSettings,
     MemoryService memories,
     IHostApplicationLifetime applicationLifetime)
@@ -189,6 +190,12 @@ public sealed class DesktopApiDispatcher(
                 DesktopApiMethods.GetSessionTurn =>
                     DesktopProtocolJson.ToElement(await GetSessionTurnAsync(
                         Deserialize<SessionTurnGetRequestDto>(request),
+                        cancellationToken).ConfigureAwait(false)),
+                DesktopApiMethods.BridgeHandshake =>
+                    DesktopProtocolJson.ToElement(bridge.Handshake(request.Payload)),
+                DesktopApiMethods.BridgeSnapshotGet =>
+                    DesktopProtocolJson.ToElement(await bridge.GetSnapshotAsync(
+                        request.Payload,
                         cancellationToken).ConfigureAwait(false)),
                 DesktopApiMethods.GetAiSettings =>
                     DesktopProtocolJson.ToElement(await aiSettings.GetAsync(cancellationToken)
@@ -1053,6 +1060,8 @@ internal static class DesktopApiErrors
     {
         var (code, userMessage) = exception switch
         {
+            BridgeProtocolException bridgeException =>
+                (bridgeException.Code, bridgeException.Message),
             WindowIdentityException windowIdentityException =>
                 (windowIdentityException.Code, windowIdentityException.Message),
             SessionProjectionException projectionException =>
