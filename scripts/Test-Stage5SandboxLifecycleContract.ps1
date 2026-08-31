@@ -100,8 +100,11 @@ if ($Mode -eq 'Preflight') {
     if (-not (Equal-Hash $facts.lifecycleProbe)) {
         Complete 'BLOCKED' 's5_lifecycle_probe_hash_mismatch' 1 ([ordered]@{ phase = 'artifact' })
     }
-    if ([int]$facts.lifecycleProbe.fileCount -lt 7 -or
-        [string]$facts.lifecycleProbe.entryPoint -cne 'probe/ScreenGuide.Stage5LifecycleProbe.exe') {
+    if ([string]$facts.lifecycleProbe.transportKind -cne 'sealed-zip-v1' -or
+        [string]$facts.lifecycleProbe.fileName -cne 'lifecycle-probe-transport.zip' -or
+        -not (Is-Sha256 ([string]$facts.lifecycleProbe.manifestSha256)) -or
+        [int]$facts.lifecycleProbe.fileCount -lt 7 -or
+        [string]$facts.lifecycleProbe.entryPoint -cne 'ScreenGuide.Stage5LifecycleProbe.exe') {
         Complete 'BLOCKED' 's5_lifecycle_probe_bundle_invalid' 1 ([ordered]@{ phase = 'artifact' })
     }
     if (-not [bool]$facts.sandboxAvailable) {
@@ -155,8 +158,10 @@ if ($Mode -eq 'Preflight') {
         oldInstaller = [ordered]@{ fileName = [string]$facts.oldInstaller.fileName; sha256 = [string]$facts.oldInstaller.expectedSha256 }
         candidateInstaller = [ordered]@{ fileName = [string]$facts.candidateInstaller.fileName; sha256 = [string]$facts.candidateInstaller.expectedSha256 }
         lifecycleProbe = [ordered]@{
+            transportKind = [string]$facts.lifecycleProbe.transportKind
             fileName = [string]$facts.lifecycleProbe.fileName
             sha256 = [string]$facts.lifecycleProbe.expectedSha256
+            manifestSha256 = [string]$facts.lifecycleProbe.manifestSha256
             fileCount = [int]$facts.lifecycleProbe.fileCount
             entryPoint = [string]$facts.lifecycleProbe.entryPoint
         }

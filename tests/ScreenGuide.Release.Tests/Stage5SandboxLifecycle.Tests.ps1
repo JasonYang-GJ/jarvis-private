@@ -6,6 +6,7 @@ $hostScript = Join-Path $repoRoot 'scripts\New-Stage5SandboxLifecycle.ps1'
 $bootstrapScript = Join-Path $repoRoot 'scripts\Invoke-Stage5SandboxLifecycle.ps1'
 $budgetScript = Join-Path $repoRoot 'scripts\Stage5LifecycleExecutionBudget.ps1'
 $diagnosticsScript = Join-Path $repoRoot 'scripts\Stage5LifecycleFailureDiagnostics.ps1'
+$transportScript = Join-Path $repoRoot 'scripts\Stage5LifecycleProbeTransport.ps1'
 $testRoot = Join-Path ([IO.Path]::GetTempPath()) ('YuanshuStage5Lifecycle-Tests-' + [Guid]::NewGuid().ToString('N'))
 
 function Assert-True([bool]$condition, [string]$message) {
@@ -63,7 +64,7 @@ try {
     foreach ($path in @($inputRoot, $evidenceRoot, $cleanupRoot)) { [IO.Directory]::CreateDirectory($path) | Out-Null }
     $oldInstaller = Join-Path $inputRoot 'old-installer.fake'
     $newInstaller = Join-Path $inputRoot 'new-installer.fake'
-    $probe = Join-Path $inputRoot 'probe.fake'
+    $probe = Join-Path $inputRoot 'lifecycle-probe-transport.zip'
     [IO.File]::WriteAllText($oldInstaller, 'fake old installer', [Text.UTF8Encoding]::new($false))
     [IO.File]::WriteAllText($newInstaller, 'fake new installer', [Text.UTF8Encoding]::new($false))
     [IO.File]::WriteAllText($probe, 'fake lifecycle probe', [Text.UTF8Encoding]::new($false))
@@ -82,11 +83,13 @@ try {
         oldInstaller = [ordered]@{ fileName = 'old-installer.fake'; expectedSha256 = (Get-FileHash $oldInstaller -Algorithm SHA256).Hash; actualSha256 = (Get-FileHash $oldInstaller -Algorithm SHA256).Hash }
         candidateInstaller = [ordered]@{ fileName = 'new-installer.fake'; expectedSha256 = (Get-FileHash $newInstaller -Algorithm SHA256).Hash; actualSha256 = (Get-FileHash $newInstaller -Algorithm SHA256).Hash }
         lifecycleProbe = [ordered]@{
-            fileName = 'probe/lifecycle-probe-bundle.json'
+            transportKind = 'sealed-zip-v1'
+            fileName = 'lifecycle-probe-transport.zip'
             expectedSha256 = (Get-FileHash $probe -Algorithm SHA256).Hash
             actualSha256 = (Get-FileHash $probe -Algorithm SHA256).Hash
+            manifestSha256 = 'A' * 64
             fileCount = 7
-            entryPoint = 'probe/ScreenGuide.Stage5LifecycleProbe.exe'
+            entryPoint = 'ScreenGuide.Stage5LifecycleProbe.exe'
         }
         mappings = [ordered]@{
             inputHostPath = $inputRoot
@@ -110,6 +113,8 @@ try {
     Assert-Equal 5 $plan.budgets.installerExecutions 'Lifecycle plan must declare all five installer/uninstaller process starts.'
     Assert-Equal 3 $plan.budgets.installOrUpgradeExecutions 'Lifecycle plan must declare three install/upgrade starts.'
     Assert-Equal 2 $plan.budgets.uninstallExecutions 'Lifecycle plan must declare two uninstall starts.'
+    Assert-Equal 'sealed-zip-v1' $plan.lifecycleProbe.transportKind 'Lifecycle plan must require the sealed ZIP transport.'
+    Assert-Equal ('A' * 64) $plan.lifecycleProbe.manifestSha256 'Lifecycle plan must bind the inner manifest identity.'
     Assert-Equal 7 $plan.lifecycleProbe.fileCount 'Lifecycle plan must bind the full probe bundle file count.'
     $wsb = Get-Content -Raw -LiteralPath $positive.WsbPath
     foreach ($element in @('Networking', 'ClipboardRedirection', 'AudioInput', 'VideoInput', 'PrinterRedirection')) {
@@ -149,6 +154,9 @@ try {
         @('s5_lifecycle_old_installer_hash_mismatch', { param($x) $x.oldInstaller.actualSha256 = '0' * 64 }),
         @('s5_lifecycle_candidate_installer_hash_mismatch', { param($x) $x.candidateInstaller.actualSha256 = '0' * 64 }),
         @('s5_lifecycle_probe_hash_mismatch', { param($x) $x.lifecycleProbe.actualSha256 = '0' * 64 }),
+        @('s5_lifecycle_probe_bundle_invalid', { param($x) $x.lifecycleProbe.transportKind = 'loose-directory' }),
+        @('s5_lifecycle_probe_bundle_invalid', { param($x) $x.lifecycleProbe.manifestSha256 = 'invalid' }),
+        @('s5_lifecycle_probe_bundle_invalid', { param($x) $x.lifecycleProbe.entryPoint = '../ScreenGuide.Stage5LifecycleProbe.exe' }),
         @('s5_lifecycle_sandbox_unavailable', { param($x) $x.sandboxAvailable = $false }),
         @('s5_lifecycle_network_policy_invalid', { param($x) $x.sandboxPolicy.networking = 'Enable' }),
         @('s5_lifecycle_input_mapping_writable', { param($x) $x.mappings.inputReadOnly = $false }),
@@ -441,6 +449,37 @@ try {
     foreach ($sensitive in @($testRoot, 'C:\fixture\installer.exe', 'SUPER_SECRET_ARGUMENT', 'RAW_EXCEPTION_SENTINEL')) {
         Assert-True (-not $diagnosticText.Contains($sensitive)) 'Failure evidence must not contain paths, arguments, secrets, or raw exceptions.'
     }
+
+    $probeDiagnosticState = New-Stage5LifecycleDiagnosticState
+    Set-Stage5LifecyclePhase $probeDiagnosticState 'probe-bundle-validation'
+    Add-Stage5LifecycleProbeValidation -State $probeDiagnosticState -Layer 'transport-mapped' -Validation ([pscustomobject]@{
+        status = 'BLOCKED'
+        errorCode = 's5_lifecycle_probe_transport_incomplete'
+        phase = 'entry-count'
+        declaredCount = 197
+        actualCount = 5
+        missingCount = 192
+        extraCount = 0
+        archiveSha256 = 'B' * 64
+        manifestSha256 = 'C' * 64
+        entryPointPresent = $true
+        rawPath = 'C:\RAW_PROBE_PATH_SENTINEL'
+        fileNames = @('RAW_FILE_NAME_SENTINEL.dll')
+    })
+    $probeDiagnosticPath = Join-Path $testRoot 'diagnostics-probe-validation.json'
+    [void](Write-Stage5LifecycleFailureEvidence -EvidencePath $probeDiagnosticPath `
+        -ErrorCode 's5_lifecycle_probe_transport_incomplete' -State $probeDiagnosticState `
+        -InstallerExecutionBudget $null -Presence $emptyPresence)
+    $probeDiagnostic = Get-Content -Raw -LiteralPath $probeDiagnosticPath | ConvertFrom-Json
+    Assert-Equal 1 @($probeDiagnostic.probeValidations).Count 'Failure evidence must retain one safe probe validation record.'
+    Assert-Equal 'transport-mapped' $probeDiagnostic.probeValidations[0].layer 'Probe validation evidence must retain only a stable layer.'
+    Assert-Equal 197 $probeDiagnostic.probeValidations[0].declaredCount 'Probe validation evidence must retain safe declared count.'
+    Assert-Equal 5 $probeDiagnostic.probeValidations[0].actualCount 'Probe validation evidence must retain safe actual count.'
+    Assert-Equal 192 $probeDiagnostic.probeValidations[0].missingCount 'Probe validation evidence must retain safe missing count.'
+    $probeDiagnosticText = Get-Content -Raw -LiteralPath $probeDiagnosticPath
+    foreach ($sensitive in @('C:\RAW_PROBE_PATH_SENTINEL', 'RAW_FILE_NAME_SENTINEL.dll', 'rawPath', 'fileNames')) {
+        Assert-True (-not $probeDiagnosticText.Contains($sensitive)) 'Probe validation evidence must not contain paths, file names, or raw fields.'
+    }
     $cleanupFixture = Join-Path ([IO.Path]::GetTempPath()) ('YuanshuStage5Lifecycle-' + [Guid]::NewGuid().ToString('N'))
     [IO.Directory]::CreateDirectory($cleanupFixture) | Out-Null
     [IO.File]::WriteAllText((Join-Path $cleanupFixture 'temporary.txt'), 'temporary')
@@ -459,7 +498,9 @@ try {
     Assert-Equal 0 ([regex]::Matches($hostText, 'Start-Process').Count) 'Host harness must execute zero installer or Sandbox processes.'
     Assert-True ($hostText.Contains("'Stage5LifecycleExecutionBudget.ps1'")) 'Host preflight must place the shared budget guard in the read-only input mapping.'
     Assert-True ($hostText.Contains("'Stage5LifecycleFailureDiagnostics.ps1'")) 'Host preflight must place shared failure diagnostics in the read-only input mapping.'
-    Assert-True ($hostText.Contains("'Test-Stage5LifecycleProbeBundle.ps1'")) 'Host preflight must validate the complete probe bundle before and after copy.'
+    Assert-True ($hostText.Contains("'Stage5LifecycleProbeTransport.ps1'")) 'Host preflight must place the sealed transport implementation in read-only input.'
+    Assert-True ($hostText.Contains('New-Stage5LifecycleProbeTransport')) 'Host preflight must seal the complete probe before mapping it.'
+    Assert-True (-not $hostText.Contains("Copy-Item -LiteralPath `$probeRoot -Destination (Join-Path `$inputRoot 'probe') -Recurse")) 'Host preflight must not copy a loose probe directory into Sandbox input.'
     $contractText = Get-Content -Raw -LiteralPath $contractScript
     Assert-True (-not $contractText.Contains('s5_lifecycle_existing_host_install')) 'Existing Host installation must not remain a preflight blocker.'
     $bootstrapText = Get-Content -Raw -LiteralPath $bootstrapScript
@@ -473,12 +514,15 @@ try {
     Assert-True ($bootstrapText.IndexOf('Write-SafeFailure $errorCode', [StringComparison]::Ordinal) -lt $bootstrapText.LastIndexOf('finally {', [StringComparison]::Ordinal)) 'Failure evidence must be finalized before cleanup begins.'
     Assert-True ($bootstrapText.Contains('installer InstallOrUpgrade')) 'Every install/upgrade wrapper must identify its budget kind.'
     Assert-True ($bootstrapText.Contains('installer Uninstall')) 'Every uninstall wrapper must identify its budget kind.'
-    Assert-True ($bootstrapText.Contains('probe-bundle-validation.json')) 'Sandbox bootstrap must validate the complete probe bundle before execution.'
+    Assert-True ($bootstrapText.Contains('Test-Stage5LifecycleProbeTransport')) 'Sandbox bootstrap must validate the mapped and local sealed transports.'
+    Assert-True ($bootstrapText.Contains('Expand-Stage5LifecycleProbeTransport')) 'Sandbox bootstrap must expand only into its owned local runtime root.'
+    Assert-True ($bootstrapText.Contains("Add-Stage5LifecycleProbeValidation")) 'Sandbox bootstrap must record safe layered probe validation evidence.'
+    Assert-True ($bootstrapText.IndexOf('Expand-Stage5LifecycleProbeTransport', [StringComparison]::Ordinal) -lt $bootstrapText.IndexOf("Set-Stage5LifecyclePhase `$diagnostics 'old-install'", [StringComparison]::Ordinal)) 'Transport expansion and entrypoint validation must finish before the first installer attempt.'
     Assert-Equal 0 ([regex]::Matches($bootstrapText, 'Start-Process').Count) 'Bootstrap must not bypass the shared observed process seam.'
     $diagnosticsText = Get-Content -Raw -LiteralPath $diagnosticsScript
     Assert-Equal 1 ([regex]::Matches($diagnosticsText, 'Start-Process').Count) 'Diagnostics must own the single process-start seam.'
 
-    Write-Host 'Stage5 Sandbox lifecycle contract: 25 existing scenarios + 3 process diagnostics + 6 pair-identity cases + evidence-before-cleanup + static safety checks passed'
+    Write-Host 'Stage5 Sandbox lifecycle contract: 28 preflight/evidence scenarios + 3 process diagnostics + 6 pair-identity cases + 1 probe-evidence case + evidence-before-cleanup + static safety checks passed'
 }
 finally {
     $resolved = [IO.Path]::GetFullPath($testRoot)

@@ -17,7 +17,7 @@ $existingUninstallKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninsta
 $contractScript = Join-Path $inputRoot 'Test-Stage5SandboxLifecycleContract.ps1'
 $budgetScript = Join-Path $inputRoot 'Stage5LifecycleExecutionBudget.ps1'
 $diagnosticsScript = Join-Path $inputRoot 'Stage5LifecycleFailureDiagnostics.ps1'
-$probeValidator = Join-Path $inputRoot 'Test-Stage5LifecycleProbeBundle.ps1'
+$probeTransportScript = Join-Path $inputRoot 'Stage5LifecycleProbeTransport.ps1'
 $probeExecutable = $null
 $errorCode = 's5_lifecycle_unexpected_failure'
 $hostExecutions = 0
@@ -76,6 +76,16 @@ function Invoke-Hidden(
 function Assert-Hash([string]$path, [string]$expected, [string]$code) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf) -or
         (Get-FileHash -Algorithm SHA256 -LiteralPath $path).Hash -cne $expected) {
+        Throw-Code $code
+    }
+}
+
+function Add-ProbeValidation([string]$layer, $validation) {
+    try { Add-Stage5LifecycleProbeValidation -State $diagnostics -Layer $layer -Validation $validation }
+    catch { Throw-Code 's5_lifecycle_probe_evidence_invalid' }
+    if ([string]$validation.status -cne 'PASS') {
+        $code = [string]$validation.errorCode
+        if ($code -cnotmatch '^s5_lifecycle_[a-z0-9_]+$') { $code = 's5_lifecycle_probe_bundle_invalid' }
         Throw-Code $code
     }
 }
@@ -144,6 +154,12 @@ try {
     }
     $plan = Get-Content -Raw -LiteralPath $resolvedPlan | ConvertFrom-Json
     if ($plan.contractVersion -ne 1 -or [string]$plan.mode -cne 'native' -or
+        [string]$plan.lifecycleProbe.transportKind -cne 'sealed-zip-v1' -or
+        [string]$plan.lifecycleProbe.fileName -cne 'lifecycle-probe-transport.zip' -or
+        [string]$plan.lifecycleProbe.sha256 -cnotmatch '^[0-9A-F]{64}$' -or
+        [string]$plan.lifecycleProbe.manifestSha256 -cnotmatch '^[0-9A-F]{64}$' -or
+        [int]$plan.lifecycleProbe.fileCount -lt 7 -or
+        [string]$plan.lifecycleProbe.entryPoint -cne 'ScreenGuide.Stage5LifecycleProbe.exe' -or
         $plan.budgets.installerExecutions -ne 5 -or
         $plan.budgets.installOrUpgradeExecutions -ne 3 -or
         $plan.budgets.uninstallExecutions -ne 2 -or
@@ -153,7 +169,11 @@ try {
     if (-not (Test-Path -LiteralPath $budgetScript -PathType Leaf) -or (Has-ReparsePoint $budgetScript)) {
         Throw-Code 's5_lifecycle_plan_invalid'
     }
+    if (-not (Test-Path -LiteralPath $probeTransportScript -PathType Leaf) -or (Has-ReparsePoint $probeTransportScript)) {
+        Throw-Code 's5_lifecycle_probe_transport_invalid'
+    }
     . $budgetScript
+    . $probeTransportScript
     try {
         $installerBudget = New-Stage5LifecycleExecutionBudget `
             -InstallerExecutions ([int]$plan.budgets.installerExecutions) `
@@ -169,27 +189,47 @@ try {
     Set-Stage5LifecyclePhase $diagnostics 'artifact-validation'
     $oldInstaller = Join-Path $inputRoot ([string]$plan.oldInstaller.fileName)
     $candidateInstaller = Join-Path $inputRoot ([string]$plan.candidateInstaller.fileName)
-    $probe = Join-Path $inputRoot ([string]$plan.lifecycleProbe.fileName).Replace('/', '\')
+    $probeTransportMapped = Join-Path $inputRoot ([string]$plan.lifecycleProbe.fileName)
     Assert-Hash $oldInstaller ([string]$plan.oldInstaller.sha256) 's5_lifecycle_old_installer_hash_mismatch'
     Assert-Hash $candidateInstaller ([string]$plan.candidateInstaller.sha256) 's5_lifecycle_candidate_installer_hash_mismatch'
-    Assert-Hash $probe ([string]$plan.lifecycleProbe.sha256) 's5_lifecycle_probe_hash_mismatch'
-    if (-not (Test-Path -LiteralPath $probeValidator -PathType Leaf) -or (Has-ReparsePoint $probeValidator)) {
-        Throw-Code 's5_lifecycle_probe_bundle_invalid'
-    }
     Set-Stage5LifecyclePhase $diagnostics 'probe-bundle-validation'
-    $probeValidationPath = Join-Path $runtimeRoot 'probe-bundle-validation.json'
-    $probeValidationOutput = @(& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $probeValidator `
-        -BundleRoot (Join-Path $inputRoot 'probe') -ResultPath $probeValidationPath 2>&1)
-    if ($LASTEXITCODE -ne 0) { Throw-Code 's5_lifecycle_probe_bundle_invalid' }
-    $probeValidation = Get-Content -Raw -LiteralPath $probeValidationPath | ConvertFrom-Json
-    if ([int]$probeValidation.fileCount -ne [int]$plan.lifecycleProbe.fileCount -or
-        [string]$probeValidation.details.manifestSha256 -cne [string]$plan.lifecycleProbe.sha256) {
-        Throw-Code 's5_lifecycle_probe_bundle_hash_mismatch'
+    $mappedValidation = Test-Stage5LifecycleProbeTransport -ArchivePath $probeTransportMapped `
+        -ExpectedArchiveSha256 ([string]$plan.lifecycleProbe.sha256) `
+        -ExpectedManifestSha256 ([string]$plan.lifecycleProbe.manifestSha256) `
+        -ExpectedFileCount ([int]$plan.lifecycleProbe.fileCount)
+    Add-ProbeValidation 'transport-mapped' $mappedValidation
+
+    $probeTransportLocal = Join-Path $runtimeRoot 'lifecycle-probe-transport.zip'
+    try { Copy-Item -LiteralPath $probeTransportMapped -Destination $probeTransportLocal }
+    catch {
+        $copyFailure = New-Stage5ProbeValidationResult 'BLOCKED' 's5_lifecycle_probe_transport_copy_failed' 'transport-copy' `
+            ([int]$mappedValidation.declaredCount) 0 0 0 ([string]$mappedValidation.archiveSha256) `
+            ([string]$mappedValidation.manifestSha256) $false
+        Add-ProbeValidation 'transport-local' $copyFailure
     }
-    $probeExecutable = Join-Path $inputRoot ([string]$plan.lifecycleProbe.entryPoint).Replace('/', '\')
-    if (-not (Test-Path -LiteralPath $probeExecutable -PathType Leaf) -or (Has-ReparsePoint $probeExecutable)) {
-        Throw-Code 's5_lifecycle_probe_bundle_invalid'
-    }
+    $localValidation = Test-Stage5LifecycleProbeTransport -ArchivePath $probeTransportLocal `
+        -ExpectedArchiveSha256 ([string]$plan.lifecycleProbe.sha256) `
+        -ExpectedManifestSha256 ([string]$plan.lifecycleProbe.manifestSha256) `
+        -ExpectedFileCount ([int]$plan.lifecycleProbe.fileCount)
+    Add-ProbeValidation 'transport-local' $localValidation
+
+    $probeExpandedRoot = Join-Path $runtimeRoot 'probe-expanded'
+    $expandedValidation = Expand-Stage5LifecycleProbeTransport -ArchivePath $probeTransportLocal `
+        -DestinationRoot $probeExpandedRoot -ApprovedRoot $runtimeRoot `
+        -ExpectedArchiveSha256 ([string]$plan.lifecycleProbe.sha256) `
+        -ExpectedManifestSha256 ([string]$plan.lifecycleProbe.manifestSha256) `
+        -ExpectedFileCount ([int]$plan.lifecycleProbe.fileCount)
+    Add-ProbeValidation 'expanded-bundle' $expandedValidation
+
+    $probeExecutable = Join-Path $probeExpandedRoot ([string]$plan.lifecycleProbe.entryPoint)
+    $entryPointValid = (Test-Path -LiteralPath $probeExecutable -PathType Leaf) -and
+        -not (Test-Stage5ProbeReparsePoint $probeExecutable)
+    $entryValidation = New-Stage5ProbeValidationResult `
+        $(if ($entryPointValid) { 'PASS' } else { 'BLOCKED' }) `
+        $(if ($entryPointValid) { $null } else { 's5_lifecycle_probe_entrypoint_invalid' }) `
+        'entrypoint' ([int]$expandedValidation.declaredCount) ([int]$expandedValidation.actualCount) `
+        0 0 ([string]$expandedValidation.archiveSha256) ([string]$expandedValidation.manifestSha256) $entryPointValid
+    Add-ProbeValidation 'entrypoint' $entryValidation
 
     Set-Stage5LifecyclePhase $diagnostics 'old-install'
     Install $oldInstaller 'install-v0.5.log'

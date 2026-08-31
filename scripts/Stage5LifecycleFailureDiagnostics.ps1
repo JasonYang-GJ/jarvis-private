@@ -5,7 +5,47 @@ function New-Stage5LifecycleDiagnosticState {
         CurrentPhase = 'initializing'
         Processes = [Collections.Generic.List[object]]::new()
         PairIdentities = [Collections.Generic.List[object]]::new()
+        ProbeValidations = [Collections.Generic.List[object]]::new()
     }
+}
+
+function Add-Stage5LifecycleProbeValidation(
+    $State,
+    [ValidateSet('transport-mapped', 'transport-local', 'expanded-bundle', 'entrypoint')]
+    [string]$Layer,
+    $Validation) {
+    if ($null -eq $State -or $null -eq $State.ProbeValidations -or $null -eq $Validation -or
+        [string]$Validation.status -cnotin @('PASS', 'BLOCKED') -or
+        [string]$Validation.phase -cnotmatch '^[a-z0-9]+(?:-[a-z0-9]+)*$') {
+        throw [InvalidOperationException]::new('s5_lifecycle_probe_evidence_invalid')
+    }
+    $errorCode = [string]$Validation.errorCode
+    if (-not [string]::IsNullOrWhiteSpace($errorCode) -and $errorCode -cnotmatch '^s5_lifecycle_[a-z0-9_]+$') {
+        throw [InvalidOperationException]::new('s5_lifecycle_probe_evidence_invalid')
+    }
+    $archiveSha = if ([string]$Validation.archiveSha256 -cmatch '^[0-9A-F]{64}$') { [string]$Validation.archiveSha256 } else { $null }
+    $manifestSha = if ([string]$Validation.manifestSha256 -cmatch '^[0-9A-F]{64}$') { [string]$Validation.manifestSha256 } else { $null }
+    $counts = @(
+        [int]$Validation.declaredCount,
+        [int]$Validation.actualCount,
+        [int]$Validation.missingCount,
+        [int]$Validation.extraCount)
+    if (@($counts | Where-Object { $_ -lt 0 -or $_ -gt 512 }).Count -gt 0) {
+        throw [InvalidOperationException]::new('s5_lifecycle_probe_evidence_invalid')
+    }
+    $State.ProbeValidations.Add([pscustomobject][ordered]@{
+        layer = $Layer
+        status = [string]$Validation.status
+        errorCode = if ([string]::IsNullOrWhiteSpace($errorCode)) { $null } else { $errorCode }
+        phase = [string]$Validation.phase
+        declaredCount = $counts[0]
+        actualCount = $counts[1]
+        missingCount = $counts[2]
+        extraCount = $counts[3]
+        archiveSha256 = $archiveSha
+        manifestSha256 = $manifestSha
+        entryPointPresent = [bool]$Validation.entryPointPresent
+    })
 }
 
 function Set-Stage5LifecyclePhase($State, [string]$Phase) {
@@ -247,6 +287,22 @@ function Write-Stage5LifecycleFailureEvidence(
                 }
             }
         })
+    $probeValidations = @(
+        $State.ProbeValidations | ForEach-Object {
+            [ordered]@{
+                layer = [string]$_.layer
+                status = [string]$_.status
+                errorCode = if ($null -eq $_.errorCode) { $null } else { [string]$_.errorCode }
+                phase = [string]$_.phase
+                declaredCount = [int]$_.declaredCount
+                actualCount = [int]$_.actualCount
+                missingCount = [int]$_.missingCount
+                extraCount = [int]$_.extraCount
+                archiveSha256 = if ($null -eq $_.archiveSha256) { $null } else { [string]$_.archiveSha256 }
+                manifestSha256 = if ($null -eq $_.manifestSha256) { $null } else { [string]$_.manifestSha256 }
+                entryPointPresent = [bool]$_.entryPointPresent
+            }
+        })
     $result = [ordered]@{
         contractVersion = 1
         status = 'BLOCKED'
@@ -260,6 +316,7 @@ function Write-Stage5LifecycleFailureEvidence(
         hostExecutions = @($processes | Where-Object { $_.processKind -ceq 'host' -and $_.processStarted }).Count
         processes = $processes
         pairIdentities = $pairIdentities
+        probeValidations = $probeValidations
         presence = [ordered]@{
             installRootPresent = [bool]$Presence.installRootPresent
             clientPresent = [bool]$Presence.clientPresent
