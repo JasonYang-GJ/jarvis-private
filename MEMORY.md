@@ -1,13 +1,14 @@
 # 元枢项目记忆
 
-> 本文件记录稳定项目事实和历史决策，不是产品运行时的用户记忆账本。更新时间：2026-08-30。
+> 本文件记录稳定项目事实和历史决策，不是产品运行时的用户记忆账本。更新时间：2026-08-31。
 
 ## 当前状态
 
 - V0.6.0 / Stage 4 已完成 Final Freeze，S4-R1/R2/R3/R4 均为 `INTEGRATED_PASS`。正式标签 `v0.6.0-stage4` 指向 C0 `3a591a7b6af7da7d97e07093d4c33a3f44553b82`，annotated tag object 为 `20045c7960c182a052a5e0b2552ce0ed14a3863f`；C1 只记录冻结证据，不改变标签源码或二进制身份。Stage 4 到此结束，不新增 S4-R5。
-- Stage 5 的唯一推荐方向是 Safe Distribution & Upgrade Readiness；Charter/Preflight 与 S5-R1 离线证据、归属合同及 fail-closed packaging gate 基础设施已形成，但可分发产品、安装生命周期、签名和最终发布仍为 `NOT_STARTED / NOT_AUTHORIZED`。S5-R1～R4 保持许可清单、隔离安装生命周期、签名/release identity 和最终分发验收的串行边界，不授权下载、安装、签名、采购、联网、上传或发布。
+- Stage 5 的唯一推荐方向是 Safe Distribution & Upgrade Readiness；Charter/Preflight 与 S5-R1 离线证据、归属合同及 fail-closed packaging gate 基础设施已形成。S5-R2 离线 Windows Sandbox 生命周期 Harness 候选为 `READY_FOR_QA`，但真实 Sandbox/installer 生命周期仍为 `NOT_RUN / NOT_PASS`；签名和最终发布仍未开始。S5-R1～R4 保持许可清单、隔离安装生命周期、签名/release identity 和最终分发验收的串行边界，不授权下载、真实安装、签名、采购、联网、上传或发布。
 - S5-R1 Offline Inventory、Official Evidence Verification、四轴归属合同与 exact LICENSE/NOTICE bundle 均已 PASS；状态为 `S5-R1_CONTRACT_PASS`、`FAIL_CLOSED_INFRASTRUCTURE_IMPLEMENTED`、`NOTICE_BUNDLE_IMPLEMENTATION_PASS`、`EXTERNAL_DISTRIBUTION_BLOCKED`。Owner 选择专有编译产品分发且不公开分发源码；保留 AI 辅助图标并作事实披露，不主张独占、商标注册、必然版权保护或绝对不侵权；Owner 亲自阅读并接受适用的 Microsoft Windows SDK license/REDIST 条件。冻结 attribution 的 539 条 payload 与 2 条 installer-container entry 已绑定显式 component/version、精确材料、UTF8_NO_BOM_LF_V1/原始 SHA-256 与组件内 NOTICE path；Inno 精确为 6.7.3，ChineseSimplified.isl 绑定 Kira exact commit。七个非 win-x64 Sherpa runtime 与中文语音模型保持排除，WinSDK BuildTools 保持 build-only。唯一详细记录为 `docs/V2_STAGE5_DISTRIBUTION_LICENSE_INVENTORY.md`。
 - packaging/NOTICE 门禁仍保持失败关闭：目录缺失/冲突、跨组件错绑、material/hash/version/path 错误、default-branch 替代、NTFS reparse path chain 和 staging 越界均拒绝；只有 exact bundle 全部通过才生成无 wildcard/optional 的 Inno include。技术 bundle PASS 不等于外部分发放行；数字签名/signed identity 与 clean-machine same-AppId install/upgrade/rollback/uninstall（含安装后 NOTICE layout）仍是独立 Gate，本轮未安装、签名、发布或改变 V0.6.0 frozen identity。
+- S5-R2 Harness 在 Host 侧仅校验 exact SHA、clean、旧/新安装包和探针 hash、Sandbox 可用性及本机同 AppId 安装不存在，再生成网络/剪贴板/音频/麦克风/视频/打印关闭的临时 `.wsb`；仓库不映射，输入只读，证据目录为独占可写临时根。Sandbox bootstrap 计划验证 v10→v11、唯一匹配 `pre-v11-from-v10`、缺失备份拒绝且 v11 DB hash 不变、成对回滚、NOTICE 与卸载后数据保留。当前只通过假夹具与只读 probe 的离线门禁；真实 Sandbox、安装器、网络、Provider 和凭据访问均为 0。
 - V2 阶段 1“统一会话中枢”已经通过；363/363 自动化和实际 Release DesktopClient + DesktopHost 的真实桌面验收均通过。
 - V0.2.1 标签 `v0.2.1-baseline` 保留为上一版回滚点；回滚必须同时使用 pre-v7 备份或隔离数据目录。
 - V2 阶段 2“可替换 AI 大脑与模型路由”已通过：统一 Chat Model、Provider Registry、Model Router、Prompt Registry、DPAPI、安全停用的 Codex 普通聊天适配器、DeepSeek/千问普通聊天 Provider、设置 UI/IPC、语义建议和 schema v8 AI 调用审计。

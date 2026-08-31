@@ -34,7 +34,7 @@ Stage 5 的用户价值是给出可核验、失败关闭的答案：**是否可�
 - 四轴合同固定区分 Source、Bundling、Attribution 与 Notice；contract PASS 不等于 NOTICE 已实现或可分发。
 - Owner 权属/分发形态确认、原始 C0 只读 manifest、clean rebuild、NOTICE installer 修改、未来在线补证和 S5-R2 lifecycle 都是独立授权门禁。
 - release/installer 已接入离线 fail-closed bundle gate，exact bundle 通过后才生成确定性 mandatory Inno include；缺失/篡改/错绑/越界/default-branch substitute 均在 restore/publish/installer compile 前阻断。安装后 layout 验证与新 release identity 尚未执行；不得把它们塞入 S5-R2 或拖到 S5-R4。
-- Stage 5 implementation 整体仍未完成；Charter 不预定 V0.7.0，不授权下载、安装、签名、发布或开始 S5-R2。
+- Stage 5 implementation 整体仍未完成；Charter 不预定 V0.7.0，不授权下载、真实安装、签名或发布。S5-R2 仅完成离线 Harness 候选，真实 Sandbox 生命周期仍需独立 QA 授权与执行。
 
 ### S5-R2 Isolated Installer Lifecycle
 
@@ -42,6 +42,8 @@ Stage 5 的用户价值是给出可核验、失败关闭的答案：**是否可�
 - 保护现有安装登记、现有用户数据和当前开发机；不得在需保留的同 AppId 安装上试验。
 - 验证 Host+Client 成对升级/回滚、数据库保留、匹配备份与缺失备份失败关闭。
 - 不把浅层脚本成功或安装器退出码单独当作用户可见生命周期通过。
+- 离线 Harness 状态为 `READY_FOR_QA`：Host 只做 exact-SHA/clean/hash/Sandbox/既有安装预检并生成临时 `.wsb`；输入只读映射，证据只写入专属临时目录，网络、剪贴板、音频、麦克风、视频与打印均关闭，Host 不执行安装器。
+- Sandbox bootstrap 固定验证 V0.5 schema v10 → V0.6 schema v11 → 匹配 `pre-v11-from-v10` 备份回滚 → 卸载与数据保留，并输出不含正文、路径、凭据或日志的紧凑 JSON。当前真实 Sandbox 启动和安装器执行均为 0，不能记为生命周期 PASS。
 
 ### S5-R3 Signing & Release Identity
 
