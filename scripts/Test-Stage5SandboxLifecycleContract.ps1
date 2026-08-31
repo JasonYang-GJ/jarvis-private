@@ -100,6 +100,10 @@ if ($Mode -eq 'Preflight') {
     if (-not (Equal-Hash $facts.lifecycleProbe)) {
         Complete 'BLOCKED' 's5_lifecycle_probe_hash_mismatch' 1 ([ordered]@{ phase = 'artifact' })
     }
+    if ([int]$facts.lifecycleProbe.fileCount -lt 7 -or
+        [string]$facts.lifecycleProbe.entryPoint -cne 'probe/ScreenGuide.Stage5LifecycleProbe.exe') {
+        Complete 'BLOCKED' 's5_lifecycle_probe_bundle_invalid' 1 ([ordered]@{ phase = 'artifact' })
+    }
     if (-not [bool]$facts.sandboxAvailable) {
         Complete 'BLOCKED' 's5_lifecycle_sandbox_unavailable' 1 ([ordered]@{ phase = 'host' })
     }
@@ -142,7 +146,12 @@ if ($Mode -eq 'Preflight') {
         sourceSha = [string]$facts.expectedSourceSha
         oldInstaller = [ordered]@{ fileName = [string]$facts.oldInstaller.fileName; sha256 = [string]$facts.oldInstaller.expectedSha256 }
         candidateInstaller = [ordered]@{ fileName = [string]$facts.candidateInstaller.fileName; sha256 = [string]$facts.candidateInstaller.expectedSha256 }
-        lifecycleProbe = [ordered]@{ fileName = [string]$facts.lifecycleProbe.fileName; sha256 = [string]$facts.lifecycleProbe.expectedSha256 }
+        lifecycleProbe = [ordered]@{
+            fileName = [string]$facts.lifecycleProbe.fileName
+            sha256 = [string]$facts.lifecycleProbe.expectedSha256
+            fileCount = [int]$facts.lifecycleProbe.fileCount
+            entryPoint = [string]$facts.lifecycleProbe.entryPoint
+        }
         oldIdentity = $facts.oldIdentity
         candidateIdentity = $facts.candidateIdentity
         noticeFiles = @(

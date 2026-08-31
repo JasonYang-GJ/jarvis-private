@@ -75,7 +75,13 @@ try {
         existingHostInstall = $false
         oldInstaller = [ordered]@{ fileName = 'old-installer.fake'; expectedSha256 = (Get-FileHash $oldInstaller -Algorithm SHA256).Hash; actualSha256 = (Get-FileHash $oldInstaller -Algorithm SHA256).Hash }
         candidateInstaller = [ordered]@{ fileName = 'new-installer.fake'; expectedSha256 = (Get-FileHash $newInstaller -Algorithm SHA256).Hash; actualSha256 = (Get-FileHash $newInstaller -Algorithm SHA256).Hash }
-        lifecycleProbe = [ordered]@{ fileName = 'probe.fake'; expectedSha256 = (Get-FileHash $probe -Algorithm SHA256).Hash; actualSha256 = (Get-FileHash $probe -Algorithm SHA256).Hash }
+        lifecycleProbe = [ordered]@{
+            fileName = 'probe/lifecycle-probe-bundle.json'
+            expectedSha256 = (Get-FileHash $probe -Algorithm SHA256).Hash
+            actualSha256 = (Get-FileHash $probe -Algorithm SHA256).Hash
+            fileCount = 7
+            entryPoint = 'probe/ScreenGuide.Stage5LifecycleProbe.exe'
+        }
         mappings = [ordered]@{
             inputHostPath = $inputRoot
             evidenceHostPath = $evidenceRoot
@@ -98,6 +104,7 @@ try {
     Assert-Equal 5 $plan.budgets.installerExecutions 'Lifecycle plan must declare all five installer/uninstaller process starts.'
     Assert-Equal 3 $plan.budgets.installOrUpgradeExecutions 'Lifecycle plan must declare three install/upgrade starts.'
     Assert-Equal 2 $plan.budgets.uninstallExecutions 'Lifecycle plan must declare two uninstall starts.'
+    Assert-Equal 7 $plan.lifecycleProbe.fileCount 'Lifecycle plan must bind the full probe bundle file count.'
     $wsb = Get-Content -Raw -LiteralPath $positive.WsbPath
     foreach ($element in @('Networking', 'ClipboardRedirection', 'AudioInput', 'VideoInput', 'PrinterRedirection')) {
         Assert-True ($wsb.Contains("<$element>Disable</$element>")) "$element must be disabled."
@@ -223,12 +230,14 @@ try {
     Assert-True ($hostText.Contains('Get-WindowsOptionalFeature')) 'Host preflight must verify Windows Sandbox availability.'
     Assert-True ($hostText.Contains('existingUninstallKey')) 'Host preflight must reject an existing same-AppId installation.'
     Assert-True ($hostText.Contains("'Stage5LifecycleExecutionBudget.ps1'")) 'Host preflight must place the shared budget guard in the read-only input mapping.'
+    Assert-True ($hostText.Contains("'Test-Stage5LifecycleProbeBundle.ps1'")) 'Host preflight must validate the complete probe bundle before and after copy.'
     $bootstrapText = Get-Content -Raw -LiteralPath $bootstrapScript
     Assert-True ($bootstrapText.Contains('tasking.pre-v11-from-v10-*.backup.db')) 'Bootstrap must require the matching migration backup.'
     Assert-True ($bootstrapText.Contains('THIRD-PARTY-NOTICES.txt')) 'Bootstrap must verify NOTICE layout.'
     Assert-True ($bootstrapText.Contains('Enter-Stage5LifecycleInstallerExecution -Budget $installerBudget -Kind $installerKind')) 'Installer process entry must invoke the shared budget guard before Start-Process.'
     Assert-True ($bootstrapText.Contains('installer InstallOrUpgrade')) 'Every install/upgrade wrapper must identify its budget kind.'
     Assert-True ($bootstrapText.Contains('installer Uninstall')) 'Every uninstall wrapper must identify its budget kind.'
+    Assert-True ($bootstrapText.Contains('probe-bundle-validation.json')) 'Sandbox bootstrap must validate the complete probe bundle before execution.'
     Assert-Equal 1 ([regex]::Matches($bootstrapText, 'Start-Process').Count) 'Bootstrap must retain one counted process-start seam.'
 
     Write-Host 'Stage5 Sandbox lifecycle contract: 1 preflight pass + 12 preflight failures + 1 evidence pass + 10 evidence failures + sixth-attempt budget guard + static safety checks passed'

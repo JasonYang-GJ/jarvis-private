@@ -73,7 +73,9 @@ $oldInstaller = [IO.Path]::GetFullPath($OldInstallerPath)
 $candidateInstaller = [IO.Path]::GetFullPath($CandidateInstallerPath)
 $probeRoot = [IO.Path]::GetFullPath($LifecycleProbeRoot)
 $probeExecutable = Join-Path $probeRoot 'ScreenGuide.Stage5LifecycleProbe.exe'
-foreach ($path in @($oldInstaller, $candidateInstaller, $probeExecutable)) {
+$probeManifest = Join-Path $probeRoot 'lifecycle-probe-bundle.json'
+$probeValidator = Join-Path $PSScriptRoot 'Test-Stage5LifecycleProbeBundle.ps1'
+foreach ($path in @($oldInstaller, $candidateInstaller, $probeExecutable, $probeManifest, $probeValidator)) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw 's5_lifecycle_artifact_missing' }
 }
 
@@ -91,6 +93,15 @@ if ((Has-ReparsePoint $inputRoot) -or (Has-ReparsePoint $evidenceRoot) -or (Has-
     throw 's5_lifecycle_reparse_point'
 }
 
+$sourceProbeValidationPath = Join-Path $ownedRoot 'probe-source-validation.json'
+$sourceProbeValidationOutput = @(& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $probeValidator `
+    -BundleRoot $probeRoot -ResultPath $sourceProbeValidationPath 2>&1)
+if ($LASTEXITCODE -ne 0) {
+    Write-Output ($sourceProbeValidationOutput -join "`n")
+    throw 's5_lifecycle_probe_bundle_invalid'
+}
+$sourceProbeValidation = Get-Content -Raw -LiteralPath $sourceProbeValidationPath | ConvertFrom-Json
+
 $oldCopy = Join-Path $inputRoot 'yuanshu-v0.5.0-installer.exe'
 $candidateCopy = Join-Path $inputRoot 'yuanshu-v0.6.0-candidate-installer.exe'
 Copy-Item -LiteralPath $oldInstaller -Destination $oldCopy
@@ -98,7 +109,22 @@ Copy-Item -LiteralPath $candidateInstaller -Destination $candidateCopy
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'Invoke-Stage5SandboxLifecycle.ps1') -Destination (Join-Path $inputRoot 'Invoke-Stage5SandboxLifecycle.ps1')
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'Test-Stage5SandboxLifecycleContract.ps1') -Destination (Join-Path $inputRoot 'Test-Stage5SandboxLifecycleContract.ps1')
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'Stage5LifecycleExecutionBudget.ps1') -Destination (Join-Path $inputRoot 'Stage5LifecycleExecutionBudget.ps1')
+Copy-Item -LiteralPath $probeValidator -Destination (Join-Path $inputRoot 'Test-Stage5LifecycleProbeBundle.ps1')
 Copy-Item -LiteralPath $probeRoot -Destination (Join-Path $inputRoot 'probe') -Recurse
+
+$copiedProbeRoot = Join-Path $inputRoot 'probe'
+$copiedProbeValidationPath = Join-Path $ownedRoot 'probe-copy-validation.json'
+$copiedProbeValidationOutput = @(& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $probeValidator `
+    -BundleRoot $copiedProbeRoot -ResultPath $copiedProbeValidationPath 2>&1)
+if ($LASTEXITCODE -ne 0) {
+    Write-Output ($copiedProbeValidationOutput -join "`n")
+    throw 's5_lifecycle_probe_bundle_invalid'
+}
+$copiedProbeValidation = Get-Content -Raw -LiteralPath $copiedProbeValidationPath | ConvertFrom-Json
+if ([int]$copiedProbeValidation.fileCount -ne [int]$sourceProbeValidation.fileCount -or
+    [string]$copiedProbeValidation.details.manifestSha256 -cne [string]$sourceProbeValidation.details.manifestSha256) {
+    throw 's5_lifecycle_probe_bundle_hash_mismatch'
+}
 
 $facts = [ordered]@{
     contractVersion = 1
@@ -109,7 +135,13 @@ $facts = [ordered]@{
     existingHostInstall = $existingHostInstall
     oldInstaller = [ordered]@{ fileName = [IO.Path]::GetFileName($oldCopy); expectedSha256 = $oldInstallerExpectedSha; actualSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $oldCopy).Hash }
     candidateInstaller = [ordered]@{ fileName = [IO.Path]::GetFileName($candidateCopy); expectedSha256 = $CandidateInstallerSha256.ToUpperInvariant(); actualSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $candidateCopy).Hash }
-    lifecycleProbe = [ordered]@{ fileName = 'probe/ScreenGuide.Stage5LifecycleProbe.exe'; expectedSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $probeExecutable).Hash; actualSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $inputRoot 'probe\ScreenGuide.Stage5LifecycleProbe.exe')).Hash }
+    lifecycleProbe = [ordered]@{
+        fileName = 'probe/lifecycle-probe-bundle.json'
+        expectedSha256 = [string]$sourceProbeValidation.details.manifestSha256
+        actualSha256 = [string]$copiedProbeValidation.details.manifestSha256
+        fileCount = [int]$sourceProbeValidation.fileCount
+        entryPoint = 'probe/ScreenGuide.Stage5LifecycleProbe.exe'
+    }
     mappings = [ordered]@{ inputHostPath = $inputRoot; evidenceHostPath = $evidenceRoot; inputReadOnly = $true; evidenceReadOnly = $false; repoMapped = $false }
     sandboxPolicy = [ordered]@{ networking = 'Disable'; clipboard = 'Disable'; audioInput = 'Disable'; videoInput = 'Disable'; printer = 'Disable' }
     cleanup = [ordered]@{ ownedRoot = $runtimeRoot; ownershipConfirmed = $true }

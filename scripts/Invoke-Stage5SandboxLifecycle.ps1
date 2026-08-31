@@ -16,6 +16,8 @@ $databasePath = Join-Path $dataRoot 'state\tasking.db'
 $existingUninstallKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\{E2B9C242-2965-48BC-B2C6-CF83A2B11953}_is1'
 $contractScript = Join-Path $inputRoot 'Test-Stage5SandboxLifecycleContract.ps1'
 $budgetScript = Join-Path $inputRoot 'Stage5LifecycleExecutionBudget.ps1'
+$probeValidator = Join-Path $inputRoot 'Test-Stage5LifecycleProbeBundle.ps1'
+$probeExecutable = $null
 $errorCode = 's5_lifecycle_unexpected_failure'
 $hostExecutions = 0
 $exitCodes = [Collections.Generic.List[int]]::new()
@@ -126,9 +128,9 @@ function Invoke-HostOnce([string]$pipeName) {
 }
 
 function Invoke-Probe([string]$database, [int]$expectedSchema, [string]$label) {
-    $probe = Join-Path $inputRoot 'probe\ScreenGuide.Stage5LifecycleProbe.exe'
+    if ([string]::IsNullOrWhiteSpace($probeExecutable)) { Throw-Code 's5_lifecycle_probe_bundle_invalid' }
     $probeOutput = Join-Path $runtimeRoot ($label + '.json')
-    Invoke-Hidden $probe @('--database', $database, '--expected-schema', [string]$expectedSchema, '--output', $probeOutput) probe
+    Invoke-Hidden $probeExecutable @('--database', $database, '--expected-schema', [string]$expectedSchema, '--output', $probeOutput) probe
     $result = Get-Content -Raw -LiteralPath $probeOutput | ConvertFrom-Json
     if (-not [bool]$result.passed -or $result.schemaVersion -ne $expectedSchema -or -not [bool]$result.integrityOk) {
         Throw-Code 's5_lifecycle_schema_mismatch'
@@ -192,6 +194,22 @@ try {
     Assert-Hash $oldInstaller ([string]$plan.oldInstaller.sha256) 's5_lifecycle_old_installer_hash_mismatch'
     Assert-Hash $candidateInstaller ([string]$plan.candidateInstaller.sha256) 's5_lifecycle_candidate_installer_hash_mismatch'
     Assert-Hash $probe ([string]$plan.lifecycleProbe.sha256) 's5_lifecycle_probe_hash_mismatch'
+    if (-not (Test-Path -LiteralPath $probeValidator -PathType Leaf) -or (Has-ReparsePoint $probeValidator)) {
+        Throw-Code 's5_lifecycle_probe_bundle_invalid'
+    }
+    $probeValidationPath = Join-Path $runtimeRoot 'probe-bundle-validation.json'
+    $probeValidationOutput = @(& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $probeValidator `
+        -BundleRoot (Join-Path $inputRoot 'probe') -ResultPath $probeValidationPath 2>&1)
+    if ($LASTEXITCODE -ne 0) { Throw-Code 's5_lifecycle_probe_bundle_invalid' }
+    $probeValidation = Get-Content -Raw -LiteralPath $probeValidationPath | ConvertFrom-Json
+    if ([int]$probeValidation.fileCount -ne [int]$plan.lifecycleProbe.fileCount -or
+        [string]$probeValidation.details.manifestSha256 -cne [string]$plan.lifecycleProbe.sha256) {
+        Throw-Code 's5_lifecycle_probe_bundle_hash_mismatch'
+    }
+    $probeExecutable = Join-Path $inputRoot ([string]$plan.lifecycleProbe.entryPoint).Replace('/', '\')
+    if (-not (Test-Path -LiteralPath $probeExecutable -PathType Leaf) -or (Has-ReparsePoint $probeExecutable)) {
+        Throw-Code 's5_lifecycle_probe_bundle_invalid'
+    }
 
     Install $oldInstaller 'install-v0.5.log'
     $oldPair = Get-PairIdentity
