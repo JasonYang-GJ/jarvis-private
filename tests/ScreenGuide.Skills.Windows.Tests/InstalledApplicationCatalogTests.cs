@@ -90,6 +90,44 @@ public sealed class InstalledApplicationCatalogTests
     }
 
     [Fact]
+    public void ResolveByDisplayName_MergesDistinctTargetsWithSameTrustedApplicationIdentity()
+    {
+        var root = CreateRoot("trusted-identity");
+        try
+        {
+            var platformTarget = CreateExecutable(root, "platform-notepad.exe");
+            var registeredTarget = CreateExecutable(root, "registered-notepad.exe");
+            var catalog = new InstalledApplicationCatalog(() =>
+            [
+                new ApplicationRegistration(
+                    "记事本",
+                    platformTarget,
+                    ApplicationRegistrationSource.Platform,
+                    PreferredId: "notepad"),
+                new ApplicationRegistration(
+                    "记事本",
+                    registeredTarget,
+                    ApplicationRegistrationSource.AppPath,
+                    PreferredId: "notepad"),
+                new ApplicationRegistration(
+                    "记事本",
+                    "Microsoft.WindowsNotepad_8wekyb3d8bbwe!App",
+                    ApplicationRegistrationSource.AppsFolder)
+            ]);
+
+            var application = catalog.ResolveByDisplayName("记事本");
+
+            Assert.Equal("notepad", application.Id);
+            Assert.Equal(platformTarget, application.LaunchTarget);
+            Assert.Single(catalog.GetApplications(), item => item.Id == "notepad");
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public void ResolveByDisplayName_RejectsAmbiguousDifferentTargets()
     {
         var root = CreateRoot("ambiguous");

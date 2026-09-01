@@ -381,10 +381,18 @@ public sealed class InstalledApplicationCatalog : IInstalledApplicationCatalog
         Func<string, ShortcutResolution?> shortcutResolver)
     {
         var byTarget = new Dictionary<string, ApplicationBuilder>(StringComparer.OrdinalIgnoreCase);
+        var byTrustedIdentity = new Dictionary<string, ApplicationBuilder>(StringComparer.Ordinal);
         foreach (var setting in SafeSettings)
         {
-            AddResolved(byTarget, setting.Id, setting.DisplayName, setting.LaunchTarget,
-                setting.RegisteredNames ?? [setting.DisplayName]);
+            AddResolved(
+                byTarget,
+                byTrustedIdentity,
+                setting.Id,
+                setting.DisplayName,
+                setting.LaunchTarget,
+                setting.RegisteredNames ?? [setting.DisplayName],
+                trustedIdentity: setting.Id,
+                preferIdentity: true);
         }
 
         foreach (var registration in registrations)
@@ -394,16 +402,21 @@ public sealed class InstalledApplicationCatalog : IInstalledApplicationCatalog
                 continue;
             }
 
+            var trustedIdentity = registration.PreferredId
+                                  ?? TrustedBuiltInIdentity(target);
             AddResolved(
                 byTarget,
-                registration.PreferredId ?? "installed-" + StableId(CanonicalTarget(target)),
+                byTrustedIdentity,
+                trustedIdentity ?? "installed-" + StableId(CanonicalTarget(target)),
                 registration.DisplayName.Trim(),
                 target,
                 [registration.DisplayName.Trim()],
-                registration.PreferredId is not null);
+                trustedIdentity,
+                preferIdentity: trustedIdentity is not null);
         }
 
         return byTarget.Values
+            .Distinct()
             .Select(builder => builder.Build())
             .OrderBy(item => item.DisplayName, StringComparer.CurrentCultureIgnoreCase)
             .ThenBy(item => item.Id, StringComparer.Ordinal)
@@ -456,25 +469,145 @@ public sealed class InstalledApplicationCatalog : IInstalledApplicationCatalog
 
     private static void AddResolved(
         IDictionary<string, ApplicationBuilder> applications,
+        IDictionary<string, ApplicationBuilder> trustedApplications,
         string id,
         string displayName,
         string target,
         IReadOnlyList<string> registeredNames,
+        string? trustedIdentity = null,
         bool preferIdentity = false)
     {
         var canonical = CanonicalTarget(target);
+        if (!string.IsNullOrWhiteSpace(trustedIdentity)
+            && trustedApplications.TryGetValue(trustedIdentity, out var trustedBuilder))
+        {
+            trustedBuilder.Merge(id, displayName, registeredNames, preferIdentity);
+            applications[canonical] = trustedBuilder;
+            return;
+        }
+
         if (!applications.TryGetValue(canonical, out var builder))
         {
-            applications[canonical] = new ApplicationBuilder(
+            builder = new ApplicationBuilder(
                 id,
                 displayName,
                 target,
                 registeredNames,
                 preferIdentity);
-            return;
+            applications[canonical] = builder;
+        }
+        else
+        {
+            builder.Merge(id, displayName, registeredNames, preferIdentity);
         }
 
-        builder.Merge(id, displayName, registeredNames, preferIdentity);
+        if (!string.IsNullOrWhiteSpace(trustedIdentity))
+        {
+            trustedApplications[trustedIdentity] = builder;
+        }
+    }
+
+    private static string? TrustedBuiltInIdentity(string target)
+    {
+        if (TryNormalizeAppsFolderTarget(target, out var appsFolder))
+        {
+            return TrustedPackagedApplicationIdentity(
+                appsFolder["shell:AppsFolder\\".Length..]);
+        }
+
+        if (!Path.IsPathFullyQualified(target))
+        {
+            return null;
+        }
+
+        string fullPath;
+        try
+        {
+            fullPath = Path.GetFullPath(target);
+        }
+        catch (ArgumentException)
+        {
+            return null;
+        }
+
+        if (IsExactWindowsExecutable(fullPath, "explorer.exe"))
+        {
+            return "file-explorer";
+        }
+
+        if (IsExactWindowsExecutable(fullPath, "notepad.exe"))
+        {
+            return "notepad";
+        }
+
+        if (IsExactWindowsExecutable(fullPath, "calc.exe"))
+        {
+            return "calculator";
+        }
+
+        if (IsExactWindowsExecutable(fullPath, "mspaint.exe"))
+        {
+            return "paint";
+        }
+
+        var programFiles = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
+        if (string.IsNullOrWhiteSpace(programFiles))
+        {
+            return null;
+        }
+
+        var windowsApps = Path.Combine(programFiles, "WindowsApps");
+        var relative = Path.GetRelativePath(windowsApps, fullPath);
+        if (relative.StartsWith("..", StringComparison.Ordinal)
+            || Path.IsPathFullyQualified(relative))
+        {
+            return null;
+        }
+
+        var packageDirectory = relative.Split(
+            Path.DirectorySeparatorChar,
+            StringSplitOptions.RemoveEmptyEntries).FirstOrDefault();
+        return TrustedPackagedApplicationIdentity(packageDirectory ?? string.Empty);
+    }
+
+    private static bool IsExactWindowsExecutable(string fullPath, string executableName)
+    {
+        var candidates = new[]
+        {
+            Environment.GetFolderPath(Environment.SpecialFolder.Windows),
+            Environment.GetFolderPath(Environment.SpecialFolder.System),
+            Environment.GetFolderPath(Environment.SpecialFolder.SystemX86)
+        };
+        return candidates.Where(path => !string.IsNullOrWhiteSpace(path))
+            .Select(path => Path.Combine(path, executableName))
+            .Any(path => string.Equals(path, fullPath, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static string? TrustedPackagedApplicationIdentity(string packageIdentity)
+    {
+        if (packageIdentity.StartsWith(
+                "Microsoft.WindowsNotepad_",
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return "notepad";
+        }
+
+        if (packageIdentity.StartsWith(
+                "Microsoft.WindowsCalculator_",
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return "calculator";
+        }
+
+        if (packageIdentity.StartsWith("Microsoft.Paint_", StringComparison.OrdinalIgnoreCase)
+            || packageIdentity.StartsWith(
+                "Microsoft.MSPaint_",
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return "paint";
+        }
+
+        return null;
     }
 
     private static IReadOnlyList<ApplicationRegistration> DiscoverRegistrations()
@@ -598,9 +731,25 @@ public sealed class InstalledApplicationCatalog : IInstalledApplicationCatalog
                     var shellPath = (item.Path as string)?.Trim();
                     var executable = (item.ExtendedProperty(
                         "System.Link.TargetParsingPath") as string)?.Trim();
-                    var launchTarget = !string.IsNullOrWhiteSpace(executable)
-                        ? executable
-                        : shellPath;
+                    string? launchTarget;
+                    if (TryNormalizeAppsFolderRegistrationTarget(
+                            shellPath ?? string.Empty,
+                            out var shellApplication))
+                    {
+                        launchTarget = shellApplication;
+                    }
+                    else if (TryNormalizeAppsFolderRegistrationTarget(
+                                 executable ?? string.Empty,
+                                 out var executableApplication))
+                    {
+                        launchTarget = executableApplication;
+                    }
+                    else
+                    {
+                        launchTarget = !string.IsNullOrWhiteSpace(executable)
+                            ? executable
+                            : shellPath;
+                    }
                     if (!string.IsNullOrWhiteSpace(displayName)
                         && !string.IsNullOrWhiteSpace(launchTarget))
                     {
