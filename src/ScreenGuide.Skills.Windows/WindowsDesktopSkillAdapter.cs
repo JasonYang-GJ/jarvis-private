@@ -345,7 +345,8 @@ public sealed class WindowsDesktopSkillAdapter(
                     "搜索操作缺少可信的目标窗口身份。");
             }
 
-            var result = automation.Search(input.WindowIdentity, input.Target);
+            var query = DesktopSearchQuery.NormalizeAndValidate(input.Target);
+            var result = automation.Search(input.WindowIdentity, query);
             return (null, result.Summary);
         }
 

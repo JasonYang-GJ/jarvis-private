@@ -59,6 +59,12 @@ public sealed class IntentPlannerTests
     }
 
     [Theory]
+    [InlineData("搜索周杰伦", "周杰伦")]
+    [InlineData("给我搜索周杰伦", "周杰伦")]
+    [InlineData("帮我搜索今日头条", "今日头条")]
+    [InlineData("在当前窗口搜索今天发生的事", "今天发生的事")]
+    [InlineData("在浏览器的地址栏搜索元枢", "元枢")]
+    [InlineData("搜索一下天气", "天气")]
     [InlineData("在文字栏搜索抖音", "抖音")]
     [InlineData("在浏览器文字栏里搜索抖音", "抖音")]
     [InlineData("在地址栏搜索元枢", "元枢")]
@@ -76,7 +82,57 @@ public sealed class IntentPlannerTests
     }
 
     [Theory]
-    [InlineData("打开谷歌浏览器界面并搜索打开抖音")]
+    [InlineData("搜索天气\r\n打开设置")]
+    [InlineData("搜索天气\t明天")]
+    [InlineData("搜索\u0001天气")]
+    [InlineData("\t搜索天气")]
+    [InlineData("\u0001搜索天气")]
+    public void ForegroundSearchRejectsControlCharactersDuringPlanning(string request)
+    {
+        var context = new IntentPlanningContext(
+            ForegroundApplication: new ForegroundApplicationContext(42, "浏览器", "chrome"));
+
+        var result = _planner.Plan(request, context);
+
+        Assert.Equal(UniversalIntentKind.Unsupported, result.Kind);
+        Assert.Equal(IntentPlanReadiness.Unsupported, result.Readiness);
+    }
+
+    [Fact]
+    public void ForegroundSearchRejectsQueryOverTwoHundredCharacters()
+    {
+        var context = new IntentPlanningContext(
+            ForegroundApplication: new ForegroundApplicationContext(42, "浏览器", "chrome"));
+
+        var result = _planner.Plan("搜索" + new string('甲', 201), context);
+
+        Assert.Equal(UniversalIntentKind.Unsupported, result.Kind);
+    }
+
+    [Fact]
+    public void ForegroundSearchNormalizesQueryWithUnicodeFormKc()
+    {
+        var context = new IntentPlanningContext(
+            ForegroundApplication: new ForegroundApplicationContext(42, "浏览器", "chrome"));
+
+        var result = _planner.Plan("搜索ＡＩ", context);
+
+        Assert.Equal(UniversalIntentKind.SearchForeground, result.Kind);
+        Assert.Equal("AI", result.Target);
+    }
+
+    [Fact]
+    public void CompoundOpenAndSearchIsNotPlannedAsOneAction()
+    {
+        var context = new IntentPlanningContext(
+            ForegroundApplication: new ForegroundApplicationContext(42, "浏览器", "chrome"));
+
+        var result = _planner.Plan("打开浏览器并搜索周杰伦", context);
+
+        Assert.Equal(UniversalIntentKind.Unsupported, result.Kind);
+    }
+
+    [Theory]
     [InlineData("用 Google Chrome 打开抖音")]
     public void CompoundBrowserWebsiteRequestKeepsRequestedBrowserAndRequiresVisibleWindow(
         string request)

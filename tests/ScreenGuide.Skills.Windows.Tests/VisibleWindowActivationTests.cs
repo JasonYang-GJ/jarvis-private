@@ -142,14 +142,24 @@ public sealed class VisibleWindowActivationTests
         var (form, search) = await ready.Task.WaitAsync(TimeSpan.FromSeconds(5));
         try
         {
+            form.Invoke(() =>
+            {
+                form.Activate();
+                search.Focus();
+            });
             using var foreground = new ForegroundWindowTracker();
             var expected = foreground.ResolveWindow(form.Handle.ToInt64())
                 ?? throw new InvalidOperationException("未能读取合成测试窗口身份。");
-            var result = new WindowsUiAutomationService(foreground).Search(expected, "抖音");
+            var driver = new SyntheticForegroundSearchDriver(form.Handle.ToInt64());
+            var result = new WindowsUiAutomationService(
+                foreground,
+                driver)
+                .Search(expected, "抖音");
             var text = (string)form.Invoke(() => search.Text);
 
             Assert.True(result.Verified);
             Assert.Equal("抖音", text);
+            Assert.Equal(1, driver.SubmitCount);
             Assert.Contains("提交", result.Summary, StringComparison.Ordinal);
         }
         finally
@@ -194,6 +204,11 @@ public sealed class VisibleWindowActivationTests
         var (form, search) = await ready.Task.WaitAsync(TimeSpan.FromSeconds(5));
         try
         {
+            form.Invoke(() =>
+            {
+                form.Activate();
+                search.Focus();
+            });
             using var tracker = new ForegroundWindowTracker();
             var expected = tracker.ResolveWindow(form.Handle.ToInt64())
                 ?? throw new InvalidOperationException("未能读取合成测试窗口身份。");
@@ -205,7 +220,10 @@ public sealed class VisibleWindowActivationTests
             var foreground = new ScriptedForegroundProvider(expected, expected, changed);
 
             var failure = Assert.Throws<WindowIdentityException>(() =>
-                new WindowsUiAutomationService(foreground).Search(expected, "不得写入"));
+                new WindowsUiAutomationService(
+                    foreground,
+                    new SyntheticForegroundSearchDriver(form.Handle.ToInt64()))
+                    .Search(expected, "不得写入"));
             var text = (string)form.Invoke(() => search.Text);
 
             Assert.Equal(WindowIdentityErrorCodes.Changed, failure.Code);
@@ -236,5 +254,15 @@ public sealed class VisibleWindowActivationTests
                 ? null
                 : snapshots[Math.Min(index, snapshots.Length - 1)];
         }
+    }
+
+    private sealed class SyntheticForegroundSearchDriver(long windowHandle)
+        : WindowsDesktopSearchAutomationDriver
+    {
+        public int SubmitCount { get; private set; }
+
+        public override long GetForegroundWindowHandle() => windowHandle;
+
+        public override void SubmitEnter(DesktopSearchControl control) => SubmitCount++;
     }
 }

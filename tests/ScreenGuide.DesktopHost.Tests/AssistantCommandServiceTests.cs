@@ -149,6 +149,49 @@ public sealed class AssistantCommandServiceTests
     }
 
     [Fact]
+    public async Task ForegroundSearchRequiresVisibleConfirmationAndRunsOnlyOnce()
+    {
+        await using var environment = DesktopHostTestEnvironment.Create();
+        var automation = new RecordingSearchAutomation();
+        using var host = environment.BuildHost(services =>
+        {
+            services.AddSingleton<IForegroundWindowContextProvider>(new FixedForegroundProvider());
+            services.AddSingleton<IReliableDesktopAutomation>(automation);
+        });
+        await host.StartAsync();
+        IDesktopApiClient client = new DesktopApiClient(environment.Options.PipeName);
+
+        var rejectedPlan = await client.PlanAssistantCommandAsync(
+            new PlanAssistantCommandRequestDto("在当前窗口搜索天气"));
+        var rejected = await Assert.ThrowsAsync<DesktopApiException>(() =>
+            client.ExecuteAssistantCommandAsync(
+                new ExecuteAssistantCommandRequestDto(rejectedPlan.PlanId, false)));
+        var plan = await client.PlanAssistantCommandAsync(
+            new PlanAssistantCommandRequestDto("在当前窗口搜索天气"));
+        var completed = await client.ExecuteAssistantCommandAsync(
+            new ExecuteAssistantCommandRequestDto(plan.PlanId, true, "search-foreground-once"));
+        var repeated = await Assert.ThrowsAsync<DesktopApiException>(() =>
+            client.ExecuteAssistantCommandAsync(
+                new ExecuteAssistantCommandRequestDto(plan.PlanId, true, "search-foreground-once")));
+        await host.StopAsync();
+
+        Assert.Equal("Ready", plan.Readiness);
+        Assert.Equal("SearchForeground", plan.IntentKind);
+        Assert.Equal("天气", plan.CanonicalTarget);
+        Assert.True(plan.RequiresConfirmation);
+        Assert.Equal("desktop_action_not_authorized", rejected.Error.Code);
+        Assert.Equal("Completed", completed.Status);
+        Assert.Equal("ExecutionVerified", completed.VerificationStatus);
+        Assert.Contains(completed.Evidence!.VerifiedFacts,
+            fact => fact.Contains("Enter", StringComparison.Ordinal));
+        Assert.Contains(completed.Evidence.UnverifiedFacts,
+            fact => fact.Contains("搜索结果页面", StringComparison.Ordinal));
+        Assert.Equal("action_plan_expired", repeated.Error.Code);
+        Assert.Equal(1, automation.SearchCallCount);
+        Assert.Equal("天气", automation.LastQuery);
+    }
+
+    [Fact]
     public async Task OrdinaryQuestionPlansConversationWithoutComputerAuthorization()
     {
         await using var environment = DesktopHostTestEnvironment.Create();
@@ -167,7 +210,7 @@ public sealed class AssistantCommandServiceTests
     }
 
     [Fact]
-    public async Task CompoundChromeDouyinCommandUsesRequestedBrowserAndVerifiedVisibleLaunch()
+    public async Task CompoundBrowserSearchRequiresSeparateActions()
     {
         await using var environment = DesktopHostTestEnvironment.Create();
         var launcher = new RecordingLauncher();
@@ -181,17 +224,12 @@ public sealed class AssistantCommandServiceTests
 
         var plan = await client.PlanAssistantCommandAsync(
             new PlanAssistantCommandRequestDto("打开谷歌浏览器界面并搜索打开抖音"));
-        var result = await client.ExecuteAssistantCommandAsync(
-            new ExecuteAssistantCommandRequestDto(plan.PlanId, true, "visible-chrome-douyin"));
         await host.StopAsync();
 
-        Assert.Contains("Google Chrome", plan.UserSummary, StringComparison.Ordinal);
-        Assert.Equal("https://www.douyin.com/", plan.CanonicalTarget);
-        Assert.Equal("ExecutionVerified", result.VerificationStatus);
-        Assert.Equal(Environment.ProcessPath, launcher.VisibleBrowserTarget);
-        Assert.Equal("https://www.douyin.com/", launcher.VisibleWebsite?.AbsoluteUri);
-        Assert.Contains(result.Evidence!.VerifiedFacts,
-            fact => fact.Contains("前台", StringComparison.Ordinal));
+        Assert.Equal("Unsupported", plan.IntentKind);
+        Assert.Equal("Unsupported", plan.Readiness);
+        Assert.Contains("分别确认", plan.UserSummary, StringComparison.Ordinal);
+        Assert.Empty(launcher.Targets);
     }
 
     [Fact]
@@ -448,6 +486,25 @@ public sealed class AssistantCommandServiceTests
 
         private static readonly DateTimeOffset TestProcessStart =
             new(2026, 8, 30, 1, 0, 0, TimeSpan.Zero);
+    }
+
+    private sealed class RecordingSearchAutomation : IReliableDesktopAutomation
+    {
+        public int SearchCallCount { get; private set; }
+
+        public string? LastQuery { get; private set; }
+
+        public DesktopAutomationResult Search(ForegroundWindowSnapshot expectedWindow, string query)
+        {
+            SearchCallCount++;
+            LastQuery = query;
+            return new DesktopAutomationResult(
+                true,
+                "已确认内容写入唯一识别的搜索框并提交；搜索结果页面尚未验证。");
+        }
+
+        public DesktopAutomationResult Describe(ForegroundWindowSnapshot expectedWindow) =>
+            new(true, "不应调用");
     }
 
     private sealed class FixedCaptureService(byte[] bytes) : IWindowCaptureService

@@ -1064,6 +1064,8 @@ internal static class DesktopApiErrors
                 (bridgeException.Code, bridgeException.Message),
             WindowIdentityException windowIdentityException =>
                 (windowIdentityException.Code, windowIdentityException.Message),
+            DesktopSearchException searchException =>
+                (searchException.Code, searchException.Message),
             SessionProjectionException projectionException =>
                 (projectionException.Code, projectionException.Message),
             MemoryServiceException memoryException =>

@@ -340,11 +340,7 @@ public sealed class DesktopActionEntryService(
 
         if (string.Equals(request.ActionKind, "SearchForeground", StringComparison.Ordinal))
         {
-            var query = request.Target.Trim();
-            if (query.Length is < 1 or > 200)
-            {
-                throw new ArgumentException("搜索操作缺少有效内容。", nameof(request));
-            }
+            var query = DesktopSearchQuery.NormalizeAndValidate(request.Target);
 
             var identity = RequireTrustedWindow(request, trustedWindow);
 

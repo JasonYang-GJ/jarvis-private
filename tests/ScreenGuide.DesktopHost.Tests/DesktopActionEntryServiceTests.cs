@@ -1,5 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 using ScreenGuide.Core.Tasking;
+using ScreenGuide.DesktopHost.Runtime;
 using ScreenGuide.DesktopProtocol;
 using ScreenGuide.Skills.Windows;
 
@@ -130,6 +131,42 @@ public sealed class DesktopActionEntryServiceTests
         await host.StopAsync();
 
         Assert.Equal(WindowIdentityErrorCodes.Missing, failure.Error.Code);
+        Assert.Equal(0, automation.CallCount);
+    }
+
+    [Theory]
+    [InlineData("天气\r\n明天")]
+    [InlineData("天气\t明天")]
+    [InlineData("天气\u0001明天")]
+    public async Task TrustedWindowSearchRejectsControlCharactersBeforePolicyOrAutomation(string query)
+    {
+        await using var environment = DesktopHostTestEnvironment.Create();
+        var automation = new RecordingAutomation();
+        using var host = environment.BuildHost(services =>
+            services.AddSingleton<IReliableDesktopAutomation>(automation));
+        await host.StartAsync();
+        var service = host.Services.GetRequiredService<DesktopActionEntryService>();
+        var identity = new ForegroundWindowSnapshot(
+            9211,
+            "可信窗口",
+            "trusted-process",
+            92110,
+            new DateTimeOffset(2026, 9, 1, 0, 0, 0, TimeSpan.Zero),
+            DateTimeOffset.UtcNow);
+
+        var failure = await Assert.ThrowsAsync<DesktopSearchException>(() =>
+            service.ExecuteTrustedWindowAsync(
+                new ExecuteDesktopActionRequestDto(
+                    "SearchForeground",
+                    query,
+                    true,
+                    "trusted-invalid-search",
+                    identity.WindowHandle,
+                    identity.WindowTitle),
+                identity));
+        await host.StopAsync();
+
+        Assert.Equal(DesktopSearchErrorCodes.InvalidQuery, failure.Code);
         Assert.Equal(0, automation.CallCount);
     }
 

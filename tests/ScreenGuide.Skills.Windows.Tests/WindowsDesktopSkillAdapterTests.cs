@@ -241,6 +241,35 @@ public sealed class WindowsDesktopSkillAdapterTests
         Assert.Equal(WindowIdentityErrorCodes.Missing, missingIdentity.Code);
     }
 
+    [Theory]
+    [InlineData("天气\r\n明天")]
+    [InlineData("天气\t明天")]
+    [InlineData("天气\u0001明天")]
+    public async Task SearchRejectsControlCharactersAtAdapterBoundary(string query)
+    {
+        var automation = new RecordingAutomation();
+        var adapter = CreateAdapter(new RecordingLauncher(), automation);
+        var identity = new ForegroundWindowSnapshot(
+            42,
+            "测试窗口",
+            "test-process",
+            420,
+            new DateTimeOffset(2026, 8, 30, 1, 0, 0, TimeSpan.Zero),
+            DateTimeOffset.UtcNow);
+
+        var error = await Assert.ThrowsAsync<DesktopSearchException>(() => adapter.StartAsync(Request(
+            WindowsDesktopCapabilities.SearchForeground,
+            new WindowsDesktopActionInput(
+                "SearchForeground",
+                query,
+                42,
+                "测试窗口",
+                WindowIdentity: identity))));
+
+        Assert.Equal(DesktopSearchErrorCodes.InvalidQuery, error.Code);
+        Assert.Equal(0, automation.SearchCallCount);
+    }
+
     [Fact]
     public async Task ExplicitBrowserWebsiteUsesVisibleBrowserLaunch()
     {
@@ -356,12 +385,15 @@ public sealed class WindowsDesktopSkillAdapterTests
 
     private sealed class RecordingAutomation : IReliableDesktopAutomation
     {
+        public int SearchCallCount { get; private set; }
+
         public ForegroundWindowSnapshot? WindowIdentity { get; private set; }
 
         public string? Query { get; private set; }
 
         public DesktopAutomationResult Search(ForegroundWindowSnapshot expectedWindow, string query)
         {
+            SearchCallCount++;
             WindowIdentity = expectedWindow;
             Query = query;
             return new DesktopAutomationResult(true, "已提交");

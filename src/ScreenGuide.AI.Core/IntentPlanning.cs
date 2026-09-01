@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.RegularExpressions;
 
 namespace ScreenGuide.AI.Core;
@@ -74,10 +75,26 @@ public sealed partial class DeterministicIntentPlanner(TimeProvider timeProvider
     public IntentPlan Plan(string text, IntentPlanningContext context)
     {
         ArgumentNullException.ThrowIfNull(context);
+        var originalText = text ?? string.Empty;
+        if (ContainsDisallowedControl(originalText)
+            && LooksLikeForegroundSearch(RemoveControlsForClassification(originalText).Trim()))
+        {
+            return Unsupported(
+                "[invalid-search-input]",
+                "搜索内容包含不允许的控制字符，因此没有创建操作计划。");
+        }
+
         var normalized = Normalize(text);
         if (normalized.Length == 0)
         {
             return Unsupported(text ?? string.Empty, "请说出或输入你希望电脑完成的事情。");
+        }
+
+        if (IsCompoundOpenAndSearch(normalized))
+        {
+            return Unsupported(
+                normalized,
+                "打开应用和搜索必须分别确认，请先完成一个操作。");
         }
 
         var explicitPlan = context.ExplicitUserIntent switch
@@ -131,6 +148,13 @@ public sealed partial class DeterministicIntentPlanner(TimeProvider timeProvider
                 $"在“{context.ForegroundApplication.WindowTitle}”的可靠搜索框中搜索“{query}”",
                 query, "desktop.search.submit", true,
                 $"确认只在“{context.ForegroundApplication.WindowTitle}”中可靠识别的搜索框输入并提交“{query}”。");
+        }
+
+        if (LooksLikeForegroundSearch(normalized))
+        {
+            return Unsupported(
+                normalized,
+                "搜索内容必须为 1 到 200 个字符，且不能包含控制字符。");
         }
 
         if (IsDescribeForegroundRequest(normalized))
@@ -343,9 +367,28 @@ public sealed partial class DeterministicIntentPlanner(TimeProvider timeProvider
             return false;
         }
 
-        query = match.Groups[1].Value.Trim(' ', '。', '！', '!', '？', '?', '"');
+        query = match.Groups[1].Value
+            .Trim(' ', '。', '！', '!', '？', '?', '"')
+            .Normalize(NormalizationForm.FormKC);
         return query.Length is > 0 and <= 200;
     }
+
+    private static bool ContainsDisallowedControl(string text) =>
+        text.Any(char.IsControl);
+
+    private static string RemoveControlsForClassification(string text) =>
+        new(text.Where(character => !char.IsControl(character)).ToArray());
+
+    private static bool LooksLikeForegroundSearch(string text) =>
+        SearchCommandPrefixRegex().IsMatch(text);
+
+    private static bool IsCompoundOpenAndSearch(string text) =>
+        (text.Contains("打开", StringComparison.Ordinal)
+         || text.Contains("启动", StringComparison.Ordinal)
+         || text.Contains("运行", StringComparison.Ordinal))
+        && (text.Contains("搜索", StringComparison.Ordinal)
+            || text.Contains("查找", StringComparison.Ordinal)
+            || text.Contains("搜一下", StringComparison.Ordinal));
 
     [GeneratedRegex(@"https://[^\s，。！？]+", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex UrlRegex();
@@ -354,7 +397,11 @@ public sealed partial class DeterministicIntentPlanner(TimeProvider timeProvider
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex OpenApplicationRegex();
 
-    [GeneratedRegex(@"^(?:请|帮我|请帮我)?(?:在(?:(?:当前|这个|刚才的)?(?:窗口|软件|页面|浏览器)(?:的)?(?:(?:搜索|文字|地址|输入)栏)?|(?:搜索|文字|地址|输入)栏)(?:里|中|内|里面)?)?(?:搜索|查找|搜一下|搜)(?:一下)?“?(.+?)”?$",
+    [GeneratedRegex(@"^(?:请|帮我|请帮我|给我)?(?:在(?:(?:当前|这个|刚才的)?(?:窗口|软件|页面|浏览器)(?:的)?(?:(?:搜索|文字|地址|输入)栏)?|(?:搜索|文字|地址|输入)栏)(?:里|中|内|里面)?)?(?:搜索|查找|搜一下|搜)(?:一下)?“?(.+?)”?$",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex SearchRegex();
+
+    [GeneratedRegex(@"^(?:请|帮我|请帮我|给我)?(?:在(?:(?:当前|这个|刚才的)?(?:窗口|软件|页面|浏览器)(?:的)?(?:(?:搜索|文字|地址|输入)栏)?|(?:搜索|文字|地址|输入)栏)(?:里|中|内|里面)?)?(?:搜索|查找|搜一下|搜)",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex SearchCommandPrefixRegex();
 }
