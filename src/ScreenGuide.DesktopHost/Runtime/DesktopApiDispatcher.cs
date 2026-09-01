@@ -9,6 +9,7 @@ using ScreenGuide.Core.Memories;
 using ScreenGuide.DesktopHost.Configuration;
 using ScreenGuide.DesktopProtocol;
 using ScreenGuide.Skills.Windows;
+using ScreenGuide.Vision.Abstractions;
 
 namespace ScreenGuide.DesktopHost.Runtime;
 
@@ -20,6 +21,7 @@ public sealed class DesktopApiDispatcher(
     ProjectInspector projectInspector,
     DesktopActionEntryService desktopActions,
     AssistantCommandService assistantCommands,
+    PointerRegionUnderstandingService pointerRegions,
     ConversationService conversations,
     SessionCoordinator sessions,
     BridgeProtocolService bridge,
@@ -108,6 +110,18 @@ public sealed class DesktopApiDispatcher(
                 DesktopApiMethods.CancelWindowObservation =>
                     DesktopProtocolJson.ToElement(assistantCommands.CancelWindowObservation(
                         Deserialize<CancelWindowObservationRequestDto>(request).OperationId)),
+                DesktopApiMethods.PreparePointerRegion =>
+                    DesktopProtocolJson.ToElement(MapPointerAnchor(pointerRegions.Prepare(
+                        Deserialize<PreparePointerRegionRequestDto>(request).Confirmed,
+                        Deserialize<PreparePointerRegionRequestDto>(request).AuthorizationSource))),
+                DesktopApiMethods.ReadPointerRegion =>
+                    DesktopProtocolJson.ToElement(MapPointerRegionResult(
+                        await pointerRegions.ReadAsync(
+                            Deserialize<PointerRegionRequestDto>(request).AnchorId,
+                            cancellationToken).ConfigureAwait(false))),
+                DesktopApiMethods.CancelPointerRegion =>
+                    DesktopProtocolJson.ToElement(pointerRegions.Cancel(
+                        Deserialize<PointerRegionRequestDto>(request).AnchorId)),
                 DesktopApiMethods.ListConversations =>
                     DesktopProtocolJson.ToElement(await ListConversationsAsync(cancellationToken)
                         .ConfigureAwait(false)),
@@ -1031,6 +1045,36 @@ public sealed class DesktopApiDispatcher(
         result.SelectedCount,
         result.TotalCharacters);
 
+    private static PointerAnchorDto MapPointerAnchor(PointerAnchor anchor) => new(
+        anchor.AnchorId,
+        anchor.PhysicalScreenX,
+        anchor.PhysicalScreenY,
+        anchor.NormalizedX,
+        anchor.NormalizedY,
+        new PointerWindowIdentityDto(
+            anchor.Window.Target.WindowHandle,
+            anchor.Window.Target.WindowTitle,
+            anchor.Window.Target.ProcessName,
+            anchor.Window.Target.ProcessId,
+            anchor.Window.Target.ProcessStartTimeUtc,
+            anchor.Window.Bounds.Left,
+            anchor.Window.Bounds.Top,
+            anchor.Window.Bounds.Width,
+            anchor.Window.Bounds.Height,
+            anchor.Window.DpiX,
+            anchor.Window.DpiY),
+        anchor.CapturedAtUtc);
+
+    private static PointerRegionOcrResultDto MapPointerRegionResult(PointerRegionOcrResult result) => new(
+        result.AnchorId,
+        result.Text,
+        result.CharacterCount,
+        result.LineCount,
+        result.RegionWidth,
+        result.RegionHeight,
+        result.RegionSource,
+        result.DiagnosticCode);
+
     private JsonElement Shutdown()
     {
         _ = Task.Run(async () =>
@@ -1062,6 +1106,8 @@ internal static class DesktopApiErrors
         {
             BridgeProtocolException bridgeException =>
                 (bridgeException.Code, bridgeException.Message),
+            PointerRegionException pointerException =>
+                (pointerException.Code, pointerException.Message),
             WindowIdentityException windowIdentityException =>
                 (windowIdentityException.Code, windowIdentityException.Message),
             DesktopSearchException searchException =>

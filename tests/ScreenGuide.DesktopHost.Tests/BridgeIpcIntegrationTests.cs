@@ -15,7 +15,7 @@ namespace ScreenGuide.DesktopHost.Tests;
 public sealed class BridgeIpcIntegrationTests
 {
     [Fact]
-    public async Task HandshakeNegotiatesSnapshotOnlyAtDesktopProtocolV11()
+    public async Task HandshakeNegotiatesSnapshotOnlyAtDesktopProtocolV12()
     {
         await using var environment = DesktopHostTestEnvironment.Create();
         using var host = environment.BuildHost();
@@ -34,11 +34,11 @@ public sealed class BridgeIpcIntegrationTests
         await host.StopAsync();
 
         Assert.True(response.Success, response.Error?.Code);
-        Assert.Equal(11, response.ProtocolVersion);
+        Assert.Equal(12, response.ProtocolVersion);
         var handshake = response.Payload!.Value.Deserialize<BridgeHandshakeResponseDto>(
             DesktopProtocolJson.Options)!;
         Assert.Equal(1, handshake.BridgeProtocolVersion);
-        Assert.Equal(11, handshake.DesktopIpcProtocolVersion);
+        Assert.Equal(12, handshake.DesktopIpcProtocolVersion);
         Assert.NotEqual(Guid.Empty, Guid.Parse(handshake.ServerInstanceId));
         Assert.Equal("yuanshu-core", handshake.ServerProduct);
         Assert.False(string.IsNullOrWhiteSpace(handshake.ServerProductVersion));
@@ -55,8 +55,9 @@ public sealed class BridgeIpcIntegrationTests
     [Theory]
     [InlineData(8)]
     [InlineData(10)]
-    [InlineData(12)]
-    public async Task DesktopProtocolRejectsEveryVersionExceptV11(int protocolVersion)
+    [InlineData(11)]
+    [InlineData(13)]
+    public async Task DesktopProtocolRejectsEveryVersionExceptV12(int protocolVersion)
     {
         await using var environment = DesktopHostTestEnvironment.Create();
         using var host = environment.BuildHost();

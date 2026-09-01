@@ -58,6 +58,7 @@ Stage 5 的唯一推荐章程见 [Stage 5 Charter](docs/V2_STAGE5_CHARTER.md)。
 - 明确语音只对“打开应用、打开网站、可靠搜索”产生一次性授权；窗口读取、打开文件和编程任务仍需要单独的可见确认。
 - 仅操作 Windows UI Automation 唯一识别的可写搜索框；拒绝密码框和无法唯一识别的控件。
 - 仅捕获用户确认的单个窗口；本机 OCR 与 UI Automation 联合分析；图像只在短期内存中存在，使用后清零。
+- 当前 C1 候选新增一次性指针锚点与本机区域 OCR 基础：只在用户可见确认后绑定精确前台窗口、物理/归一化坐标、窗口范围与 DPI；10 秒后或窗口/指针下目标变化即失效。区域最多 640×480，只在内存中处理，不发送给 Provider，也尚未实现 C2 回答链路。
 - 编程任务通过 Codex Connector 执行，并记录 Git、测试和 TaskEvidence 证据。
 - 自包含 win-x64 发布目录、简体中文 Inno Setup 安装包和隔离安装验收脚本。
 
@@ -154,6 +155,6 @@ Stage 5 的唯一推荐章程见 [Stage 5 Charter](docs/V2_STAGE5_CHARTER.md)。
 - V0.2.1 标签 `v0.2.1-baseline` 保留为上一版回滚点；回滚数据必须使用 pre-v7 备份或隔离数据目录。
 - 阶段 2 候选代码把 SQLite 升到 schema v8 并在升级前建立 `pre-v8` 备份。V0.3.0 不能直接打开 schema v8；回滚到阶段 1 时必须使用 pre-v8 备份或隔离数据目录，不能覆盖正式数据库。
 - V0.5.0 使用 schema v10。直接从 V0.4.0 schema v8 升级只建立 `pre-v10-from-v8`，不会自动建立中间 pre-v9；从 v9 升级建立 `pre-v10-from-v9`。V0.4.0 不能直接打开 v9/v10；回滚时必须保留新主库，并使用匹配来源的 pre-v10、既有 v8 备份或隔离数据目录。
-- 阶段 4 当前使用 schema v11、protocol v11；S4-R3/S4-R4 没有新增 schema 迁移。回滚到 V0.5.0 时 Host 与 Client 必须成对回滚，保留 v11 主库，只能在隔离数据目录使用与来源匹配的 `pre-v11-from-v10`；没有匹配备份时必须失败关闭，不能覆盖或原地降级正式主库。
+- 当前候选使用 schema v11、Desktop IPC protocol v12；v12 只增加一次性指针锚点与本机区域 OCR IPC，未新增 SQLite 迁移。S4-R3/S4-R4 的 protocol v11/schema v11 冻结事实不变。回滚到 V0.5.0 时 Host 与 Client 必须成对回滚，保留 v11 主库，只能在隔离数据目录使用与来源匹配的 `pre-v11-from-v10`；没有匹配备份时必须失败关闭，不能覆盖或原地降级正式主库。
 - S5-R2 使用隔离 Windows Sandbox 完成生命周期，宿主现有元枢的 536 个文件、tree SHA-256 与卸载登记在运行前后保持不变；没有在宿主上运行 installer。
 - V0.6.0 冻结安装包仍未获得数字签名、语音模型许可/分发和最终分发放行；S5-R2 候选也未签名且不是新 tag，因此不得声称已获对外分发批准。

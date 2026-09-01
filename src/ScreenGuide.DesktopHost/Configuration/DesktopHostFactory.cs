@@ -156,9 +156,12 @@ public static class DesktopHostFactory
         builder.Services.AddSingleton<PrintWindowCaptureBackend>();
         builder.Services.AddSingleton<IExactWindowCaptureBackend, ResilientExactWindowCaptureBackend>();
         builder.Services.AddSingleton<IWindowCaptureService, WindowsSingleWindowCaptureService>();
+        builder.Services.AddSingleton<IPointerDesktopProbe, WindowsPointerDesktopProbe>();
+        builder.Services.AddSingleton<IPointerRegionCaptureService, WindowsPointerRegionCaptureService>();
         builder.Services.AddSingleton<ILocalOcrTextExtractor, WindowsLocalOcrTextExtractor>();
         builder.Services.AddSingleton<IWindowVisionProvider, WindowsLocalWindowVisionProvider>();
         builder.Services.AddSingleton<WindowUnderstandingService>();
+        builder.Services.AddSingleton<PointerRegionUnderstandingService>();
         builder.Services.AddSingleton<WindowsDesktopSkillAdapter>();
         builder.Services.AddSingleton<ISkillAdapter>(services =>
             services.GetRequiredService<WindowsDesktopSkillAdapter>());

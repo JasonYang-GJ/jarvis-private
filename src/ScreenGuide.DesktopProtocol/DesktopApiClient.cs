@@ -65,6 +65,24 @@ public interface IDesktopApiClient
         string operationId,
         CancellationToken cancellationToken = default);
 
+    Task<PointerAnchorDto> PreparePointerRegionAsync(
+        PreparePointerRegionRequestDto request,
+        CancellationToken cancellationToken = default) =>
+        Task.FromException<PointerAnchorDto>(
+            new NotSupportedException("此客户端尚未实现本机指针区域准备。"));
+
+    Task<PointerRegionOcrResultDto> ReadPointerRegionAsync(
+        Guid anchorId,
+        CancellationToken cancellationToken = default) =>
+        Task.FromException<PointerRegionOcrResultDto>(
+            new NotSupportedException("此客户端尚未实现本机指针区域读取。"));
+
+    Task<bool> CancelPointerRegionAsync(
+        Guid anchorId,
+        CancellationToken cancellationToken = default) =>
+        Task.FromException<bool>(
+            new NotSupportedException("此客户端尚未实现本机指针区域取消。"));
+
     Task<IReadOnlyList<ConversationSummaryDto>> ListConversationsAsync(
         CancellationToken cancellationToken = default);
 
@@ -484,6 +502,30 @@ public sealed class DesktopApiClient(
         CallAsync<SessionTurnConfirmationRequestDto, SessionSnapshotDto>(
             DesktopApiMethods.ConfirmSessionTurn,
             new SessionTurnConfirmationRequestDto(sessionId, turnId, confirmed),
+            cancellationToken);
+
+    public Task<PointerAnchorDto> PreparePointerRegionAsync(
+        PreparePointerRegionRequestDto request,
+        CancellationToken cancellationToken = default) =>
+        CallAsync<PreparePointerRegionRequestDto, PointerAnchorDto>(
+            DesktopApiMethods.PreparePointerRegion,
+            request,
+            cancellationToken);
+
+    public Task<PointerRegionOcrResultDto> ReadPointerRegionAsync(
+        Guid anchorId,
+        CancellationToken cancellationToken = default) =>
+        CallAsync<PointerRegionRequestDto, PointerRegionOcrResultDto>(
+            DesktopApiMethods.ReadPointerRegion,
+            new PointerRegionRequestDto(anchorId),
+            cancellationToken);
+
+    public Task<bool> CancelPointerRegionAsync(
+        Guid anchorId,
+        CancellationToken cancellationToken = default) =>
+        CallAsync<PointerRegionRequestDto, bool>(
+            DesktopApiMethods.CancelPointerRegion,
+            new PointerRegionRequestDto(anchorId),
             cancellationToken);
 
     public Task<SessionSnapshotDto> ConfirmMemoryOutboundAsync(

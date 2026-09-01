@@ -380,10 +380,10 @@ public sealed class SessionProjectionIntegrationTests
     }
 
     [Fact]
-    public void DesktopProtocolIsVersionElevenWithoutChangingTheSchemaContract()
+    public void DesktopProtocolIsVersionTwelveWithoutChangingTheSchemaContract()
     {
-        Assert.Equal(11, DesktopProtocolVersion.Current);
-        Assert.Equal(11, DesktopProtocolVersion.MinimumSupported);
+        Assert.Equal(12, DesktopProtocolVersion.Current);
+        Assert.Equal(12, DesktopProtocolVersion.MinimumSupported);
         Assert.Equal(11, ScreenGuide.Core.Tasking.V02Contract.SchemaVersion);
     }
 

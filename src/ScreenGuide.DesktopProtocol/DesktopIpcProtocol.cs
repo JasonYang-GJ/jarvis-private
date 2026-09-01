@@ -8,9 +8,9 @@ namespace ScreenGuide.DesktopProtocol;
 
 public static class DesktopProtocolVersion
 {
-    public const int Current = 11;
+    public const int Current = 12;
 
-    public const int MinimumSupported = 11;
+    public const int MinimumSupported = 12;
 }
 
 public static class DesktopApiMethods
@@ -32,6 +32,9 @@ public static class DesktopApiMethods
     public const string PlanAssistantCommand = "assistant.command.plan";
     public const string ExecuteAssistantCommand = "assistant.command.execute";
     public const string CancelWindowObservation = "assistant.window-observation.cancel";
+    public const string PreparePointerRegion = "assistant.pointer-region.prepare";
+    public const string ReadPointerRegion = "assistant.pointer-region.read";
+    public const string CancelPointerRegion = "assistant.pointer-region.cancel";
     public const string ListConversations = "conversations.list";
     public const string GetConversation = "conversations.get";
     public const string CreateConversation = "conversations.create";

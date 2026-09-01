@@ -5,6 +5,8 @@ using ScreenGuide.Core.Conversations;
 using ScreenGuide.Core.Security;
 using ScreenGuide.DesktopHost.Runtime;
 using ScreenGuide.Skills.Abstractions;
+using ScreenGuide.Vision.Abstractions;
+using ScreenGuide.Vision.Windows;
 
 namespace ScreenGuide.DesktopHost.Tests;
 
@@ -53,6 +55,11 @@ public sealed class DesktopHostDependencyTests
         Assert.Equal(2, skillIds.Length);
         Assert.Contains("codex.project-task", skillIds);
         Assert.Contains("windows.safe-launch", skillIds);
+        Assert.IsType<WindowsPointerDesktopProbe>(
+            host.Services.GetRequiredService<IPointerDesktopProbe>());
+        Assert.IsType<WindowsPointerRegionCaptureService>(
+            host.Services.GetRequiredService<IPointerRegionCaptureService>());
+        Assert.NotNull(host.Services.GetRequiredService<PointerRegionUnderstandingService>());
     }
 
     [Fact]

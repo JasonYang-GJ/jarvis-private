@@ -79,6 +79,48 @@ public sealed record ExecuteAssistantCommandRequestDto(
 
 public sealed record CancelWindowObservationRequestDto(string OperationId);
 
+public sealed record PreparePointerRegionRequestDto(
+    bool Confirmed,
+    string AuthorizationSource = "VisibleConfirmation");
+
+public sealed record PointerWindowIdentityDto(
+    long WindowHandle,
+    string WindowTitle,
+    string ProcessName,
+    int ProcessId,
+    DateTimeOffset ProcessStartTimeUtc,
+    int WindowLeft,
+    int WindowTop,
+    int WindowWidth,
+    int WindowHeight,
+    uint DpiX,
+    uint DpiY);
+
+public sealed record PointerAnchorDto(
+    Guid AnchorId,
+    int PhysicalScreenX,
+    int PhysicalScreenY,
+    double NormalizedX,
+    double NormalizedY,
+    PointerWindowIdentityDto Window,
+    DateTimeOffset CapturedAtUtc);
+
+public sealed record PointerRegionRequestDto(Guid AnchorId);
+
+public sealed record PointerRegionOcrResultDto(
+    Guid AnchorId,
+    string Text,
+    int CharacterCount,
+    int LineCount,
+    int RegionWidth,
+    int RegionHeight,
+    string RegionSource,
+    string DiagnosticCode)
+{
+    public override string ToString() =>
+        $"PointerRegionOcrResultDto {{ AnchorId = {AnchorId}, CharacterCount = {CharacterCount}, LineCount = {LineCount}, RegionWidth = {RegionWidth}, RegionHeight = {RegionHeight}, RegionSource = {RegionSource}, DiagnosticCode = {DiagnosticCode}, Text = [REDACTED] }}";
+}
+
 public sealed record AssistantCommandResultDto(
     string IntentKind,
     string Status,

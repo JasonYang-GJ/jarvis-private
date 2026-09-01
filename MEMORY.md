@@ -14,6 +14,7 @@
 - V2 阶段 2“可替换 AI 大脑与模型路由”已通过：统一 Chat Model、Provider Registry、Model Router、Prompt Registry、DPAPI、安全停用的 Codex 普通聊天适配器、DeepSeek/千问普通聊天 Provider、设置 UI/IPC、语义建议和 schema v8 AI 调用审计。
 - 阶段 2 普通聊天发布目标是 DeepSeek + 千问；千问是手动备用，无自动 fallback/retry/resend。DeepSeek 真实证据已冻结，Qwen 真实 Health/聊天/取消和普通聊天选 Qwen 时的真实 Codex 编程隔离均已通过。Codex 普通聊天保持 `ProductionDisabled`/`PolicyDisabled`，不是发布目标。
 - S3-R1 本机加密记忆账本、S3-R2 确定性本地预览与 S3-R3 schema/protocol v10、chat.general@2 和逐 Turn 完整出站确认均已集成。默认 0 条，只有用户单次确认的普通聊天 Turn 才最多发送一次。
+- 当前指针理解 C1 候选把 Desktop IPC 升至 v12，SQLite 保持 v11：用户可见确认后只创建一次性、最长 10 秒的精确窗口指针锚点，本机只裁剪最多 640×480 区域并运行本地 OCR；窗口身份/范围/DPI/指针下窗口变化均失败关闭，帧不持久化、不上传、不调用 Provider。C2 回答/Prompt/出站尚未实现。
 
 ## 长期架构决策
 

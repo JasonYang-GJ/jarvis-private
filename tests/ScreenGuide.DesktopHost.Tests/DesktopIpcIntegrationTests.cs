@@ -50,6 +50,7 @@ public sealed class DesktopIpcIntegrationTests
     }
 
     [Theory]
+    [InlineData(11)]
     [InlineData(9)]
     [InlineData(99)]
     public async Task RejectsUnsupportedProtocolVersionWithStructuredError(int protocolVersion)

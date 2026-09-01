@@ -59,7 +59,7 @@ V0.4.0 Stage 2 正式源码由下面这些内容共同组成：
 | 模块 | 当前职责 | 不应承担 |
 |---|---|---|
 | `ScreenGuide.DesktopClient` | WPF 界面、托盘、可见确认、Host 生命周期、语音交互、Session 状态呈现 | 直接执行动作、直接读写 SQLite、直接调用 Codex |
-| `ScreenGuide.DesktopProtocol` | IPC protocol v11、Session 有界投影/游标页/精确 Turn、AI/显式记忆与逐 Turn 出站确认 DTO、当前用户 Pipe 客户端、跨 IPC 敏感文本清理 | 业务规则、权限判断、Key 或记忆密文持久化和模型调用 |
+| `ScreenGuide.DesktopProtocol` | IPC protocol v12、Session 有界投影/游标页/精确 Turn、AI/显式记忆/逐 Turn 出站确认及一次性指针区域 DTO、当前用户 Pipe 客户端、跨 IPC 敏感文本清理 | 业务规则、权限判断、Key 或记忆密文持久化和模型调用 |
 | `ScreenGuide.DesktopHost` | SessionCoordinator、业务编排、MemoryService、权限、恢复、审计、增量状态通知 | 让 UI 绕过 Host Service 直接访问存储 |
 | `ScreenGuide.AI.Core` | 供应商无关 Chat Model 契约、Provider Registry、Model Router、Prompt Registry、语义建议校验及确定性意图规划 | Provider HTTP/CLI 细节、自由执行工具或隐式授予权限 |
 | `ScreenGuide.AI.DeepSeek` | 固定 DeepSeek 官方目的地的普通聊天 HTTP/SSE Provider、错误和健康映射 | 保存 Key、决定 Session、编程 Agent 或电脑权限 |
@@ -67,7 +67,7 @@ V0.4.0 Stage 2 正式源码由下面这些内容共同组成：
 | `ScreenGuide.Core` | Session、任务、对话、AI 调用审计、权限和独立 Memory Ledger 领域契约 | Windows、SQLite 或模型供应商细节 |
 | `ScreenGuide.Persistence` | SQLite schema v11 与 Session/任务/对话/AI 调用/受保护记忆、窗口身份及安全出站审计元数据存储 | UI、Key、记忆明文和模型调用 |
 | `ScreenGuide.Skills.*` | 可替换技能接口与 Windows 低风险动作 | 任意桌面控制 |
-| `ScreenGuide.Vision.*` | 单窗口捕获、敏感窗口拒绝、本机 OCR/UIA | 全桌面捕获和云端上传 |
+| `ScreenGuide.Vision.*` | 单窗口捕获、敏感窗口拒绝、本机 OCR/UIA、一次性指针锚点与最大 640×480 的内存区域裁剪 | 全桌面捕获、持久化图像/OCR 或云端上传 |
 | `ScreenGuide.Voice.Windows` | 本机采音、离线识别、回声过滤、朗读 | 保存录音或后台隐蔽监听 |
 | `ScreenGuide.Agent.*` | Agent 抽象、安全停用的 Codex 普通聊天适配、独立 Codex 编程连接和进程树取消 | 把普通聊天路由与编程 Agent 混为同一配置，或决定电脑动作权限 |
 | `ScreenGuide.Evidence` | Git、测试和任务结果证据 | 代替真实用户验收 |
@@ -166,7 +166,7 @@ V0.4.0 Stage 2 正式源码由下面这些内容共同组成：
 
 ## 8. IPC、AI 设置与状态更新
 
-- DesktopClient 与 DesktopHost 使用当前 Windows 用户专属 Named Pipe，当前 protocol v11；v10 增加逐 Turn 记忆选择和出站确认，v11 增加 Session 有界投影、游标分页与精确 Turn 读取，旧协议不混用。
+- DesktopClient 与 DesktopHost 使用当前 Windows 用户专属 Named Pipe，当前 protocol v12；v10 增加逐 Turn 记忆选择和出站确认，v11 增加 Session 有界投影、游标分页与精确 Turn 读取，v12 增加一次性、10 秒有效、精确窗口绑定的指针区域准备/本机 OCR/取消方法，旧协议不混用。SQLite 仍为 schema v11。
 - v8 新增 `ai.settings.get`、`ai.chat-route.set`、`ai.credentials.set/delete` 和 `ai.provider.health`。AI 设置 DTO 只返回 Provider/Model、能力、数据目的地、健康和配置状态，绝不返回完整 Key。
 - 普通聊天路由存入本地 `settings/ai-settings.json`；Key 单独存入 DPAPI 密文。设置页明确显示同一 Session 的既有历史会随下一条消息发送给新 Provider；当前运行回答不切换。
 - `sessions.current` 返回最多 32 个最新 Turn、全部非终态 Turn 和 50 条最新消息的有界 bootstrap；`sessions.messages.page` 使用 `(sequence_number < cursor)` keyset 分页，每页最多 50 条；`sessions.turn.get` 读取精确权威 Turn。
