@@ -19,7 +19,7 @@ DesktopClient（WPF）
 DesktopHost
   ├─ SessionCoordinator（唯一会话与前台 Turn 协调入口）
   │    ├─ ConversationService → RoutedConversationProvider
-  │    │    ├─ PromptRegistry → chat.general@1（默认无记忆）/ chat.general@2（逐 Turn 记忆确认）
+  │    │    ├─ PromptRegistry → chat.general@1/@2 + window.pointer.answer@1 + intent.semantic@1
   │    │    └─ ModelRouter → Provider Registry
   │    │         ├─ CodexChatModelProvider（生产策略安全停用）
   │    │         ├─ DeepSeekChatModelProvider
@@ -166,7 +166,7 @@ V0.4.0 Stage 2 正式源码由下面这些内容共同组成：
 
 ## 8. IPC、AI 设置与状态更新
 
-- DesktopClient 与 DesktopHost 使用当前 Windows 用户专属 Named Pipe，当前 protocol v12；v10 增加逐 Turn 记忆选择和出站确认，v11 增加 Session 有界投影、游标分页与精确 Turn 读取，v12 增加一次性、10 秒有效、精确窗口绑定的指针区域准备/本机 OCR/取消方法，旧协议不混用。SQLite 仍为 schema v11。
+- DesktopClient 与 DesktopHost 使用当前 Windows 用户专属 Named Pipe，当前 protocol v12；v10 增加逐 Turn 记忆选择和出站确认，v11 增加 Session 有界投影、游标分页与精确 Turn 读取，v12 增加一次性、10 秒有效、精确窗口绑定的指针区域准备/本机 OCR/取消，以及纯文本出站预览/单次确认方法，旧协议不混用。SQLite 仍为 schema v11。
 - v8 新增 `ai.settings.get`、`ai.chat-route.set`、`ai.credentials.set/delete` 和 `ai.provider.health`。AI 设置 DTO 只返回 Provider/Model、能力、数据目的地、健康和配置状态，绝不返回完整 Key。
 - 普通聊天路由存入本地 `settings/ai-settings.json`；Key 单独存入 DPAPI 密文。设置页明确显示同一 Session 的既有历史会随下一条消息发送给新 Provider；当前运行回答不切换。
 - `sessions.current` 返回最多 32 个最新 Turn、全部非终态 Turn 和 50 条最新消息的有界 bootstrap；`sessions.messages.page` 使用 `(sequence_number < cursor)` keyset 分页，每页最多 50 条；`sessions.turn.get` 读取精确权威 Turn。
@@ -181,7 +181,7 @@ V0.4.0 Stage 2 正式源码由下面这些内容共同组成：
 
 ### 统一普通聊天入口
 
-`ConversationService` 仍只依赖既有 `IConversationProvider`，其当前实现为 `RoutedConversationProvider`。这个兼容层从 ConversationStore 读取消息历史：无记忆普通聊天使用默认 `chat.general@1`；只有已完成逐 Turn 完整出站确认时才使用 `chat.general@2`。它消费本 Turn 冻结路由，调用统一 `IChatModelProvider`，并记录 AI 调用证据。SessionCoordinator 没有增加 Provider 分支。
+`ConversationService` 仍只依赖既有 `IConversationProvider`，其当前实现为 `RoutedConversationProvider`。这个兼容层从 ConversationStore 读取普通聊天历史：无记忆普通聊天使用默认 `chat.general@1`；只有已完成逐 Turn 记忆完整出站确认时才使用 `chat.general@2`。指针区域回答使用 `window.pointer.answer@1`，并只构建获批的 OCR JSON User 消息与当前问题，不带既有会话历史或图片。所有路径都消费本 Turn 冻结路由并调用统一 `IChatModelProvider`；SessionCoordinator 没有增加 Provider 分支。
 
 `IChatModelProvider` 统一 System Prompt、Messages、Model、可选采样参数、CancellationToken、流式回调、Usage、Finish Reason、Provider Metadata、健康和错误；`ChatModelCapabilities` 显式描述 Streaming、Tool Calling、Vision、JSON Object、JSON Schema、Reasoning 和 Context Window，调用方按真实能力使用。
 
@@ -199,7 +199,7 @@ Registry 中的注册本身不构成真实账号验收证据；阶段 2 千问 `
 
 ### Prompt 与调用审计
 
-`prompts/runtime/registry.json` 当前注册 `chat.general@1`、`chat.general@2` 和 `intent.semantic@1`。`chat.general@1` 仍是无记忆普通聊天的默认 Prompt；`chat.general@2` 只用于用户逐 Turn 明确选择并完整确认的记忆出站；`intent.semantic@1` 始终不接收记忆。每项包含 ID、版本、用途、文件、SHA-256、适用 Provider、创建时间和修改原因；加载时拒绝越界路径、重复项和哈希不一致。固定小型评测集覆盖连续指代、歧义、纠正、安全及缺项目/文件/窗口等场景。
+`prompts/runtime/registry.json` 当前注册 `chat.general@1`、`chat.general@2`、`window.pointer.answer@1` 和 `intent.semantic@1`。`chat.general@1` 仍是无记忆普通聊天的默认 Prompt；`chat.general@2` 只用于用户逐 Turn 明确选择并完整确认的记忆出站；`window.pointer.answer@1` 只解释当前问题与获批的局部 OCR 文字，并在不足/歧义时明确说明；`intent.semantic@1` 始终不接收记忆或指针 OCR。每项包含 ID、版本、用途、文件、SHA-256、适用 Provider、创建时间和修改原因；加载时拒绝越界路径、重复项和哈希不一致。
 
 SQLite `ai_invocations` 记录 Provider/Model、Prompt ID/版本/哈希、数据去向、状态、时间、Usage、Provider Request ID 和安全失败码；不记录 Key、Authorization Header、Prompt 正文或完整 Conversation 副本。
 

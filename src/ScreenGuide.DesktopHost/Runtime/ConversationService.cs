@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Text.Json;
+using ScreenGuide.Core.Ai;
 using ScreenGuide.Core.Conversations;
 using ScreenGuide.Core.Memories;
 using ScreenGuide.Core.Sessions;
@@ -83,6 +84,7 @@ public sealed class ConversationService(
                 message,
                 idempotencyKey,
                 memoryOutbound: null,
+                pointerAnswer: null,
                 cancellationToken)
             .ConfigureAwait(false);
 
@@ -93,6 +95,7 @@ public sealed class ConversationService(
         string message,
         string? idempotencyKey = null,
         MemoryOutboundEnvelope? memoryOutbound = null,
+        PointerAnswerEnvelope? pointerAnswer = null,
         CancellationToken cancellationToken = default)
     {
         if (sessionTurnId == Guid.Empty)
@@ -107,6 +110,7 @@ public sealed class ConversationService(
                 message,
                 idempotencyKey,
                 memoryOutbound,
+                pointerAnswer,
                 cancellationToken)
             .ConfigureAwait(false);
     }
@@ -118,6 +122,7 @@ public sealed class ConversationService(
         string message,
         string? idempotencyKey,
         MemoryOutboundEnvelope? memoryOutbound,
+        PointerAnswerEnvelope? pointerAnswer,
         CancellationToken cancellationToken)
     {
         RequireStartedHost();
@@ -126,6 +131,11 @@ public sealed class ConversationService(
         var normalizedIdempotencyKey = string.IsNullOrWhiteSpace(idempotencyKey)
             ? Guid.NewGuid().ToString("N")
             : idempotencyKey.Trim();
+        if (memoryOutbound is not null && pointerAnswer is not null)
+        {
+            throw new ArgumentException("同一 Turn 不能同时携带记忆与指针区域上下文。", nameof(pointerAnswer));
+        }
+
         var registration = memoryOutbound is null
             ? await conversationStore.StartTurnAsync(
                     conversationId,
@@ -165,6 +175,7 @@ public sealed class ConversationService(
             frozenRoute,
             normalized,
             memoryOutbound,
+            pointerAnswer,
             active.Cancellation.Token);
         active.SetRun(run);
         _runningTurns[registration.Turn.Id] = active;
@@ -182,7 +193,7 @@ public sealed class ConversationService(
                 "ConversationTurnStarted",
                 conversationId,
                 AuditOutcome.Success,
-                JsonSerializer.Serialize(new { turnId = registration.Turn.Id }),
+                BuildTurnStartedAuditDetails(registration.Turn.Id, pointerAnswer),
                 CancellationToken.None)
             .ConfigureAwait(false);
         return new ConversationSendResult(conversationId, registration.Turn.Id, false);
@@ -263,6 +274,7 @@ public sealed class ConversationService(
         SessionTurnFrozenRoute? frozenRoute,
         string message,
         MemoryOutboundEnvelope? memoryOutbound,
+        PointerAnswerEnvelope? pointerAnswer,
         CancellationToken cancellationToken)
     {
         try
@@ -277,7 +289,8 @@ public sealed class ConversationService(
                         conversation.ExternalThreadId,
                         sessionTurnId,
                         frozenRoute,
-                        memoryOutbound),
+                        memoryOutbound,
+                        pointerAnswer),
                     (threadId, processId) => conversationStore.RecordProviderStartedAsync(
                         conversationId,
                         turnId,
@@ -421,6 +434,40 @@ public sealed class ConversationService(
                 DetailsJson = details
             },
             cancellationToken);
+
+    private static string BuildTurnStartedAuditDetails(
+        Guid turnId,
+        PointerAnswerEnvelope? pointerAnswer) =>
+        pointerAnswer is null
+            ? JsonSerializer.Serialize(new { turnId })
+            : JsonSerializer.Serialize(new
+            {
+                turnId,
+                pointerAnswer = new
+                {
+                    pointerAnswer.Audit.ConsentId,
+                    pointerAnswer.Audit.SessionTurnId,
+                    pointerAnswer.Audit.AnchorId,
+                    pointerAnswer.Audit.ProviderId,
+                    pointerAnswer.Audit.ModelId,
+                    pointerAnswer.Audit.DestinationOrigin,
+                    pointerAnswer.Audit.PromptId,
+                    pointerAnswer.Audit.PromptVersion,
+                    pointerAnswer.Audit.PromptContentHash,
+                    pointerAnswer.Audit.QuestionHash,
+                    pointerAnswer.Audit.OcrHash,
+                    pointerAnswer.Audit.ContextHash,
+                    pointerAnswer.Audit.TargetBindingHash,
+                    pointerAnswer.Audit.PreviewHash,
+                    pointerAnswer.Audit.QuestionCharacterCount,
+                    pointerAnswer.Audit.OcrCharacterCount,
+                    pointerAnswer.Audit.OcrLineCount,
+                    pointerAnswer.Audit.RegionWidth,
+                    pointerAnswer.Audit.RegionHeight,
+                    pointerAnswer.Audit.RegionSource,
+                    Decision = "Consumed"
+                }
+            });
 
     private static string NormalizeTitle(string? title)
     {

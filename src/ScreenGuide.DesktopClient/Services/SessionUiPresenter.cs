@@ -115,6 +115,7 @@ public static class SessionUiPresenter
         "WaitingForWindowConsent" => ("需要你允许查看这一个窗口", "Waiting"),
         "WaitingForConfirmation" => ("准备就绪，等待你确认这一次", "Waiting"),
         "WaitingForMemoryOutboundConsent" => ("请查看完整记忆内容并确认是否只发送这一次", "Waiting"),
+        "WaitingForPointerAnswerConsent" => ("请查看完整问题与区域文字，确认是否只发送这一次", "Waiting"),
         "Executing" => ("正在执行这一次已确认的操作…", "Busy"),
         "ObservingWindow" => ("正在查看你允许的单个窗口…", "Busy"),
         "ProgrammingTask" => ("编程任务正在后台运行，你可以继续说话", "Busy"),

@@ -188,6 +188,11 @@ public sealed class DesktopApiDispatcher(
                         await ConfirmMemoryOutboundAsync(
                             Deserialize<SessionMemoryOutboundConsentRequestDto>(request),
                             cancellationToken).ConfigureAwait(false))!),
+                DesktopApiMethods.ConfirmPointerAnswer =>
+                    DesktopProtocolJson.ToElement(MapSession(
+                        await ConfirmPointerAnswerAsync(
+                            Deserialize<SessionPointerAnswerConsentRequestDto>(request),
+                            cancellationToken).ConfigureAwait(false))!),
                 DesktopApiMethods.CancelSessionTurn =>
                     DesktopProtocolJson.ToElement(MapSession(
                         await CancelSessionTurnAsync(
@@ -551,7 +556,8 @@ public sealed class DesktopApiDispatcher(
                 request.ExpectedIntentKind,
                 request.ExpectedTarget,
                 request.MemoryItems?.Select(item =>
-                    new MemoryOutboundItemReference(item.MemoryId, item.ExpectedVersion)).ToArray())
+                    new MemoryOutboundItemReference(item.MemoryId, item.ExpectedVersion)).ToArray(),
+                request.PointerAnchorId)
             .ConfigureAwait(false);
         return new SessionTurnCommandResultDto(result.SessionId, result.TurnId, result.WasDuplicate);
     }
@@ -607,6 +613,17 @@ public sealed class DesktopApiDispatcher(
             request.SessionId,
             request.TurnId,
             request.ConsentId,
+            request.Confirmed,
+            cancellationToken);
+
+    private Task<LocalSessionSnapshot> ConfirmPointerAnswerAsync(
+        SessionPointerAnswerConsentRequestDto request,
+        CancellationToken cancellationToken) =>
+        sessions.ConfirmPointerAnswerAsync(
+            request.SessionId,
+            request.TurnId,
+            request.ConsentId,
+            request.PreviewHash,
             request.Confirmed,
             cancellationToken);
 
@@ -901,7 +918,29 @@ public sealed class DesktopApiDispatcher(
                 consent.PreparedAtUtc,
                 consent.ExpiresAtUtc,
                 consent.ManifestHash)).ToArray(),
-            snapshot.HasEarlierMessages);
+            snapshot.HasEarlierMessages,
+            snapshot.PointerAnswerConsents.Select(consent => new PointerAnswerConsentDto(
+                consent.ConsentId,
+                consent.TurnId,
+                consent.Anchor.AnchorId,
+                consent.ProviderId,
+                consent.ModelId,
+                consent.DestinationOrigin,
+                consent.PromptId,
+                consent.PromptVersion,
+                consent.PromptContentHash,
+                consent.Question,
+                consent.OcrText,
+                consent.Question.Length,
+                consent.OcrText.Length,
+                consent.OcrLineCount,
+                consent.RegionWidth,
+                consent.RegionHeight,
+                consent.RegionSource,
+                consent.PreviewHash,
+                consent.PreparedAtUtc,
+                consent.ExpiresAtUtc,
+                SendsImage: false)).ToArray());
         return FitSnapshotBudget(response);
     }
 
@@ -1108,6 +1147,8 @@ internal static class DesktopApiErrors
                 (bridgeException.Code, bridgeException.Message),
             PointerRegionException pointerException =>
                 (pointerException.Code, pointerException.Message),
+            PointerAnswerException pointerAnswerException =>
+                (pointerAnswerException.Code, pointerAnswerException.Message),
             WindowIdentityException windowIdentityException =>
                 (windowIdentityException.Code, windowIdentityException.Message),
             DesktopSearchException searchException =>

@@ -30,6 +30,16 @@
       "providerIds": ["*"],
       "createdAtUtc": "2026-08-24T00:00:00Z",
       "changeReason": "建立只建议、不授权的供应商无关语义意图分类边界。"
+    },
+    {
+      "id": "window.pointer.answer",
+      "version": "1",
+      "purpose": "pointer-region-text-answer",
+      "contentFile": "window/pointer-answer.v1.md",
+      "sha256": "8136B489DBE4B9FBF5CEDEA9DA0106257A15706414EDD5EC20C704F79E5DF6F8",
+      "providerIds": ["*"],
+      "createdAtUtc": "2026-09-01T00:00:00Z",
+      "changeReason": "为逐 Turn 明确确认的本机指针区域 OCR 文本建立供应商无关、无图片的回答边界。"
     }
   ]
 }

@@ -1,11 +1,14 @@
 using Microsoft.Extensions.DependencyInjection;
 using System.Text;
+using System.Text.Json;
 using ScreenGuide.AI.Core;
 using ScreenGuide.Core.Ai;
 using ScreenGuide.Core.Memories;
 using ScreenGuide.Core.Sessions;
+using ScreenGuide.Core.Tasking;
 using ScreenGuide.DesktopHost.Runtime;
 using ScreenGuide.DesktopProtocol;
+using ScreenGuide.Vision.Abstractions;
 
 namespace ScreenGuide.DesktopHost.Tests;
 
@@ -182,6 +185,238 @@ public sealed class SessionFrozenRouteTests
         Assert.Equal(1, settings.LoadCount);
         Assert.Equal(0, semantic.CallCount);
         Assert.Equal(0, provider.CompleteCount);
+    }
+
+    [Fact]
+    public async Task PointerAnswerWaitsForExactPreviewAndOneConfirmationAllowsOnlyOneTextOnlyRequest()
+    {
+        await using var environment = DesktopHostTestEnvironment.Create();
+        const string question = "这个按钮是什么意思？";
+        const string ocr = "保存并继续";
+        var provider = new SwitchingRecordingProvider(
+            "qwen",
+            "qwen3.7-plus",
+            _ => Task.FromResult("它表示保存当前内容并继续下一步。"),
+            "https://qwen.example/v1/chat");
+        using var host = environment.BuildHost(services =>
+        {
+            services.AddSingleton<IAiSettingsStore>(
+                new MutableSettingsStore(Route("qwen", "qwen3.7-plus")));
+            services.AddSingleton(new ChatProviderRegistry([provider]));
+            services.AddSingleton<IPointerDesktopProbe>(new FixedPointerProbe(PointerSnapshot()));
+            services.AddSingleton<IPointerRegionCaptureService>(new FixedPointerCapture());
+            services.AddSingleton<ILocalOcrTextExtractor>(new FixedPointerOcr(ocr));
+        });
+        await host.StartAsync();
+        IDesktopApiClient client = new DesktopApiClient(environment.Options.PipeName);
+        var coordinator = host.Services.GetRequiredService<SessionCoordinator>();
+        var store = host.Services.GetRequiredService<ISessionStore>();
+        var conversations = host.Services.GetRequiredService<ScreenGuide.Core.Conversations.IConversationStore>();
+        var invocations = host.Services.GetRequiredService<IAiInvocationStore>();
+        var taskStore = host.Services.GetRequiredService<ILocalTaskStore>();
+        var session = await coordinator.StartNewAsync("指针回答确认");
+        var anchor = await client.PreparePointerRegionAsync(new PreparePointerRegionRequestDto(true));
+
+        var submitted = await client.SubmitSessionInputAsync(new SessionInputRequestDto(
+            question,
+            "Text",
+            "pointer-answer-success",
+            session.Session.Id,
+            PointerAnchorId: anchor.AnchorId));
+        _ = await WaitForPhaseAsync(
+            store,
+            submitted.TurnId,
+            SessionTurnPhase.WaitingForPointerAnswerConsent);
+        var previewSnapshot = await client.GetCurrentSessionAsync();
+        var preview = Assert.Single(previewSnapshot!.PointerAnswerConsents!);
+
+        Assert.Equal(question, preview.Question);
+        Assert.Equal(ocr, preview.OcrText);
+        Assert.Equal("qwen", preview.ProviderId);
+        Assert.Equal("qwen3.7-plus", preview.ModelId);
+        Assert.Equal("https://qwen.example", preview.DestinationOrigin);
+        Assert.Equal("window.pointer.answer", preview.PromptId);
+        Assert.Equal("1", preview.PromptVersion);
+        Assert.False(preview.SendsImage);
+        Assert.DoesNotContain(question, preview.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain(ocr, preview.ToString(), StringComparison.Ordinal);
+        Assert.Empty(provider.Requests);
+        Assert.Empty(await invocations.GetForSessionTurnAsync(submitted.TurnId));
+
+        var confirmationResults = await Task.WhenAll(
+            TryConfirmPointerAnswerAsync(
+                client,
+                session.Session.Id,
+                submitted.TurnId,
+                preview.ConsentId,
+                preview.PreviewHash),
+            TryConfirmPointerAnswerAsync(
+                new DesktopApiClient(environment.Options.PipeName),
+                session.Session.Id,
+                submitted.TurnId,
+                preview.ConsentId,
+                preview.PreviewHash));
+        Assert.Single(confirmationResults, code => code is null);
+        Assert.Single(
+            confirmationResults,
+            code => code == PointerAnswerErrorCodes.ConsentStale);
+        var completed = await WaitForPhaseAsync(store, submitted.TurnId, SessionTurnPhase.Completed);
+        var providerRequest = Assert.Single(provider.Requests);
+        Assert.Equal("window.pointer.answer", providerRequest.Prompt?.PromptId);
+        Assert.Equal(2, providerRequest.Messages.Count);
+        Assert.StartsWith("{\"type\":\"POINTER_REGION_TEXT_CONTEXT_V1\"", providerRequest.Messages[0].Content, StringComparison.Ordinal);
+        using (var contextDocument = JsonDocument.Parse(providerRequest.Messages[0].Content))
+        {
+            Assert.Equal(ocr, contextDocument.RootElement.GetProperty("ocrText").GetString());
+        }
+        Assert.Equal(question, providerRequest.Messages[1].Content);
+        Assert.Single(await invocations.GetForSessionTurnAsync(submitted.TurnId));
+
+        Assert.Single(provider.Requests);
+
+        var messages = await conversations.GetMessagesAsync(session.Session.ConversationId);
+        Assert.Contains(messages, message => message.Content == question);
+        Assert.DoesNotContain(messages, message => message.Content.Contains(ocr, StringComparison.Ordinal));
+        var pointerAudit = Assert.Single(
+            await taskStore.GetAuditLogAsync(),
+            item => item.Action == "ConversationTurnStarted"
+                && item.DetailsJson?.Contains("pointerAnswer", StringComparison.Ordinal) == true);
+        Assert.DoesNotContain(question, pointerAudit.DetailsJson!, StringComparison.Ordinal);
+        Assert.DoesNotContain(ocr, pointerAudit.DetailsJson!, StringComparison.Ordinal);
+        Assert.DoesNotContain("SerializedContext", pointerAudit.DetailsJson!, StringComparison.Ordinal);
+        Assert.Contains(
+            PointerAnswerOutboundContract.HashText(question),
+            pointerAudit.DetailsJson!,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            PointerAnswerOutboundContract.HashText(ocr),
+            pointerAudit.DetailsJson!,
+            StringComparison.Ordinal);
+        Assert.NotNull(completed.ConversationTurnId);
+        await host.StopAsync();
+    }
+
+    [Fact]
+    public async Task PointerAnswerTamperedDeclinedOrStoppedPreviewFailsBeforeInvocationOrProvider()
+    {
+        await using var environment = DesktopHostTestEnvironment.Create();
+        var provider = new SwitchingRecordingProvider(
+            "deepseek",
+            "deepseek-chat",
+            _ => Task.FromResult("不应发送"),
+            "https://deepseek.example/v1/chat");
+        using var host = environment.BuildHost(services =>
+        {
+            services.AddSingleton<IAiSettingsStore>(
+                new MutableSettingsStore(Route("deepseek", "deepseek-chat")));
+            services.AddSingleton(new ChatProviderRegistry([provider]));
+            services.AddSingleton<IPointerDesktopProbe>(new FixedPointerProbe(PointerSnapshot()));
+            services.AddSingleton<IPointerRegionCaptureService>(new FixedPointerCapture());
+            services.AddSingleton<ILocalOcrTextExtractor>(new FixedPointerOcr("PRIVATE_OCR_SENTINEL"));
+        });
+        await host.StartAsync();
+        IDesktopApiClient client = new DesktopApiClient(environment.Options.PipeName);
+        var coordinator = host.Services.GetRequiredService<SessionCoordinator>();
+        var store = host.Services.GetRequiredService<ISessionStore>();
+        var invocations = host.Services.GetRequiredService<IAiInvocationStore>();
+        var session = await coordinator.StartNewAsync("失效确认");
+
+        var firstAnchor = await client.PreparePointerRegionAsync(new PreparePointerRegionRequestDto(true));
+        var first = await client.SubmitSessionInputAsync(new SessionInputRequestDto(
+            "第一个问题",
+            IdempotencyKey: "pointer-answer-tampered",
+            SessionId: session.Session.Id,
+            PointerAnchorId: firstAnchor.AnchorId));
+        _ = await WaitForPhaseAsync(store, first.TurnId, SessionTurnPhase.WaitingForPointerAnswerConsent);
+        var firstPreview = Assert.Single((await client.GetCurrentSessionAsync())!.PointerAnswerConsents!);
+        _ = await client.ConfirmPointerAnswerAsync(
+            session.Session.Id,
+            first.TurnId,
+            firstPreview.ConsentId,
+            new string('0', 64),
+            confirmed: true);
+        _ = await WaitForPhaseAsync(store, first.TurnId, SessionTurnPhase.Failed);
+
+        var secondAnchor = await client.PreparePointerRegionAsync(new PreparePointerRegionRequestDto(true));
+        var second = await client.SubmitSessionInputAsync(new SessionInputRequestDto(
+            "第二个问题",
+            IdempotencyKey: "pointer-answer-declined",
+            SessionId: session.Session.Id,
+            PointerAnchorId: secondAnchor.AnchorId));
+        _ = await WaitForPhaseAsync(store, second.TurnId, SessionTurnPhase.WaitingForPointerAnswerConsent);
+        var secondPreview = Assert.Single((await client.GetCurrentSessionAsync())!.PointerAnswerConsents!);
+        _ = await client.ConfirmPointerAnswerAsync(
+            session.Session.Id,
+            second.TurnId,
+            secondPreview.ConsentId,
+            secondPreview.PreviewHash,
+            confirmed: false);
+        _ = await WaitForPhaseAsync(store, second.TurnId, SessionTurnPhase.Cancelled);
+
+        var thirdAnchor = await client.PreparePointerRegionAsync(new PreparePointerRegionRequestDto(true));
+        var third = await client.SubmitSessionInputAsync(new SessionInputRequestDto(
+            "第三个问题",
+            IdempotencyKey: "pointer-answer-stopped",
+            SessionId: session.Session.Id,
+            PointerAnchorId: thirdAnchor.AnchorId));
+        _ = await WaitForPhaseAsync(store, third.TurnId, SessionTurnPhase.WaitingForPointerAnswerConsent);
+        Assert.Single((await client.GetCurrentSessionAsync())!.PointerAnswerConsents!);
+        _ = await client.CancelSessionTurnAsync(session.Session.Id, third.TurnId);
+        _ = await WaitForPhaseAsync(store, third.TurnId, SessionTurnPhase.Cancelled);
+        Assert.Empty((await client.GetCurrentSessionAsync())!.PointerAnswerConsents!);
+
+        Assert.Empty(provider.Requests);
+        Assert.Empty(await invocations.GetForSessionTurnAsync(first.TurnId));
+        Assert.Empty(await invocations.GetForSessionTurnAsync(second.TurnId));
+        Assert.Empty(await invocations.GetForSessionTurnAsync(third.TurnId));
+        await host.StopAsync();
+    }
+
+    [Fact]
+    public async Task PointerAnswerAtExactTenSecondAnchorExpiryFailsBeforeInvocationOrProvider()
+    {
+        await using var environment = DesktopHostTestEnvironment.Create();
+        var provider = new SwitchingRecordingProvider(
+            "provider-a",
+            "model-a",
+            _ => Task.FromResult("不应发送"),
+            "https://provider-a.example/v1/chat");
+        using var host = environment.BuildHost(services =>
+        {
+            services.AddSingleton<IAiSettingsStore>(new MutableSettingsStore(Route("provider-a", "model-a")));
+            services.AddSingleton(new ChatProviderRegistry([provider]));
+            services.AddSingleton<IPointerDesktopProbe>(new FixedPointerProbe(PointerSnapshot()));
+            services.AddSingleton<IPointerRegionCaptureService>(new FixedPointerCapture());
+            services.AddSingleton<ILocalOcrTextExtractor>(new FixedPointerOcr("OCR"));
+        });
+        await host.StartAsync();
+        IDesktopApiClient client = new DesktopApiClient(environment.Options.PipeName);
+        var coordinator = host.Services.GetRequiredService<SessionCoordinator>();
+        var store = host.Services.GetRequiredService<ISessionStore>();
+        var invocations = host.Services.GetRequiredService<IAiInvocationStore>();
+        var session = await coordinator.StartNewAsync("精确过期");
+        var anchor = await client.PreparePointerRegionAsync(new PreparePointerRegionRequestDto(true));
+        var submitted = await client.SubmitSessionInputAsync(new SessionInputRequestDto(
+            "这里是什么？",
+            IdempotencyKey: "pointer-answer-exact-expiry",
+            SessionId: session.Session.Id,
+            PointerAnchorId: anchor.AnchorId));
+        _ = await WaitForPhaseAsync(store, submitted.TurnId, SessionTurnPhase.WaitingForPointerAnswerConsent);
+        var preview = Assert.Single((await client.GetCurrentSessionAsync())!.PointerAnswerConsents!);
+
+        environment.TimeProvider.UtcNow = preview.ExpiresAtUtc;
+        _ = await client.ConfirmPointerAnswerAsync(
+            session.Session.Id,
+            submitted.TurnId,
+            preview.ConsentId,
+            preview.PreviewHash,
+            confirmed: true);
+        var failed = await WaitForPhaseAsync(store, submitted.TurnId, SessionTurnPhase.Failed);
+
+        Assert.Equal(PointerAnswerErrorCodes.ConsentStale, failed.FailureCode);
+        Assert.Empty(provider.Requests);
+        Assert.Empty(await invocations.GetForSessionTurnAsync(submitted.TurnId));
+        await host.StopAsync();
     }
 
     [Fact]
@@ -1008,6 +1243,26 @@ public sealed class SessionFrozenRouteTests
     private static AiSettings Route(string providerId, string modelId) =>
         new(new ChatModelRoute(providerId, modelId));
 
+    private static PointerDesktopSnapshot PointerSnapshot() => new(
+        new PointerWindowIdentity(
+            new WindowCaptureTarget(
+                42,
+                "目标窗口",
+                "fake",
+                7,
+                new DateTimeOffset(2026, 8, 17, 9, 0, 0, TimeSpan.Zero),
+                new DateTimeOffset(2026, 8, 17, 9, 59, 0, TimeSpan.Zero)),
+            new PixelBounds(100, 100, 800, 600),
+            96,
+            96),
+        42,
+        500,
+        400,
+        42,
+        7,
+        false,
+        new PixelBounds(450, 350, 100, 80));
+
     private static async Task<SessionTurnRecord> WaitForPhaseAsync(
         ISessionStore store,
         Guid turnId,
@@ -1034,6 +1289,29 @@ public sealed class SessionFrozenRouteTests
         throw new TimeoutException($"Turn 未在预期时间内进入 {phase}。");
     }
 
+    private static async Task<string?> TryConfirmPointerAnswerAsync(
+        IDesktopApiClient client,
+        Guid sessionId,
+        Guid turnId,
+        Guid consentId,
+        string previewHash)
+    {
+        try
+        {
+            _ = await client.ConfirmPointerAnswerAsync(
+                sessionId,
+                turnId,
+                consentId,
+                previewHash,
+                confirmed: true);
+            return null;
+        }
+        catch (DesktopApiException exception)
+        {
+            return exception.Error.Code;
+        }
+    }
+
     private sealed class MutableSettingsStore(AiSettings current) : IAiSettingsStore
     {
         private AiSettings _current = current;
@@ -1055,6 +1333,34 @@ public sealed class SessionFrozenRouteTests
             _current = settings;
             return Task.CompletedTask;
         }
+    }
+
+    private sealed class FixedPointerProbe(PointerDesktopSnapshot snapshot) : IPointerDesktopProbe
+    {
+        public PointerDesktopSnapshot CaptureCurrent() => snapshot;
+
+        public PointerDesktopSnapshot ObserveAt(int screenX, int screenY) => snapshot with
+        {
+            ScreenX = screenX,
+            ScreenY = screenY
+        };
+    }
+
+    private sealed class FixedPointerCapture : IPointerRegionCaptureService
+    {
+        public Task<CapturedPointerRegion> CaptureAsync(
+            WindowCaptureTarget target,
+            PixelBounds windowBounds,
+            PixelBounds regionBounds,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(new CapturedPointerRegion([1], 320, 120, "fake"));
+    }
+
+    private sealed class FixedPointerOcr(string text) : ILocalOcrTextExtractor
+    {
+        public Task<string> ExtractAsync(
+            ReadOnlyMemory<byte> pngBytes,
+            CancellationToken cancellationToken = default) => Task.FromResult(text);
     }
 
     private sealed class BlockingSettingsStore(AiSettings settings) : IAiSettingsStore

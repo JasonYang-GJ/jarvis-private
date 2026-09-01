@@ -437,7 +437,7 @@ public sealed class SqliteSessionStore : ISessionStore
               CASE WHEN phase IN (
                 'Understanding', 'Responding', 'WaitingForProject', 'WaitingForFile',
                 'WaitingForWindow', 'WaitingForWindowConsent', 'WaitingForConfirmation',
-                'WaitingForMemoryOutboundConsent', 'Executing', 'ObservingWindow'
+                'WaitingForMemoryOutboundConsent', 'WaitingForPointerAnswerConsent', 'Executing', 'ObservingWindow'
               ) THEN 0 ELSE 1 END,
               sequence_number DESC,
               updated_at_utc DESC,
@@ -461,7 +461,7 @@ public sealed class SqliteSessionStore : ISessionStore
             query.Transaction = transaction;
             query.CommandText = """
                 SELECT id FROM session_turns
-                WHERE phase IN ('Understanding', 'Responding', 'Executing', 'ObservingWindow', 'ProgrammingTask', 'WaitingForUser', 'WaitingForMemoryOutboundConsent');
+                WHERE phase IN ('Understanding', 'Responding', 'Executing', 'ObservingWindow', 'ProgrammingTask', 'WaitingForUser', 'WaitingForMemoryOutboundConsent', 'WaitingForPointerAnswerConsent');
                 """;
             await using var reader = await query.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
             while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
@@ -485,7 +485,7 @@ public sealed class SqliteSessionStore : ISessionStore
                     END,
                     completed_at_utc = $recoveredAtUtc, updated_at_utc = $recoveredAtUtc,
                     version = version + 1
-                WHERE phase IN ('Understanding', 'Responding', 'Executing', 'ObservingWindow', 'ProgrammingTask', 'WaitingForUser', 'WaitingForMemoryOutboundConsent');
+                WHERE phase IN ('Understanding', 'Responding', 'Executing', 'ObservingWindow', 'ProgrammingTask', 'WaitingForUser', 'WaitingForMemoryOutboundConsent', 'WaitingForPointerAnswerConsent');
 
                 UPDATE session_turns
                 SET phase = 'WaitingForWindow', missing_context = 'Window',

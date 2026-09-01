@@ -12,7 +12,8 @@ public sealed record PointerRegionOcrResult(
     int RegionWidth,
     int RegionHeight,
     string RegionSource,
-    string DiagnosticCode);
+    string DiagnosticCode,
+    PointerAnchor Anchor);
 
 /// <summary>
 /// Owns short-lived, one-use pointer anchors and regional pixels. It never writes image or OCR
@@ -170,7 +171,8 @@ public sealed class PointerRegionUnderstandingService : IDisposable
                 region.PixelWidth,
                 region.PixelHeight,
                 selection.Source,
-                compact.Length == 0 ? "local_ocr_no_text" : "local_ocr_text_detected");
+                compact.Length == 0 ? "local_ocr_no_text" : "local_ocr_text_detected",
+                anchor);
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
@@ -194,6 +196,23 @@ public sealed class PointerRegionUnderstandingService : IDisposable
         }
 
         return removed;
+    }
+
+    public void RequireCurrent(PointerAnchor anchor)
+    {
+        ThrowIfDisposed();
+        ArgumentNullException.ThrowIfNull(anchor);
+        if (anchor.AppRunId != _appRunId)
+        {
+            throw new PointerRegionException(
+                PointerRegionErrorCodes.AnchorUnavailable,
+                "这次指针确认不属于当前应用运行。 ");
+        }
+
+        PointerAnchorPolicy.RequireCurrent(
+            anchor,
+            _probe.ObserveAt(anchor.PhysicalScreenX, anchor.PhysicalScreenY),
+            _timeProvider.GetUtcNow());
     }
 
     public void Dispose()

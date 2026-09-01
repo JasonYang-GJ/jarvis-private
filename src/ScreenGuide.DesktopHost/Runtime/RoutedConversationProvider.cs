@@ -23,6 +23,8 @@ public sealed class RoutedConversationProvider(
     private const string ChatPromptId = "chat.general";
     private const string DefaultChatPromptVersion = "1";
     private const string MemoryChatPromptVersion = "2";
+    private const string PointerPromptId = "window.pointer.answer";
+    private const string PointerPromptVersion = "1";
     private const int MaximumHistoryCharacters = 200_000;
     private readonly ConcurrentDictionary<Guid, ActiveRoute> _activeConversations = new();
 
@@ -77,19 +79,29 @@ public sealed class RoutedConversationProvider(
                 "这条消息保存的 AI 路由与当前注册信息不一致，因此没有发送。请重新发送一条新消息。");
         }
 
+        if (request.MemoryOutbound is not null && request.PointerAnswer is not null)
+        {
+            return Failed(
+                PointerAnswerErrorCodes.ContentInvalid,
+                "同一条消息不能同时携带记忆和指针区域上下文，因此没有发送。");
+        }
+
         var turns = await conversations.GetTurnsAsync(request.ConversationId, cancellationToken)
             .ConfigureAwait(false);
-        if (!HistoryOriginMatches(turns, route))
+        if (request.PointerAnswer is null && !HistoryOriginMatches(turns, route))
         {
             return Failed(
                 MemoryOutboundErrorCodes.DerivedHistoryRouteMismatch,
                 "这段对话包含由另一条 AI 路由生成的记忆相关回答。为避免跨服务泄露，请新建话题后再发送。");
         }
 
-        var promptVersion = request.MemoryOutbound is null
-            ? DefaultChatPromptVersion
-            : MemoryChatPromptVersion;
-        var prompt = prompts.GetRequired(ChatPromptId, promptVersion, route.ProviderId);
+        var promptId = request.PointerAnswer is null ? ChatPromptId : PointerPromptId;
+        var promptVersion = request.PointerAnswer is not null
+            ? PointerPromptVersion
+            : request.MemoryOutbound is null
+                ? DefaultChatPromptVersion
+                : MemoryChatPromptVersion;
+        var prompt = prompts.GetRequired(promptId, promptVersion, route.ProviderId);
         if (request.MemoryOutbound is { } memoryOutbound
             && !ValidateMemoryOutbound(memoryOutbound, route, prompt))
         {
@@ -98,9 +110,29 @@ public sealed class RoutedConversationProvider(
                 "记忆出站确认与当前冻结路由或 Prompt 不一致，因此没有发送。请重新检查并确认。");
         }
 
-        var history = await conversations.GetMessagesAsync(request.ConversationId, cancellationToken)
-            .ConfigureAwait(false);
-        var messages = BuildHistory(request, history);
+        if (request.PointerAnswer is { } pointerAnswer
+            && !ValidatePointerAnswer(request, pointerAnswer, route, prompt, timeProvider.GetUtcNow()))
+        {
+            return Failed(
+                PointerAnswerErrorCodes.ConsentStale,
+                "指针区域出站确认与当前冻结路由、Prompt 或文本不一致，因此没有发送。请重新检查并确认。");
+        }
+
+        IReadOnlyList<ChatMessage> messages;
+        if (request.PointerAnswer is { } confirmedPointer)
+        {
+            messages =
+            [
+                new ChatMessage(ChatMessageRole.User, confirmedPointer.SerializedContext),
+                new ChatMessage(ChatMessageRole.User, request.Message)
+            ];
+        }
+        else
+        {
+            var history = await conversations.GetMessagesAsync(request.ConversationId, cancellationToken)
+                .ConfigureAwait(false);
+            messages = BuildHistory(request, history);
+        }
         var invocationId = Guid.NewGuid();
         var invocation = new AiInvocationRecord
         {
@@ -384,6 +416,54 @@ public sealed class RoutedConversationProvider(
                 StringComparison.OrdinalIgnoreCase);
         }
         catch (MemoryValidationException)
+        {
+            return false;
+        }
+    }
+
+    private static bool ValidatePointerAnswer(
+        ConversationProviderRequest request,
+        PointerAnswerEnvelope envelope,
+        FrozenChatModelRoute route,
+        PromptDefinition prompt,
+        DateTimeOffset nowUtc)
+    {
+        var audit = envelope.Audit;
+        if (request.SessionTurnId is null
+            || audit.SessionTurnId != request.SessionTurnId
+            || audit.ConsentId == Guid.Empty
+            || audit.AnchorId == Guid.Empty
+            || audit.ConsumedAtUtc is null
+            || nowUtc < audit.PreparedAtUtc
+            || nowUtc >= audit.ExpiresAtUtc
+            || string.IsNullOrWhiteSpace(envelope.SerializedContext)
+            || envelope.SerializedContext.Length > PointerAnswerOutboundContract.MaximumSerializedContextCharacters
+            || audit.QuestionCharacterCount != request.Message.Length
+            || audit.OcrCharacterCount is < 0 or > PointerAnswerOutboundContract.MaximumOcrCharacters
+            || audit.OcrLineCount < 0
+            || audit.RegionWidth <= 0
+            || audit.RegionHeight <= 0
+            || (audit.RegionSource != "uia-element" && audit.RegionSource != "pointer-centered")
+            || !string.Equals(audit.QuestionHash, PointerAnswerOutboundContract.HashText(request.Message), StringComparison.Ordinal)
+            || !string.Equals(audit.ContextHash, PointerAnswerOutboundContract.HashText(envelope.SerializedContext), StringComparison.Ordinal)
+            || !PointerAnswerOutboundContract.ContextMatchesAudit(envelope.SerializedContext, audit)
+            || !string.Equals(audit.ProviderId, route.ProviderId, StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(audit.ModelId, route.ModelId, StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(audit.PromptId, prompt.PromptId, StringComparison.Ordinal)
+            || !string.Equals(audit.PromptVersion, prompt.Version, StringComparison.Ordinal)
+            || !string.Equals(audit.PromptContentHash, prompt.ContentSha256, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        try
+        {
+            return string.Equals(
+                audit.DestinationOrigin,
+                PointerAnswerOutboundContract.NormalizeHttpsOrigin(route.DataDestination),
+                StringComparison.OrdinalIgnoreCase);
+        }
+        catch (ArgumentException)
         {
             return false;
         }

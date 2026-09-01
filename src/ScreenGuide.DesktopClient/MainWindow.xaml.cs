@@ -34,6 +34,7 @@ public partial class MainWindow : Window
     private IReadOnlyList<MemoryDto> _memories = [];
     private bool _isRenderingMemoryConsent;
     private bool _isInvalidatingMemoryConsent;
+    private bool _isInvalidatingPointerConsent;
     private SystemStatusDto? _systemStatus;
     private Guid? _selectedTaskId;
     private Guid? _selectedConversationId;
@@ -400,8 +401,10 @@ public partial class MainWindow : Window
         ConversationStateText.Text = presentation.StatusText;
         ConversationInputTextBox.IsEnabled = _isHostOnline && snapshot is not null;
         SendConversationButton.IsEnabled = ConversationInputTextBox.IsEnabled;
+        AskPointerQuestionButton.IsEnabled = ConversationInputTextBox.IsEnabled;
         StopConversationButton.Visibility = presentation.ShowStop ? Visibility.Visible : Visibility.Collapsed;
         RenderMemoryOutboundConsent(snapshot);
+        RenderPointerAnswerConsent(snapshot);
         ConversationListBox.ItemsSource = snapshot is null
             ? Array.Empty<ConversationRow>()
             : new[]
@@ -585,6 +588,30 @@ public partial class MainWindow : Window
         {
             _isRenderingMemoryConsent = false;
         }
+    }
+
+    private void RenderPointerAnswerConsent(SessionSnapshotDto? snapshot)
+    {
+        var consent = snapshot?.PointerAnswerConsents?
+            .SingleOrDefault(item => item.TurnId == snapshot.ForegroundTurn?.Id);
+        PointerAnswerConsentBorder.Visibility = consent is null
+            ? Visibility.Collapsed
+            : Visibility.Visible;
+        if (consent is null)
+        {
+            PointerAnswerQuestionText.Clear();
+            PointerAnswerOcrText.Clear();
+            return;
+        }
+
+        PointerAnswerRouteText.Text =
+            $"AI 服务：{consent.ProviderId} · 模型：{consent.ModelId} · HTTPS 去向：{consent.DestinationOrigin}";
+        PointerAnswerPromptText.Text =
+            $"Prompt：{consent.PromptId}@{consent.PromptVersion} · SHA-256：{consent.PromptContentHash}";
+        PointerAnswerQuestionText.Text = consent.Question;
+        PointerAnswerOcrText.Text = consent.OcrText;
+        PointerAnswerShapeText.Text =
+            $"区域：{consent.RegionWidth}×{consent.RegionHeight} · 来源：{consent.RegionSource} · OCR {consent.OcrLineCount} 行 / {consent.OcrCharacterCount} 字符 · 图片发送：否";
     }
 
     private async Task LoadMemoriesForPageAsync(Guid? preferredMemoryId = null)
@@ -1559,6 +1586,87 @@ public partial class MainWindow : Window
     private async void DeclineMemoryOutboundButton_Click(object sender, RoutedEventArgs e) =>
         await RespondMemoryOutboundConsentAsync(confirmed: false);
 
+    private async void AskPointerQuestionButton_Click(object sender, RoutedEventArgs e)
+    {
+        var session = _currentSession;
+        var question = ConversationInputTextBox.Text.Trim();
+        if (session is null || question.Length == 0)
+        {
+            ShowError("请先输入要询问当前指针位置的问题。", null);
+            return;
+        }
+
+        if (ConversationMemorySelectionList.SelectedItems.Count > 0)
+        {
+            ShowError("指针区域提问不能同时携带长期记忆，请先清除记忆选择。", null);
+            return;
+        }
+
+        if (MessageBox.Show(
+                "只授权这一次：读取当前指针所在前台窗口的一小块区域，并在本机做 OCR。\n\n此时不会发送给 AI；识别完成后会显示完整出站预览，由你再次确认。",
+                "确认本机区域读取",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Question) != MessageBoxResult.Yes)
+        {
+            return;
+        }
+
+        await RunCommandAsync(async () =>
+        {
+            var anchor = await _api.PreparePointerRegionAsync(
+                new PreparePointerRegionRequestDto(true),
+                _lifetime.Token);
+            await _api.SubmitSessionInputAsync(
+                new SessionInputRequestDto(
+                    question,
+                    "Text",
+                    $"desktop-pointer-answer-{Guid.NewGuid():N}",
+                    session.SessionId,
+                    PointerAnchorId: anchor.AnchorId),
+                _lifetime.Token);
+            _isRenderingMemoryConsent = true;
+            try
+            {
+                ConversationInputTextBox.Clear();
+            }
+            finally
+            {
+                _isRenderingMemoryConsent = false;
+            }
+
+            await RefreshSessionAsync();
+        });
+    }
+
+    private async void ConfirmPointerAnswerButton_Click(object sender, RoutedEventArgs e) =>
+        await RespondPointerAnswerConsentAsync(confirmed: true);
+
+    private async void DeclinePointerAnswerButton_Click(object sender, RoutedEventArgs e) =>
+        await RespondPointerAnswerConsentAsync(confirmed: false);
+
+    private async Task RespondPointerAnswerConsentAsync(bool confirmed)
+    {
+        var session = _currentSession;
+        var consent = session?.PointerAnswerConsents?
+            .SingleOrDefault(item => item.TurnId == session.ForegroundTurn?.Id);
+        if (session is null || consent is null)
+        {
+            return;
+        }
+
+        await RunCommandAsync(async () =>
+        {
+            var snapshot = await _api.ConfirmPointerAnswerAsync(
+                session.SessionId,
+                consent.TurnId,
+                consent.ConsentId,
+                consent.PreviewHash,
+                confirmed,
+                _lifetime.Token);
+            RenderSession(snapshot);
+        });
+    }
+
     private async Task RespondMemoryOutboundConsentAsync(bool confirmed)
     {
         var session = _currentSession;
@@ -1586,8 +1694,11 @@ public partial class MainWindow : Window
         SelectionChangedEventArgs e) =>
         await InvalidateDisplayedMemoryConsentAsync();
 
-    private async void ConversationInputTextBox_TextChanged(object sender, TextChangedEventArgs e) =>
+    private async void ConversationInputTextBox_TextChanged(object sender, TextChangedEventArgs e)
+    {
         await InvalidateDisplayedMemoryConsentAsync();
+        await InvalidateDisplayedPointerConsentAsync();
+    }
 
     private async Task InvalidateDisplayedMemoryConsentAsync()
     {
@@ -1625,6 +1736,46 @@ public partial class MainWindow : Window
         finally
         {
             _isInvalidatingMemoryConsent = false;
+        }
+    }
+
+    private async Task InvalidateDisplayedPointerConsentAsync()
+    {
+        if (_isRenderingMemoryConsent || _isInvalidatingPointerConsent)
+        {
+            return;
+        }
+
+        var session = _currentSession;
+        var consent = session?.PointerAnswerConsents?
+            .SingleOrDefault(item => item.TurnId == session.ForegroundTurn?.Id);
+        if (session is null || consent is null)
+        {
+            return;
+        }
+
+        _isInvalidatingPointerConsent = true;
+        try
+        {
+            var snapshot = await _api.ConfirmPointerAnswerAsync(
+                session.SessionId,
+                consent.TurnId,
+                consent.ConsentId,
+                consent.PreviewHash,
+                confirmed: false,
+                _lifetime.Token);
+            RenderSession(snapshot);
+        }
+        catch (OperationCanceledException) when (_lifetime.IsCancellationRequested)
+        {
+        }
+        catch (Exception exception)
+        {
+            ShowError("指针区域出站确认已失效，请重新指向并提交。", exception);
+        }
+        finally
+        {
+            _isInvalidatingPointerConsent = false;
         }
     }
 

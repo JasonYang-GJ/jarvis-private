@@ -222,7 +222,8 @@ public sealed class SessionProjectionCache
     private static bool IsForeground(string phase) => phase is
         "Understanding" or "Responding" or "WaitingForProject" or "WaitingForFile"
         or "WaitingForWindow" or "WaitingForWindowConsent" or "WaitingForConfirmation"
-        or "WaitingForMemoryOutboundConsent" or "Executing" or "ObservingWindow";
+        or "WaitingForMemoryOutboundConsent" or "WaitingForPointerAnswerConsent"
+        or "Executing" or "ObservingWindow";
 
     private sealed record BoundedTurnView(
         IReadOnlyList<UnifiedSessionTurnDto> Turns,

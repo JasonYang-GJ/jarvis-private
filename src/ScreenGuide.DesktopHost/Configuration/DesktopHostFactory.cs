@@ -192,6 +192,7 @@ public static class DesktopHostFactory
             services.GetRequiredService<ModelRouter>(),
             services.GetRequiredService<PromptRegistry>(),
             services.GetRequiredService<MemoryService>(),
+            services.GetRequiredService<PointerRegionUnderstandingService>(),
             services.GetServices<ISessionMemoryConsentPublicationObserver>(),
             services.GetRequiredService<IForegroundWindowContextProvider>(),
             services.GetRequiredService<TimeProvider>()));

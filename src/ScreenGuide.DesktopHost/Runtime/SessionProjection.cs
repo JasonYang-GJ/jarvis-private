@@ -21,6 +21,7 @@ public sealed record LocalSessionSnapshot(
     IReadOnlyList<SessionTurnRecord> ActiveTurns,
     IReadOnlyList<ConversationMessageRecord> Messages,
     IReadOnlyList<MemoryOutboundPreparedConsent> MemoryOutboundConsents,
+    IReadOnlyList<PointerAnswerPreparedConsent> PointerAnswerConsents,
     bool HasEarlierMessages);
 
 public sealed record LocalSessionProjectionUpdate(

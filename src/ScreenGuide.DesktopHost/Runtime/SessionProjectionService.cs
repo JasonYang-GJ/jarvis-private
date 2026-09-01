@@ -60,18 +60,39 @@ public sealed class SessionProjectionService(
 
     public async Task<LocalSessionSnapshot?> GetCurrentAsync(
         IReadOnlyCollection<MemoryOutboundPreparedConsent> preparedConsents,
+        CancellationToken cancellationToken = default) =>
+        await GetCurrentAsync(preparedConsents, [], cancellationToken).ConfigureAwait(false);
+
+    public async Task<LocalSessionSnapshot?> GetCurrentAsync(
+        IReadOnlyCollection<MemoryOutboundPreparedConsent> preparedConsents,
+        IReadOnlyCollection<PointerAnswerPreparedConsent> pointerAnswerConsents,
         CancellationToken cancellationToken = default)
     {
         var current = await sessionStore.GetCurrentSessionAsync(cancellationToken).ConfigureAwait(false);
         return current is null
             ? null
-            : await BuildSnapshotAsync(current, preparedConsents, cancellationToken).ConfigureAwait(false);
+            : await BuildSnapshotAsync(current, preparedConsents, pointerAnswerConsents, cancellationToken)
+                .ConfigureAwait(false);
     }
 
     public async Task<LocalSessionSnapshot?> WaitForChangeAsync(
         long knownChangeVersion,
         TimeSpan maximumWait,
         IReadOnlyCollection<MemoryOutboundPreparedConsent> preparedConsents,
+        CancellationToken cancellationToken = default) =>
+        await WaitForChangeAsync(
+                knownChangeVersion,
+                maximumWait,
+                preparedConsents,
+                [],
+                cancellationToken)
+            .ConfigureAwait(false);
+
+    public async Task<LocalSessionSnapshot?> WaitForChangeAsync(
+        long knownChangeVersion,
+        TimeSpan maximumWait,
+        IReadOnlyCollection<MemoryOutboundPreparedConsent> preparedConsents,
+        IReadOnlyCollection<PointerAnswerPreparedConsent> pointerAnswerConsents,
         CancellationToken cancellationToken = default)
     {
         ValidateWait(maximumWait);
@@ -79,7 +100,8 @@ public sealed class SessionProjectionService(
         if (knownChangeVersion < 0)
         {
             var versionBeforeLookup = ChangeVersion;
-            var current = await GetCurrentAsync(preparedConsents, cancellationToken).ConfigureAwait(false);
+            var current = await GetCurrentAsync(preparedConsents, pointerAnswerConsents, cancellationToken)
+                .ConfigureAwait(false);
             if (current is not null)
             {
                 return current;
@@ -103,7 +125,8 @@ public sealed class SessionProjectionService(
         }
 
         await WaitBoundedAsync(wait, maximumWait, cancellationToken).ConfigureAwait(false);
-        return await GetCurrentAsync(preparedConsents, cancellationToken).ConfigureAwait(false);
+        return await GetCurrentAsync(preparedConsents, pointerAnswerConsents, cancellationToken)
+            .ConfigureAwait(false);
     }
 
     public async Task<LocalSessionProjectionUpdate> WaitForProjectionAsync(
@@ -250,6 +273,13 @@ public sealed class SessionProjectionService(
     public async Task<LocalSessionSnapshot> BuildSnapshotAsync(
         SessionRecord session,
         IReadOnlyCollection<MemoryOutboundPreparedConsent> preparedConsents,
+        CancellationToken cancellationToken = default) =>
+        await BuildSnapshotAsync(session, preparedConsents, [], cancellationToken).ConfigureAwait(false);
+
+    public async Task<LocalSessionSnapshot> BuildSnapshotAsync(
+        SessionRecord session,
+        IReadOnlyCollection<MemoryOutboundPreparedConsent> preparedConsents,
+        IReadOnlyCollection<PointerAnswerPreparedConsent> pointerAnswerConsents,
         CancellationToken cancellationToken = default)
     {
         for (var attempt = 0; attempt < 4; attempt++)
@@ -301,6 +331,13 @@ public sealed class SessionProjectionService(
                     .Where(item => item.SessionId == session.Id
                                    && projectedTurns.SelectedActiveTurns.Any(turn => turn.Id == item.TurnId
                                        && SessionTurnPhases.IsForegroundWork(turn.Phase)))
+                    .OrderBy(item => item.PreparedAtUtc)
+                    .ToArray(),
+                pointerAnswerConsents
+                    .Where(item => item.TurnId != Guid.Empty
+                                   && projectedTurns.SelectedActiveTurns.Any(turn =>
+                                       turn.Id == item.TurnId
+                                       && turn.Phase == SessionTurnPhase.WaitingForPointerAnswerConsent))
                     .OrderBy(item => item.PreparedAtUtc)
                     .ToArray(),
                 messages.HasMore);

@@ -83,6 +83,52 @@ public sealed class AiSettingsUiTests
     }
 
     [Fact]
+    public void PointerQuestionRequiresVisibleLocalCaptureAndExactTextOnlyOutboundConfirmation()
+    {
+        var repositoryRoot = FindRepositoryRoot();
+        var xaml = File.ReadAllText(Path.Combine(
+            repositoryRoot,
+            "src",
+            "ScreenGuide.DesktopClient",
+            "MainWindow.xaml"));
+        var code = File.ReadAllText(Path.Combine(
+            repositoryRoot,
+            "src",
+            "ScreenGuide.DesktopClient",
+            "MainWindow.xaml.cs"));
+
+        Assert.Contains("AutomationProperties.AutomationId=\"AskPointerQuestion\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("AutomationProperties.AutomationId=\"PointerAnswerOutboundConsent\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("将发送的完整问题", xaml, StringComparison.Ordinal);
+        Assert.Contains("将发送的完整本机 OCR 文字", xaml, StringComparison.Ordinal);
+        Assert.Contains("不会发送图片、整页文字、窗口标题或文件路径", xaml, StringComparison.Ordinal);
+        Assert.Contains("PreparePointerRegionAsync", code, StringComparison.Ordinal);
+        Assert.Contains("PointerAnchorId: anchor.AnchorId", code, StringComparison.Ordinal);
+        Assert.Contains("ConfirmPointerAnswerAsync", code, StringComparison.Ordinal);
+        Assert.Contains("consent.PreviewHash", code, StringComparison.Ordinal);
+        Assert.DoesNotContain("PointerAnswerImage", xaml, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void PointerAnswerProtocolDiagnosticsRedactQuestionAndOcrText()
+    {
+        const string question = "pointer-question-sentinel";
+        const string ocr = "pointer-ocr-sentinel";
+        var consent = new PointerAnswerConsentDto(
+            Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(),
+            "qwen", "qwen3.7-plus", "https://qwen.example",
+            "window.pointer.answer", "1", new string('A', 64),
+            question, ocr, question.Length, ocr.Length, 1, 320, 120,
+            "uia-element", new string('B', 64), DateTimeOffset.UtcNow,
+            DateTimeOffset.UtcNow.AddSeconds(10));
+
+        Assert.DoesNotContain(question, consent.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain(ocr, consent.ToString(), StringComparison.Ordinal);
+        Assert.Contains("[REDACTED]", consent.ToString(), StringComparison.Ordinal);
+        Assert.False(consent.SendsImage);
+    }
+
+    [Fact]
     public void MemoryOutboundProtocolObjectsRedactUserInputAndMemoryContent()
     {
         const string input = "outbound-input-sentinel";

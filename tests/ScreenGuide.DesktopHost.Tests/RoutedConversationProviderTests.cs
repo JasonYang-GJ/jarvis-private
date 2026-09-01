@@ -428,6 +428,64 @@ public sealed class RoutedConversationProviderTests
         Assert.DoesNotContain(memoryId.ToString("D"), context, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Theory]
+    [InlineData("deepseek", "deepseek-chat")]
+    [InlineData("qwen", "qwen3.7-plus")]
+    public async Task ConfirmedPointerAnswerUsesOneProviderNeutralTextOnlyRequestWithoutConversationHistory(
+        string providerId,
+        string modelId)
+    {
+        var conversationId = Guid.NewGuid();
+        var history = new HistoryStore(conversationId);
+        history.Add(ConversationMessageRole.User, "OLD_USER_SENTINEL");
+        history.Add(ConversationMessageRole.Assistant, "OLD_ASSISTANT_SENTINEL");
+        history.Add(ConversationMessageRole.User, "这里是什么按钮？");
+        var provider = new RecordingChatProvider(
+            providerId,
+            modelId,
+            $"https://{providerId}.example/v1/chat");
+        var invocations = new RecordingInvocationStore();
+        var routed = new RoutedConversationProvider(
+            history,
+            new ModelRouter(
+                new ChatProviderRegistry([provider]),
+                new MutableAiSettingsStore(providerId, modelId)),
+            await LoadRepositoryPromptsAsync(),
+            invocations,
+            TimeProvider.System);
+        const string ocr = "保存并继续";
+        var context = PointerAnswerOutboundContract.SerializeContext(
+            ocr,
+            lineCount: 1,
+            regionWidth: 320,
+            regionHeight: 120,
+            regionSource: "uia-element");
+        var audit = PointerAudit(provider, "这里是什么按钮？", ocr, context);
+
+        var result = await routed.SendAsync(new ConversationProviderRequest(
+            conversationId,
+            Guid.NewGuid(),
+            "这里是什么按钮？",
+            null,
+            audit.SessionTurnId,
+            Frozen(provider),
+            MemoryOutbound: null,
+            PointerAnswer: new PointerAnswerEnvelope(context, audit)));
+
+        Assert.Equal(ConversationProviderOutcome.Succeeded, result.Outcome);
+        var request = Assert.Single(provider.Requests);
+        Assert.Equal("window.pointer.answer", request.Prompt?.PromptId);
+        Assert.Equal("1", request.Prompt?.Version);
+        Assert.Equal([context, "这里是什么按钮？"], request.Messages.Select(item => item.Content));
+        Assert.All(request.Messages, item => Assert.Equal(ChatMessageRole.User, item.Role));
+        Assert.DoesNotContain(request.Messages, item => item.Content.Contains("OLD_", StringComparison.Ordinal));
+        var invocation = Assert.Single(invocations.Started);
+        Assert.Null(invocation.MemoryOutbound);
+        Assert.DoesNotContain(ocr, invocation.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("这里是什么按钮？", invocation.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain(ocr, audit.ToString(), StringComparison.Ordinal);
+    }
+
     [Fact]
     public async Task MemoryDerivedHistoryWithAnotherOriginFailsBeforePromptInvocationOrProvider()
     {
@@ -505,6 +563,39 @@ public sealed class RoutedConversationProviderTests
             1,
             9,
             new string('B', 64));
+    }
+
+    private static PointerAnswerAuditMetadata PointerAudit(
+        IChatModelProvider provider,
+        string question,
+        string ocr,
+        string context)
+    {
+        var now = DateTimeOffset.UtcNow;
+        return new PointerAnswerAuditMetadata(
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            now,
+            now.AddMinutes(1),
+            now,
+            provider.Descriptor.ProviderId,
+            provider.Descriptor.Models[0].ModelId,
+            PointerAnswerOutboundContract.NormalizeHttpsOrigin(provider.Descriptor.DataDestination),
+            "window.pointer.answer",
+            "1",
+            "8136B489DBE4B9FBF5CEDEA9DA0106257A15706414EDD5EC20C704F79E5DF6F8",
+            PointerAnswerOutboundContract.HashText(question),
+            PointerAnswerOutboundContract.HashText(ocr),
+            PointerAnswerOutboundContract.HashText(context),
+            new string('A', 64),
+            new string('B', 64),
+            question.Length,
+            ocr.Length,
+            1,
+            320,
+            120,
+            "uia-element");
     }
 
     private static Task<PromptRegistry> LoadRepositoryPromptsAsync() =>

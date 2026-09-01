@@ -13,6 +13,7 @@ public sealed class SessionUiPresenterTests
     [InlineData("WaitingForWindowConsent", "允许查看", false)]
     [InlineData("ProgrammingTask", "后台运行", false)]
     [InlineData("WaitingForMemoryOutboundConsent", "查看完整记忆内容", false)]
+    [InlineData("WaitingForPointerAnswerConsent", "完整问题与区域文字", false)]
     [InlineData("Cancelled", "已取消", false)]
     public void MapsOneCoordinatorPhaseToOneUserFacingState(
         string phase,

@@ -198,10 +198,11 @@ public sealed record SessionInputRequestDto(
     Guid? SessionId = null,
     string? ExpectedIntentKind = null,
     string? ExpectedTarget = null,
-    IReadOnlyList<MemoryOutboundItemReferenceDto>? MemoryItems = null)
+    IReadOnlyList<MemoryOutboundItemReferenceDto>? MemoryItems = null,
+    Guid? PointerAnchorId = null)
 {
     public override string ToString() =>
-        $"SessionInputRequestDto {{ SessionId = {SessionId}, InputModality = {InputModality}, MemoryItemCount = {MemoryItems?.Count ?? 0}, Text = [REDACTED] }}";
+        $"SessionInputRequestDto {{ SessionId = {SessionId}, InputModality = {InputModality}, MemoryItemCount = {MemoryItems?.Count ?? 0}, PointerAnchorId = {PointerAnchorId}, Text = [REDACTED] }}";
 }
 
 public sealed record ProvideSessionProjectRequestDto(
@@ -228,6 +229,13 @@ public sealed record SessionMemoryOutboundConsentRequestDto(
     Guid SessionId,
     Guid TurnId,
     Guid ConsentId,
+    bool Confirmed);
+
+public sealed record SessionPointerAnswerConsentRequestDto(
+    Guid SessionId,
+    Guid TurnId,
+    Guid ConsentId,
+    string PreviewHash,
     bool Confirmed);
 
 public sealed record CancelSessionTurnRequestDto(
@@ -350,6 +358,33 @@ public sealed record MemoryOutboundConsentDto(
         $"MemoryOutboundConsentDto {{ ConsentId = {ConsentId}, TurnId = {TurnId}, State = {State}, ProviderId = {ProviderId}, ModelId = {ModelId}, DestinationOrigin = {DestinationOrigin}, ProjectId = {ProjectId}, ItemCount = {ItemCount}, TotalCharacters = {TotalCharacters}, Content = [REDACTED] }}";
 }
 
+public sealed record PointerAnswerConsentDto(
+    Guid ConsentId,
+    Guid TurnId,
+    Guid AnchorId,
+    string ProviderId,
+    string ModelId,
+    string DestinationOrigin,
+    string PromptId,
+    string PromptVersion,
+    string PromptContentHash,
+    string Question,
+    string OcrText,
+    int QuestionCharacterCount,
+    int OcrCharacterCount,
+    int OcrLineCount,
+    int RegionWidth,
+    int RegionHeight,
+    string RegionSource,
+    string PreviewHash,
+    DateTimeOffset PreparedAtUtc,
+    DateTimeOffset ExpiresAtUtc,
+    bool SendsImage = false)
+{
+    public override string ToString() =>
+        $"PointerAnswerConsentDto {{ ConsentId = {ConsentId}, TurnId = {TurnId}, AnchorId = {AnchorId}, ProviderId = {ProviderId}, ModelId = {ModelId}, DestinationOrigin = {DestinationOrigin}, PromptId = {PromptId}, PromptVersion = {PromptVersion}, QuestionCharacterCount = {QuestionCharacterCount}, OcrCharacterCount = {OcrCharacterCount}, OcrLineCount = {OcrLineCount}, RegionWidth = {RegionWidth}, RegionHeight = {RegionHeight}, RegionSource = {RegionSource}, PreviewHash = {PreviewHash}, SendsImage = {SendsImage}, Content = [REDACTED] }}";
+}
+
 public sealed record SessionSnapshotDto(
     long ChangeVersion,
     string CoordinatorInstanceId,
@@ -365,7 +400,8 @@ public sealed record SessionSnapshotDto(
     IReadOnlyList<UnifiedSessionTurnDto> Turns,
     IReadOnlyList<ConversationMessageDto> Messages,
     IReadOnlyList<MemoryOutboundConsentDto>? MemoryOutboundConsents = null,
-    bool HasEarlierMessages = false);
+    bool HasEarlierMessages = false,
+    IReadOnlyList<PointerAnswerConsentDto>? PointerAnswerConsents = null);
 
 public sealed record CommandResultDto(Guid TaskId, bool WasDuplicate);
 

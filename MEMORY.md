@@ -14,7 +14,7 @@
 - V2 阶段 2“可替换 AI 大脑与模型路由”已通过：统一 Chat Model、Provider Registry、Model Router、Prompt Registry、DPAPI、安全停用的 Codex 普通聊天适配器、DeepSeek/千问普通聊天 Provider、设置 UI/IPC、语义建议和 schema v8 AI 调用审计。
 - 阶段 2 普通聊天发布目标是 DeepSeek + 千问；千问是手动备用，无自动 fallback/retry/resend。DeepSeek 真实证据已冻结，Qwen 真实 Health/聊天/取消和普通聊天选 Qwen 时的真实 Codex 编程隔离均已通过。Codex 普通聊天保持 `ProductionDisabled`/`PolicyDisabled`，不是发布目标。
 - S3-R1 本机加密记忆账本、S3-R2 确定性本地预览与 S3-R3 schema/protocol v10、chat.general@2 和逐 Turn 完整出站确认均已集成。默认 0 条，只有用户单次确认的普通聊天 Turn 才最多发送一次。
-- 当前指针理解 C1 候选把 Desktop IPC 升至 v12，SQLite 保持 v11：用户可见确认后只创建一次性、最长 10 秒的精确窗口指针锚点，本机只裁剪最多 640×480 区域并运行本地 OCR；窗口身份/范围/DPI/指针下窗口变化均失败关闭，帧不持久化、不上传、不调用 Provider。C2 回答/Prompt/出站尚未实现。
+- 当前指针理解 C1/C2 候选使用 Desktop IPC v12、SQLite v11：第一次可见同意只允许一次性、严格小于 10 秒、精确窗口绑定的最大 640×480 本机裁剪/OCR；第二次逐 Turn 可见预览显示冻结 Provider/Model/HTTPS origin、`window.pointer.answer@1`、完整问题与 OCR 文字，并明确不发送图片。确认绑定 Turn、路由、Prompt、问题/OCR/锚点/预览哈希，单次消费后最多 1 个纯文本 Provider 请求；取消、Stop、过期、篡改或变化均为 0 次，无 retry/fallback/resend。
 
 ## 长期架构决策
 
@@ -55,7 +55,7 @@
 3. `ModelRouter` 第一版只支持用户明确选择的默认路由。每个 Turn 开始时冻结 Provider/Model；设置变化只影响下一轮，没有静默 fallback、自动付费重试或隐式跨供应商发送。
 4. 对话连续性由元枢 `ConversationStore` 保存的消息历史负责，而不是依赖 Provider Thread。A → B → A 时每轮把同一 Conversation 历史交给当时选中的 Provider。
 5. 普通聊天与编程 Agent 独立：`CodexChatModelProvider` 作为安全停用适配器保留，生产普通聊天以 `ProductionDisabled`/`PolicyDisabled` 失败关闭；编程任务继续走 `CodexConnector` / `CodexSkillAdapter`。DeepSeek/千问聊天切换不能改变项目授权或 TaskEvidence。
-6. Prompt Registry 使用仓库内受版本控制的文件和清单：`chat.general@1` 仍是无记忆普通聊天的默认 Prompt，`chat.general@2` 只用于用户逐 Turn 明确选择并完整确认的记忆出站，`intent.semantic@1` 始终不接收记忆。每次加载校验相对路径、适用 Provider 和 SHA-256；每次调用记录 Prompt ID/版本/哈希。
+6. Prompt Registry 使用仓库内受版本控制的文件和清单：`chat.general@1` 仍是无记忆普通聊天的默认 Prompt，`chat.general@2` 只用于用户逐 Turn 明确选择并完整确认的记忆出站，`window.pointer.answer@1` 只用于逐 Turn 确认的指针 OCR 纯文本回答，`intent.semantic@1` 始终不接收记忆或指针 OCR。每次加载校验相对路径、适用 Provider 和 SHA-256；每次调用记录 Prompt ID/版本/哈希。
 7. Provider/Model 设置与凭据分开。路由 ID 写普通设置文件；DeepSeek/Qwen Key 分别使用 Windows DPAPI `CurrentUser` 加密密文，只通过各自短生命周期 lease 读取，Key 不进 Git、SQLite、普通日志或 IPC 响应。
 8. 不做静默跨 Provider 降级。Provider 故障必须给用户明确、安全提示；是否切换数据目的地由用户决定。
 9. AI 语义层只提供不可信的意图类型建议。严格本机解析、置信度和歧义门槛通过后，仍由确定性 Planner 用真实上下文重算；模型 target、缺失上下文和任何“用户已同意”主张都不能授权。

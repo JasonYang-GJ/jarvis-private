@@ -156,6 +156,16 @@ public interface IDesktopApiClient
         Task.FromException<SessionSnapshotDto>(
             new NotSupportedException("此客户端尚未实现长期记忆出站确认。"));
 
+    Task<SessionSnapshotDto> ConfirmPointerAnswerAsync(
+        Guid sessionId,
+        Guid turnId,
+        Guid consentId,
+        string previewHash,
+        bool confirmed,
+        CancellationToken cancellationToken = default) =>
+        Task.FromException<SessionSnapshotDto>(
+            new NotSupportedException("此客户端尚未实现指针区域文字出站确认。"));
+
     Task<SessionSnapshotDto> CancelSessionTurnAsync(
         Guid sessionId,
         Guid turnId,
@@ -537,6 +547,23 @@ public sealed class DesktopApiClient(
         CallAsync<SessionMemoryOutboundConsentRequestDto, SessionSnapshotDto>(
             DesktopApiMethods.ConfirmMemoryOutbound,
             new SessionMemoryOutboundConsentRequestDto(sessionId, turnId, consentId, confirmed),
+            cancellationToken);
+
+    public Task<SessionSnapshotDto> ConfirmPointerAnswerAsync(
+        Guid sessionId,
+        Guid turnId,
+        Guid consentId,
+        string previewHash,
+        bool confirmed,
+        CancellationToken cancellationToken = default) =>
+        CallAsync<SessionPointerAnswerConsentRequestDto, SessionSnapshotDto>(
+            DesktopApiMethods.ConfirmPointerAnswer,
+            new SessionPointerAnswerConsentRequestDto(
+                sessionId,
+                turnId,
+                consentId,
+                previewHash,
+                confirmed),
             cancellationToken);
 
     public Task<SessionSnapshotDto> CancelSessionTurnAsync(

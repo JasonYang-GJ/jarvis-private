@@ -1,11 +1,13 @@
 using System.Collections.Concurrent;
 using ScreenGuide.AI.Core;
+using ScreenGuide.Core.Ai;
 using ScreenGuide.Core.Conversations;
 using ScreenGuide.Core.Memories;
 using ScreenGuide.Core.Sessions;
 using ScreenGuide.Core.Tasking;
 using ScreenGuide.DesktopProtocol;
 using ScreenGuide.Skills.Windows;
+using ScreenGuide.Vision.Abstractions;
 using AgentTaskStatus = ScreenGuide.Core.Tasking.TaskStatus;
 
 namespace ScreenGuide.DesktopHost.Runtime;
@@ -37,6 +39,7 @@ public sealed class SessionCoordinator
     private readonly ModelRouter modelRouter;
     private readonly PromptRegistry prompts;
     private readonly MemoryService memories;
+    private readonly PointerRegionUnderstandingService pointerRegions;
     private readonly IEnumerable<ISessionMemoryConsentPublicationObserver> memoryConsentPublicationObservers;
     private readonly IForegroundWindowContextProvider foregroundWindows;
     private readonly TimeProvider timeProvider;
@@ -47,6 +50,9 @@ public sealed class SessionCoordinator
         _requestedMemorySelections = new();
     private readonly ConcurrentDictionary<Guid, MemoryOutboundPreparedConsent>
         _preparedMemoryConsents = new();
+    private readonly ConcurrentDictionary<Guid, Guid> _requestedPointerAnchors = new();
+    private readonly ConcurrentDictionary<Guid, PointerAnswerPreparedConsent>
+        _preparedPointerAnswerConsents = new();
 
     internal SessionCoordinator(
         ISessionStore sessionStore,
@@ -60,6 +66,7 @@ public sealed class SessionCoordinator
         ModelRouter modelRouter,
         PromptRegistry prompts,
         MemoryService memories,
+        PointerRegionUnderstandingService pointerRegions,
         IEnumerable<ISessionMemoryConsentPublicationObserver> memoryConsentPublicationObservers,
         IForegroundWindowContextProvider foregroundWindows,
         TimeProvider timeProvider)
@@ -75,6 +82,7 @@ public sealed class SessionCoordinator
         this.modelRouter = modelRouter;
         this.prompts = prompts;
         this.memories = memories;
+        this.pointerRegions = pointerRegions;
         this.memoryConsentPublicationObservers = memoryConsentPublicationObservers;
         this.foregroundWindows = foregroundWindows;
         this.timeProvider = timeProvider;
@@ -187,11 +195,20 @@ public sealed class SessionCoordinator
         CancellationToken cancellationToken = default,
         string? expectedIntentKind = null,
         string? expectedTarget = null,
-        IReadOnlyList<MemoryOutboundItemReference>? memoryItems = null)
+        IReadOnlyList<MemoryOutboundItemReference>? memoryItems = null,
+        Guid? pointerAnchorId = null)
     {
         RequireStartedHost();
         var normalized = NormalizeInput(text);
         var normalizedMemoryItems = NormalizeMemorySelection(memoryItems);
+        if (normalizedMemoryItems.Count > 0 && pointerAnchorId is not null)
+        {
+            throw new ArgumentException("同一 Turn 不能同时发送长期记忆和指针区域文字。", nameof(pointerAnchorId));
+        }
+        if (pointerAnchorId == Guid.Empty)
+        {
+            throw new ArgumentException("指针锚点标识无效。", nameof(pointerAnchorId));
+        }
         var expectation = NormalizeActionExpectation(expectedIntentKind, expectedTarget);
         await _currentSessionGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
@@ -247,6 +264,12 @@ public sealed class SessionCoordinator
                             "同一个请求编号不能改成另一组长期记忆。");
                     }
 
+                    if (!PointerAnchorMatches(existingTurn, pointerAnchorId))
+                    {
+                        throw new InvalidOperationException(
+                            "同一个请求编号不能改成另一个指针锚点。");
+                    }
+
                     return new SessionSubmitResult(session.Id, existingTurn.Id, true);
                 }
 
@@ -280,6 +303,10 @@ public sealed class SessionCoordinator
                 if (normalizedMemoryItems.Count > 0)
                 {
                     _requestedMemorySelections[registeredTurn.Id] = normalizedMemoryItems;
+                }
+                if (pointerAnchorId is { } anchorId)
+                {
+                    _requestedPointerAnchors[registeredTurn.Id] = anchorId;
                 }
 
                 if (expectation.IntentKind is not null)
@@ -665,6 +692,8 @@ public sealed class SessionCoordinator
 
             _preparedMemoryConsents.TryRemove(turn.Id, out _);
             _requestedMemorySelections.TryRemove(turn.Id, out _);
+            _preparedPointerAnswerConsents.TryRemove(turn.Id, out _);
+            _requestedPointerAnchors.TryRemove(turn.Id, out _);
 
             if (_activeWork.TryGetValue(turn.Id, out active))
             {
@@ -759,6 +788,7 @@ public sealed class SessionCoordinator
                 knownChangeVersion,
                 maximumWait,
                 _preparedMemoryConsents.Values.ToArray(),
+                _preparedPointerAnswerConsents.Values.ToArray(),
                 cancellationToken)
             .ConfigureAwait(false);
 
@@ -904,6 +934,8 @@ public sealed class SessionCoordinator
     {
         _preparedMemoryConsents.Clear();
         _requestedMemorySelections.Clear();
+        _preparedPointerAnswerConsents.Clear();
+        _requestedPointerAnchors.Clear();
         var active = _activeWork.Values.ToArray();
         foreach (var work in active)
         {
@@ -1074,7 +1106,10 @@ public sealed class SessionCoordinator
                 turn.Id,
                 out var requestedMemoryItems)
             && requestedMemoryItems.Count > 0;
-        var persistedIntent = memorySelectionRequested
+        var pointerAnswerRequested = _requestedPointerAnchors.TryGetValue(
+            turn.Id,
+            out var requestedPointerAnchorId);
+        var persistedIntent = memorySelectionRequested || pointerAnswerRequested
             ? UniversalIntentKind.Conversation
             : TryParsePersistedIntent(turn.IntentKind);
         var plan = await assistantCommands.PlanSessionAsync(
@@ -1245,7 +1280,16 @@ public sealed class SessionCoordinator
 
         if (kind == UniversalIntentKind.Conversation)
         {
-            if (memorySelectionRequested)
+            if (pointerAnswerRequested)
+            {
+                await PreparePointerAnswerConsentAsync(
+                        session,
+                        turn,
+                        requestedPointerAnchorId,
+                        cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            else if (memorySelectionRequested)
             {
                 await PrepareMemoryOutboundConsentAsync(
                         session,
@@ -1256,7 +1300,12 @@ public sealed class SessionCoordinator
             }
             else
             {
-                await RunConversationTurnAsync(session, turn, memoryOutbound: null, cancellationToken)
+                await RunConversationTurnAsync(
+                        session,
+                        turn,
+                        memoryOutbound: null,
+                        pointerAnswer: null,
+                        cancellationToken)
                     .ConfigureAwait(false);
             }
             return;
@@ -1390,6 +1439,171 @@ public sealed class SessionCoordinator
                 },
                 CancellationToken.None)
             .ConfigureAwait(false);
+    }
+
+    private async Task PreparePointerAnswerConsentAsync(
+        SessionRecord session,
+        SessionTurnRecord turn,
+        Guid anchorId,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            if (turn.FrozenRoute is not
+                {
+                    Status: SessionTurnRouteStatus.Ready,
+                    ProviderId: { Length: > 0 } providerId
+                })
+            {
+                throw new PointerAnswerException(
+                    turn.FrozenRoute?.FailureCode ?? "frozen_chat_route_invalid",
+                    "当前普通聊天路由不可用，指针区域文字没有发送。");
+            }
+
+            var prompt = prompts.GetRequired("window.pointer.answer", "1", providerId);
+            var result = await pointerRegions.ReadAsync(anchorId, cancellationToken)
+                .ConfigureAwait(false);
+            var prepared = PointerAnswerPreparedConsent.Create(
+                turn,
+                result,
+                prompt,
+                timeProvider.GetUtcNow());
+            var gate = await operationGates.AcquireTurnAsync(turn.Id, cancellationToken)
+                .ConfigureAwait(false);
+            try
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var latestSession = await sessionStore.GetSessionAsync(session.Id, cancellationToken)
+                    .ConfigureAwait(false);
+                var latestTurn = await sessionStore.GetTurnAsync(turn.Id, cancellationToken)
+                    .ConfigureAwait(false);
+                if (latestSession is null
+                    || latestTurn is null
+                    || !CanPublishPointerAnswerConsent(latestSession, latestTurn, prepared, anchorId))
+                {
+                    throw new PointerAnswerException(
+                        PointerAnswerErrorCodes.ConsentStale,
+                        "指针区域出站预览已失效，请重新指向并检查。");
+                }
+
+                pointerRegions.RequireCurrent(prepared.Anchor);
+                _preparedPointerAnswerConsents[turn.Id] = prepared;
+                try
+                {
+                    _ = await TransitionAsync(
+                            turn.Id,
+                            current => current with
+                            {
+                                WorkKind = SessionWorkKind.Conversation,
+                                IntentKind = "Conversation",
+                                Phase = SessionTurnPhase.WaitingForPointerAnswerConsent,
+                                MissingContext = SessionMissingContext.None,
+                                RequiresConfirmation = true,
+                                ResultSummary = "请检查本次将发送的完整问题、区域文字、AI 服务和 HTTPS 目的地后再确认；不会发送图片。",
+                                FailureCode = null,
+                                FailureMessage = null
+                            },
+                            CancellationToken.None)
+                        .ConfigureAwait(false);
+                    _requestedPointerAnchors.TryRemove(turn.Id, out _);
+                }
+                catch
+                {
+                    _preparedPointerAnswerConsents.TryRemove(turn.Id, out _);
+                    throw;
+                }
+            }
+            finally
+            {
+                await gate.DisposeAsync();
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            _preparedPointerAnswerConsents.TryRemove(turn.Id, out _);
+            _requestedPointerAnchors.TryRemove(turn.Id, out _);
+            throw;
+        }
+        catch (PointerRegionException exception)
+        {
+            await EndPointerAnswerTurnAsync(turn.Id, SessionTurnPhase.Failed, exception.Code, exception.Message)
+                .ConfigureAwait(false);
+        }
+        catch (PointerAnswerException exception)
+        {
+            await EndPointerAnswerTurnAsync(turn.Id, SessionTurnPhase.Failed, exception.Code, exception.Message)
+                .ConfigureAwait(false);
+        }
+        catch (Exception)
+        {
+            await EndPointerAnswerTurnAsync(
+                    turn.Id,
+                    SessionTurnPhase.Failed,
+                    PointerAnswerErrorCodes.CommitFailed,
+                    "指针区域出站预览未能安全生成，没有发送。")
+                .ConfigureAwait(false);
+        }
+        finally
+        {
+            _requestedPointerAnchors.TryRemove(turn.Id, out _);
+        }
+    }
+
+    private bool CanPublishPointerAnswerConsent(
+        SessionRecord session,
+        SessionTurnRecord turn,
+        PointerAnswerPreparedConsent prepared,
+        Guid anchorId)
+    {
+        if (!session.IsCurrent
+            || prepared.TurnId != turn.Id
+            || prepared.TurnVersion != turn.Version
+            || prepared.Anchor.AnchorId != anchorId
+            || turn.Phase != SessionTurnPhase.Understanding
+            || turn.CancellationRequested
+            || !string.Equals(prepared.Question, turn.InputText, StringComparison.Ordinal)
+            || !_requestedPointerAnchors.TryGetValue(turn.Id, out var requested)
+            || requested != anchorId)
+        {
+            return false;
+        }
+
+        return PointerAnswerRouteAndPromptMatch(turn, prepared);
+    }
+
+    private bool PointerAnswerRouteAndPromptMatch(
+        SessionTurnRecord turn,
+        PointerAnswerPreparedConsent prepared)
+    {
+        if (turn.FrozenRoute is not
+            {
+                Status: SessionTurnRouteStatus.Ready,
+                ProviderId: { Length: > 0 } providerId,
+                ModelId: { Length: > 0 } modelId,
+                DataDestination: { Length: > 0 } destination
+            }
+            || !string.Equals(providerId, prepared.ProviderId, StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(modelId, prepared.ModelId, StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(PointerAnswerOutboundContract.HashText(turn.InputText), prepared.QuestionHash, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        try
+        {
+            var prompt = prompts.GetRequired("window.pointer.answer", "1", providerId);
+            return string.Equals(
+                    PointerAnswerOutboundContract.NormalizeHttpsOrigin(destination),
+                    prepared.DestinationOrigin,
+                    StringComparison.OrdinalIgnoreCase)
+                && string.Equals(prompt.PromptId, prepared.PromptId, StringComparison.Ordinal)
+                && string.Equals(prompt.Version, prepared.PromptVersion, StringComparison.Ordinal)
+                && string.Equals(prompt.ContentSha256, prepared.PromptContentHash, StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private async Task PrepareMemoryOutboundConsentAsync(
@@ -1610,7 +1824,12 @@ public sealed class SessionCoordinator
                     },
                     CancellationToken.None)
                 .ConfigureAwait(false);
-            await RunConversationTurnAsync(session, consumed, envelope, cancellationToken)
+            await RunConversationTurnAsync(
+                    session,
+                    consumed,
+                    envelope,
+                    pointerAnswer: null,
+                    cancellationToken)
                 .ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -1684,6 +1903,7 @@ public sealed class SessionCoordinator
         SessionRecord session,
         SessionTurnRecord sessionTurn,
         MemoryOutboundEnvelope? memoryOutbound,
+        PointerAnswerEnvelope? pointerAnswer,
         CancellationToken cancellationToken)
     {
         try
@@ -1706,7 +1926,8 @@ public sealed class SessionCoordinator
                     responding.InputText,
                     $"session-conversation-{responding.Id:N}",
                     memoryOutbound,
-                    cancellationToken)
+                    pointerAnswer,
+                    cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
             await TransitionAsync(
                     responding.Id,
@@ -1782,6 +2003,8 @@ public sealed class SessionCoordinator
             {
                 _preparedMemoryConsents.TryRemove(turn.Id, out _);
                 _requestedMemorySelections.TryRemove(turn.Id, out _);
+                _preparedPointerAnswerConsents.TryRemove(turn.Id, out _);
+                _requestedPointerAnchors.TryRemove(turn.Id, out _);
                 latest = await sessionStore.GetTurnAsync(turn.Id, cancellationToken).ConfigureAwait(false);
                 if (latest is null
                     || SessionTurnPhases.IsTerminal(latest.Phase)
@@ -2019,6 +2242,247 @@ public sealed class SessionCoordinator
         }
     }
 
+    public async Task<LocalSessionSnapshot> ConfirmPointerAnswerAsync(
+        Guid sessionId,
+        Guid turnId,
+        Guid consentId,
+        string previewHash,
+        bool confirmed,
+        CancellationToken cancellationToken = default)
+    {
+        RequireStartedHost();
+        var gate = await operationGates.AcquireTurnAsync(turnId, cancellationToken)
+            .ConfigureAwait(false);
+        SessionRecord session;
+        try
+        {
+            (SessionRecord Session, SessionTurnRecord Turn) required;
+            try
+            {
+                required = await RequireWaitingTurnAsync(
+                        sessionId,
+                        turnId,
+                        SessionTurnPhase.WaitingForPointerAnswerConsent,
+                        cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            catch (InvalidOperationException exception)
+            {
+                throw new PointerAnswerException(
+                    PointerAnswerErrorCodes.ConsentStale,
+                    "指针区域出站确认已失效，不能重复使用。",
+                    exception);
+            }
+
+            session = required.Session;
+            if (!_preparedPointerAnswerConsents.TryGetValue(turnId, out var prepared)
+                || consentId == Guid.Empty
+                || prepared.ConsentId != consentId
+                || !string.Equals(prepared.PreviewHash, previewHash, StringComparison.Ordinal)
+                || required.Turn.Version != prepared.TurnVersion + 1
+                || required.Turn.Phase != SessionTurnPhase.WaitingForPointerAnswerConsent
+                || !PointerAnswerRouteAndPromptMatch(required.Turn, prepared)
+                || timeProvider.GetUtcNow() >= prepared.ExpiresAtUtc)
+            {
+                await InvalidatePointerAnswerAsync(turnId, PointerAnswerErrorCodes.ConsentStale)
+                    .ConfigureAwait(false);
+                return await BuildSnapshotAsync(session, cancellationToken).ConfigureAwait(false);
+            }
+
+            try
+            {
+                pointerRegions.RequireCurrent(prepared.Anchor);
+            }
+            catch (PointerRegionException)
+            {
+                await InvalidatePointerAnswerAsync(turnId, PointerAnswerErrorCodes.ConsentStale)
+                    .ConfigureAwait(false);
+                return await BuildSnapshotAsync(session, cancellationToken).ConfigureAwait(false);
+            }
+
+            if (!confirmed)
+            {
+                _preparedPointerAnswerConsents.TryRemove(turnId, out _);
+                _requestedPointerAnchors.TryRemove(turnId, out _);
+                await TransitionAsync(
+                        turnId,
+                        current => current with
+                        {
+                            Phase = SessionTurnPhase.Cancelled,
+                            MissingContext = SessionMissingContext.None,
+                            RequiresConfirmation = false,
+                            CancellationRequested = true,
+                            FailureCode = PointerAnswerErrorCodes.Cancelled,
+                            FailureMessage = "你未同意发送区域文字，本次请求已取消。",
+                            CompletedAtUtc = timeProvider.GetUtcNow()
+                        },
+                        CancellationToken.None)
+                    .ConfigureAwait(false);
+                return await BuildSnapshotAsync(session, cancellationToken).ConfigureAwait(false);
+            }
+
+            var committing = await TransitionAsync(
+                    turnId,
+                    current => current with
+                    {
+                        Phase = SessionTurnPhase.Understanding,
+                        RequiresConfirmation = false,
+                        ConfirmationGranted = true,
+                        MissingContext = SessionMissingContext.None,
+                        FailureCode = null,
+                        FailureMessage = null
+                    },
+                    CancellationToken.None)
+                .ConfigureAwait(false);
+            _preparedPointerAnswerConsents.TryRemove(turnId, out _);
+            _requestedPointerAnchors.TryRemove(turnId, out _);
+            var active = new ActiveSessionWork(turnId);
+            if (!_activeWork.TryAdd(turnId, active))
+            {
+                active.Cancellation.Dispose();
+                throw new PointerAnswerException(
+                    PointerAnswerErrorCodes.ConsentStale,
+                    "这次确认已经被使用，不能重复发送。");
+            }
+
+            active.SetCompletion(Task.Run(
+                () => CommitAndRunPointerAnswerAsync(
+                    session,
+                    committing,
+                    prepared,
+                    active.Cancellation.Token),
+                CancellationToken.None));
+            PublishChange();
+        }
+        finally
+        {
+            await gate.DisposeAsync();
+        }
+
+        return await BuildSnapshotAsync(session, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task CommitAndRunPointerAnswerAsync(
+        SessionRecord session,
+        SessionTurnRecord committing,
+        PointerAnswerPreparedConsent prepared,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var latest = await sessionStore.GetTurnAsync(committing.Id, CancellationToken.None)
+                .ConfigureAwait(false)
+                ?? throw new PointerAnswerException(
+                    PointerAnswerErrorCodes.ConsentStale,
+                    "指针区域出站确认已失效。");
+            if (SessionTurnPhases.IsTerminal(latest.Phase)
+                || latest.CancellationRequested
+                || !latest.ConfirmationGranted
+                || !PointerAnswerRouteAndPromptMatch(latest, prepared)
+                || timeProvider.GetUtcNow() >= prepared.ExpiresAtUtc)
+            {
+                throw new PointerAnswerException(
+                    PointerAnswerErrorCodes.ConsentStale,
+                    "指针区域出站确认已失效，没有发送。");
+            }
+
+            pointerRegions.RequireCurrent(prepared.Anchor);
+            var envelope = prepared.CreateEnvelope(timeProvider.GetUtcNow());
+            await RunConversationTurnAsync(
+                    session,
+                    latest,
+                    memoryOutbound: null,
+                    pointerAnswer: envelope,
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            await EndPointerAnswerTurnAsync(
+                    committing.Id,
+                    SessionTurnPhase.Cancelled,
+                    PointerAnswerErrorCodes.Cancelled,
+                    "指针区域出站已取消，没有复用本次确认。")
+                .ConfigureAwait(false);
+        }
+        catch (PointerRegionException)
+        {
+            await EndPointerAnswerTurnAsync(
+                    committing.Id,
+                    SessionTurnPhase.Failed,
+                    PointerAnswerErrorCodes.ConsentStale,
+                    "指针或目标窗口已变化，区域文字没有发送。")
+                .ConfigureAwait(false);
+        }
+        catch (PointerAnswerException exception)
+        {
+            await EndPointerAnswerTurnAsync(
+                    committing.Id,
+                    SessionTurnPhase.Failed,
+                    exception.Code,
+                    exception.Message)
+                .ConfigureAwait(false);
+        }
+        catch
+        {
+            await EndPointerAnswerTurnAsync(
+                    committing.Id,
+                    SessionTurnPhase.Failed,
+                    PointerAnswerErrorCodes.CommitFailed,
+                    "指针区域出站提交未能安全完成，没有发送。")
+                .ConfigureAwait(false);
+        }
+        finally
+        {
+            _preparedPointerAnswerConsents.TryRemove(committing.Id, out _);
+            _requestedPointerAnchors.TryRemove(committing.Id, out _);
+            RemoveActiveWork(committing.Id);
+            PublishChange();
+        }
+    }
+
+    private async Task InvalidatePointerAnswerAsync(Guid turnId, string code)
+    {
+        _preparedPointerAnswerConsents.TryRemove(turnId, out _);
+        _requestedPointerAnchors.TryRemove(turnId, out _);
+        await EndPointerAnswerTurnAsync(
+                turnId,
+                SessionTurnPhase.Failed,
+                code,
+                "指针区域出站确认已失效，请重新指向并检查。")
+            .ConfigureAwait(false);
+    }
+
+    private async Task EndPointerAnswerTurnAsync(
+        Guid turnId,
+        SessionTurnPhase phase,
+        string code,
+        string message)
+    {
+        _preparedPointerAnswerConsents.TryRemove(turnId, out _);
+        _requestedPointerAnchors.TryRemove(turnId, out _);
+        try
+        {
+            await TransitionAsync(
+                    turnId,
+                    current => current with
+                    {
+                        Phase = phase,
+                        RequiresConfirmation = false,
+                        CancellationRequested = phase == SessionTurnPhase.Cancelled,
+                        FailureCode = code,
+                        FailureMessage = message,
+                        CompletedAtUtc = timeProvider.GetUtcNow()
+                    },
+                    CancellationToken.None)
+                .ConfigureAwait(false);
+        }
+        catch
+        {
+        }
+    }
+
     public async Task<LocalSessionSnapshot> ConfirmMemoryOutboundAsync(
         Guid sessionId,
         Guid turnId,
@@ -2076,6 +2540,8 @@ public sealed class SessionCoordinator
             {
                 _preparedMemoryConsents.TryRemove(turnId, out _);
                 _requestedMemorySelections.TryRemove(turnId, out _);
+                _preparedPointerAnswerConsents.TryRemove(turnId, out _);
+                _requestedPointerAnchors.TryRemove(turnId, out _);
                 await TransitionAsync(
                         turnId,
                         current => current with
@@ -2200,7 +2666,7 @@ public sealed class SessionCoordinator
                 cancellationToken)
             .ConfigureAwait(false);
         PublishChange(updated.SessionId, updated);
-        if (RequiresMemoryConsentProjectionReset(current, updated))
+        if (RequiresConsentProjectionReset(current, updated))
         {
             PublishChange(updated.SessionId);
         }
@@ -2208,12 +2674,14 @@ public sealed class SessionCoordinator
         return updated;
     }
 
-    private static bool RequiresMemoryConsentProjectionReset(
+    private static bool RequiresConsentProjectionReset(
         SessionTurnRecord before,
         SessionTurnRecord after) =>
         before.MemoryOutboundState != after.MemoryOutboundState
         || before.Phase == SessionTurnPhase.WaitingForMemoryOutboundConsent
-        || after.Phase == SessionTurnPhase.WaitingForMemoryOutboundConsent;
+        || after.Phase == SessionTurnPhase.WaitingForMemoryOutboundConsent
+        || before.Phase == SessionTurnPhase.WaitingForPointerAnswerConsent
+        || after.Phase == SessionTurnPhase.WaitingForPointerAnswerConsent;
 
     private async Task TryEndTurnAsync(
         Guid turnId,
@@ -2239,6 +2707,8 @@ public sealed class SessionCoordinator
             {
                 _preparedMemoryConsents.TryRemove(turnId, out _);
                 _requestedMemorySelections.TryRemove(turnId, out _);
+                _preparedPointerAnswerConsents.TryRemove(turnId, out _);
+                _requestedPointerAnchors.TryRemove(turnId, out _);
             }
         }
         catch
@@ -2252,6 +2722,7 @@ public sealed class SessionCoordinator
         await projections.BuildSnapshotAsync(
                 session,
                 _preparedMemoryConsents.Values.ToArray(),
+                _preparedPointerAnswerConsents.Values.ToArray(),
                 cancellationToken)
             .ConfigureAwait(false);
 
@@ -2312,6 +2783,14 @@ public sealed class SessionCoordinator
             && existing.Zip(requested).All(pair =>
                 pair.First.MemoryId == pair.Second.MemoryId
                 && pair.First.ExpectedVersion == pair.Second.ExpectedVersion);
+    }
+
+    private bool PointerAnchorMatches(SessionTurnRecord turn, Guid? requestedAnchorId)
+    {
+        Guid? existing = _requestedPointerAnchors.TryGetValue(turn.Id, out var requested)
+            ? requested
+            : _preparedPointerAnswerConsents.GetValueOrDefault(turn.Id)?.Anchor.AnchorId;
+        return existing == requestedAnchorId;
     }
 
     private bool PreparedConsentMatches(

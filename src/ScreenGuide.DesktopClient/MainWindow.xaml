@@ -368,6 +368,7 @@
                                 <RowDefinition Height="*" />
                                 <RowDefinition Height="Auto" />
                                 <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
                             </Grid.RowDefinitions>
                             <Border Padding="20,15" Background="#F7FAFB" BorderBrush="{StaticResource LineBrush}"
                                     BorderThickness="0,0,0,1">
@@ -475,7 +476,39 @@
                                 </StackPanel>
                             </Border>
 
-                            <Border Grid.Row="3" Padding="16" Background="#F7FAFB" BorderBrush="{StaticResource LineBrush}"
+                            <Border x:Name="PointerAnswerConsentBorder" Grid.Row="3" Margin="16,0,16,12"
+                                    Padding="14" CornerRadius="6" BorderThickness="1" BorderBrush="#4A86C5"
+                                    Background="#EEF6FF" Visibility="Collapsed"
+                                    AutomationProperties.AutomationId="PointerAnswerOutboundConsent">
+                                <StackPanel>
+                                    <TextBlock Text="指针区域文字出站确认（仅本 Turn 一次）"
+                                               FontSize="15" FontWeight="SemiBold" />
+                                    <TextBlock x:Name="PointerAnswerRouteText" Margin="0,6,0,0"
+                                               TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" />
+                                    <TextBlock x:Name="PointerAnswerPromptText" Margin="0,3,0,0"
+                                               TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" />
+                                    <TextBlock Text="将发送的完整问题" Margin="0,10,0,3" FontWeight="SemiBold" />
+                                    <TextBox x:Name="PointerAnswerQuestionText" IsReadOnly="True" TextWrapping="Wrap"
+                                             Background="White" BorderBrush="{StaticResource LineBrush}" />
+                                    <TextBlock Text="将发送的完整本机 OCR 文字" Margin="0,10,0,3" FontWeight="SemiBold" />
+                                    <TextBox x:Name="PointerAnswerOcrText" IsReadOnly="True" TextWrapping="Wrap"
+                                             Background="White" BorderBrush="{StaticResource LineBrush}" />
+                                    <TextBlock x:Name="PointerAnswerShapeText" Margin="0,7,0,0"
+                                               TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" />
+                                    <TextBlock Text="不会发送图片、整页文字、窗口标题或文件路径。确认只对当前 Turn、锚点、路由、Prompt 和以上精确文本有效。"
+                                               Margin="0,6,0,0" TextWrapping="Wrap" Foreground="#285A8A" />
+                                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,10,0,0">
+                                        <Button Content="不发送并取消" Style="{StaticResource SecondaryButton}"
+                                                Margin="0,0,8,0" Click="DeclinePointerAnswerButton_Click"
+                                                AutomationProperties.AutomationId="DeclinePointerAnswer" />
+                                        <Button Content="确认发送这一次" Style="{StaticResource PrimaryButton}"
+                                                Click="ConfirmPointerAnswerButton_Click"
+                                                AutomationProperties.AutomationId="ConfirmPointerAnswer" />
+                                    </StackPanel>
+                                </StackPanel>
+                            </Border>
+
+                            <Border Grid.Row="4" Padding="16" Background="#F7FAFB" BorderBrush="{StaticResource LineBrush}"
                                     BorderThickness="0,1,0,0">
                                 <Grid>
                                     <Grid.RowDefinitions>
@@ -519,6 +552,10 @@
                                             <Button x:Name="StopConversationButton" Content="停止回答"
                                                     Style="{StaticResource DangerButton}" Visibility="Collapsed"
                                                     Margin="0,0,8,0" Click="StopConversationButton_Click" />
+                                            <Button x:Name="AskPointerQuestionButton" Content="询问指针位置"
+                                                    Style="{StaticResource SecondaryButton}" IsEnabled="False"
+                                                    Margin="0,0,8,0" Click="AskPointerQuestionButton_Click"
+                                                    AutomationProperties.AutomationId="AskPointerQuestion" />
                                             <Button x:Name="SendConversationButton" Content="发送"
                                                     Style="{StaticResource PrimaryButton}" IsEnabled="False"
                                                     Click="SendConversationButton_Click"

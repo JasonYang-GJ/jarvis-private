@@ -71,7 +71,8 @@ public sealed class BridgeSnapshotProjection(
     private static BridgePresentationDto MapTurn(Guid sessionId, SessionTurnRecord turn)
     {
         var display = TurnDisplay(turn.Phase);
-        var wirePhase = turn.Phase == SessionTurnPhase.WaitingForMemoryOutboundConsent
+        var wirePhase = turn.Phase is SessionTurnPhase.WaitingForMemoryOutboundConsent
+            or SessionTurnPhase.WaitingForPointerAnswerConsent
             ? "WaitingUser"
             : turn.Phase.ToString();
         return new BridgePresentationDto(
@@ -128,6 +129,8 @@ public sealed class BridgeSnapshotProjection(
         SessionTurnPhase.WaitingForWindowConsent =>
             new("WaitingUser", "需要窗口许可", "请返回元枢主窗口继续。", true),
         SessionTurnPhase.WaitingForMemoryOutboundConsent =>
+            new("WaitingUser", "需要你的确认", "请返回元枢主窗口继续。", true),
+        SessionTurnPhase.WaitingForPointerAnswerConsent =>
             new("WaitingUser", "需要你的确认", "请返回元枢主窗口继续。", true),
         SessionTurnPhase.WaitingForConfirmation =>
             new("WaitingUser", "需要你的确认", "请返回元枢主窗口继续。", true),

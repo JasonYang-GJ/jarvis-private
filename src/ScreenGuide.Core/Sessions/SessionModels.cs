@@ -27,6 +27,7 @@ public enum SessionTurnPhase
     WaitingForWindowConsent,
     WaitingForConfirmation,
     WaitingForMemoryOutboundConsent,
+    WaitingForPointerAnswerConsent,
     Executing,
     ObservingWindow,
     ProgrammingTask,
@@ -147,6 +148,7 @@ public static class SessionTurnPhases
         SessionTurnPhase.WaitingForWindowConsent or
         SessionTurnPhase.WaitingForConfirmation or
         SessionTurnPhase.WaitingForMemoryOutboundConsent or
+        SessionTurnPhase.WaitingForPointerAnswerConsent or
         SessionTurnPhase.Executing or
         SessionTurnPhase.ObservingWindow;
 }

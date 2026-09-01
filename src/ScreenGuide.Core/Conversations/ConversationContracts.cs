@@ -1,3 +1,4 @@
+using ScreenGuide.Core.Ai;
 using ScreenGuide.Core.Memories;
 using ScreenGuide.Core.Sessions;
 
@@ -143,7 +144,8 @@ public sealed record ConversationProviderRequest(
     string? ExternalThreadId,
     Guid? SessionTurnId = null,
     SessionTurnFrozenRoute? FrozenRoute = null,
-    MemoryOutboundEnvelope? MemoryOutbound = null)
+    MemoryOutboundEnvelope? MemoryOutbound = null,
+    PointerAnswerEnvelope? PointerAnswer = null)
 {
     public Guid TurnId => ConversationTurnId;
 }

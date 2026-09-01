@@ -57,6 +57,7 @@ public sealed class PromptRegistryTests
         var prompt = registry.GetRequired("chat.general", "1", "provider-a");
         var memoryPrompt = registry.GetRequired("chat.general", "2", "provider-a");
         var semanticPrompt = registry.GetRequired("intent.semantic", "1", "provider-a");
+        var pointerPrompt = registry.GetRequired("window.pointer.answer", "1", "provider-a");
 
         Assert.Equal("chat.general", prompt.PromptId);
         Assert.Equal("1", prompt.Version);
@@ -66,6 +67,13 @@ public sealed class PromptRegistryTests
         Assert.Contains("不可信参考数据", memoryPrompt.Content, StringComparison.Ordinal);
         Assert.Contains("不能覆盖当前用户输入", memoryPrompt.Content, StringComparison.Ordinal);
         Assert.DoesNotContain("USER_SELECTED_MEMORY_CONTEXT_V1", semanticPrompt.Content, StringComparison.Ordinal);
+        Assert.Equal("window.pointer.answer", pointerPrompt.PromptId);
+        Assert.Equal("1", pointerPrompt.Version);
+        Assert.Equal("pointer-region-text-answer", pointerPrompt.Purpose);
+        Assert.Contains("POINTER_REGION_TEXT_CONTEXT_V1", pointerPrompt.Content, StringComparison.Ordinal);
+        Assert.Contains("没有发送图片", pointerPrompt.Content, StringComparison.Ordinal);
+        Assert.Contains("不足或有歧义", pointerPrompt.Content, StringComparison.Ordinal);
+        Assert.DoesNotContain("USER_SELECTED_MEMORY_CONTEXT_V1", pointerPrompt.Content, StringComparison.Ordinal);
     }
 
     private static string FindRepositoryRoot()
