@@ -147,7 +147,7 @@ internal interface IDesktopSearchAutomationDriver
 
     void SetValue(DesktopSearchControl control, string value);
 
-    void SubmitEnter(DesktopSearchControl control);
+    void SubmitEnter(DesktopSearchControl control, Action validateAtSendBoundary);
 }
 
 internal sealed class SafeForegroundSearchExecutor(
@@ -251,7 +251,25 @@ internal sealed class SafeForegroundSearchExecutor(
                     "搜索内容在提交前已经变化，因此没有提交。 ");
             }
 
-            driver.SubmitEnter(selected);
+            driver.SubmitEnter(selected, () =>
+            {
+                RequireWindowAndForeground(expectedWindow);
+                var atSendBoundary = ReadAndRequireBoundTarget(
+                    selected,
+                    bound,
+                    expectedWindow.WindowHandle);
+                if (!atSendBoundary.HasKeyboardFocus)
+                {
+                    throw FocusChanged();
+                }
+
+                if (!string.Equals(atSendBoundary.Value, normalizedQuery, StringComparison.Ordinal))
+                {
+                    throw new DesktopSearchException(
+                        DesktopSearchErrorCodes.WriteVerificationFailed,
+                        "搜索内容在提交边界已经变化，因此没有提交。 ");
+                }
+            });
         }
         catch (DesktopSearchException)
         {
@@ -663,9 +681,13 @@ internal class WindowsDesktopSearchAutomationDriver : IDesktopSearchAutomationDr
         ((ValuePattern)rawPattern).SetValue(value);
     }
 
-    public virtual void SubmitEnter(DesktopSearchControl control)
+    public virtual void SubmitEnter(
+        DesktopSearchControl control,
+        Action validateAtSendBoundary)
     {
-        _ = ReadToken(Token(control));
+        _ = Token(control);
+        ArgumentNullException.ThrowIfNull(validateAtSendBoundary);
+        validateAtSendBoundary();
         SendKeys.SendWait("{ENTER}");
     }
 

@@ -240,6 +240,80 @@ public sealed class DesktopSearchSafetyTests
     }
 
     [Fact]
+    public void ForegroundChangeInsideSubmitBoundaryPreventsEnter()
+    {
+        var expected = Window();
+        var driver = new FakeSearchDriver([Control("primary", name: "搜索框")])
+        {
+            BeforeSubmitSend = (current, _) => current.ForegroundWindowHandle = 43
+        };
+
+        var exception = Assert.Throws<DesktopSearchException>(
+            () => Executor(expected, driver).Search(expected, "天气"));
+
+        Assert.Equal(DesktopSearchErrorCodes.TargetChanged, exception.Code);
+        Assert.Equal(1, driver.SetValueCount);
+        Assert.Equal(0, driver.SubmitCount);
+    }
+
+    [Fact]
+    public void FocusChangeInsideSubmitBoundaryPreventsEnter()
+    {
+        var expected = Window();
+        var driver = new FakeSearchDriver([Control("primary", name: "搜索框")])
+        {
+            BeforeSubmitSend = (current, control) => current.Mutate(
+                control,
+                snapshot => snapshot with { HasKeyboardFocus = false })
+        };
+
+        var exception = Assert.Throws<DesktopSearchException>(
+            () => Executor(expected, driver).Search(expected, "天气"));
+
+        Assert.Equal(DesktopSearchErrorCodes.FocusChanged, exception.Code);
+        Assert.Equal(1, driver.SetValueCount);
+        Assert.Equal(0, driver.SubmitCount);
+    }
+
+    [Fact]
+    public void ExactValueChangeInsideSubmitBoundaryPreventsEnter()
+    {
+        var expected = Window();
+        var driver = new FakeSearchDriver([Control("primary", name: "搜索框")])
+        {
+            BeforeSubmitSend = (current, control) => current.Mutate(
+                control,
+                snapshot => snapshot with { Value = "changed" })
+        };
+
+        var exception = Assert.Throws<DesktopSearchException>(
+            () => Executor(expected, driver).Search(expected, "天气"));
+
+        Assert.Equal(DesktopSearchErrorCodes.WriteVerificationFailed, exception.Code);
+        Assert.Equal(1, driver.SetValueCount);
+        Assert.Equal(0, driver.SubmitCount);
+    }
+
+    [Fact]
+    public void OwnershipChangeInsideSubmitBoundaryPreventsEnter()
+    {
+        var expected = Window();
+        var driver = new FakeSearchDriver([Control("primary", name: "搜索框")])
+        {
+            BeforeSubmitSend = (current, control) => current.Mutate(
+                control,
+                snapshot => snapshot with { OwnerWindowHandle = 43 })
+        };
+
+        var exception = Assert.Throws<DesktopSearchException>(
+            () => Executor(expected, driver).Search(expected, "天气"));
+
+        Assert.Equal(DesktopSearchErrorCodes.TargetChanged, exception.Code);
+        Assert.Equal(1, driver.SetValueCount);
+        Assert.Equal(0, driver.SubmitCount);
+    }
+
+    [Fact]
     public void ExactValueMismatchFailsClosedBeforeSubmit()
     {
         var expected = Window();
@@ -364,6 +438,8 @@ public sealed class DesktopSearchSafetyTests
 
         public Func<int, DesktopSearchControlSnapshot, DesktopSearchControlSnapshot>? OnRead { get; set; }
 
+        public Action<FakeSearchDriver, DesktopSearchControl>? BeforeSubmitSend { get; init; }
+
         public long ForegroundWindowHandle { get; set; } = 42;
 
         public int ActivationCount { get; private set; }
@@ -373,6 +449,14 @@ public sealed class DesktopSearchSafetyTests
         public int SubmitCount { get; private set; }
 
         public string Value(string id) => _states[id].Value;
+
+        public void Mutate(
+            DesktopSearchControl control,
+            Func<DesktopSearchControlSnapshot, DesktopSearchControlSnapshot> mutation)
+        {
+            var id = (string)control.NativeReference;
+            _states[id] = mutation(_states[id]);
+        }
 
         public bool IsWindow(long windowHandle) => windowHandle == 42;
 
@@ -409,6 +493,13 @@ public sealed class DesktopSearchSafetyTests
             _states[id] = _states[id] with { Value = value };
         }
 
-        public void SubmitEnter(DesktopSearchControl control) => SubmitCount++;
+        public void SubmitEnter(
+            DesktopSearchControl control,
+            Action validateAtSendBoundary)
+        {
+            BeforeSubmitSend?.Invoke(this, control);
+            validateAtSendBoundary();
+            SubmitCount++;
+        }
     }
 }

@@ -263,6 +263,12 @@ public sealed class VisibleWindowActivationTests
 
         public override long GetForegroundWindowHandle() => windowHandle;
 
-        public override void SubmitEnter(DesktopSearchControl control) => SubmitCount++;
+        public override void SubmitEnter(
+            DesktopSearchControl control,
+            Action validateAtSendBoundary)
+        {
+            validateAtSendBoundary();
+            SubmitCount++;
+        }
     }
 }
