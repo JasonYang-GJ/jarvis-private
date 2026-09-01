@@ -21,7 +21,8 @@ public static class WindowsDesktopCapabilities
 public sealed record KnownDesktopApplication(
     string Id,
     string DisplayName,
-    string LaunchTarget);
+    string LaunchTarget,
+    IReadOnlyList<string>? RegisteredNames = null);
 
 public sealed record WindowsDesktopActionInput(
     string ActionKind,
@@ -29,7 +30,8 @@ public sealed record WindowsDesktopActionInput(
     long? WindowHandle = null,
     string? WindowTitle = null,
     string? Argument = null,
-    ForegroundWindowSnapshot? WindowIdentity = null);
+    ForegroundWindowSnapshot? WindowIdentity = null,
+    string? ApplicationTargetBinding = null);
 
 public sealed record VisibleDesktopLaunchResult(
     int? ProcessId,
@@ -251,6 +253,23 @@ public sealed class WindowsDesktopSkillAdapter(
                 || applications.FindById(input.Target) is not { } application)
             {
                 throw new UnauthorizedAccessException("这个应用不在当前允许打开的清单中。");
+            }
+
+            if (!string.Equals(application.Id, input.Target, StringComparison.Ordinal)
+                || !InstalledApplicationCatalog.TargetBindingMatches(
+                    application,
+                    input.ApplicationTargetBinding))
+            {
+                throw new InstalledApplicationResolutionException(
+                    InstalledApplicationErrorCodes.TargetChanged,
+                    "应用目标在授权后发生变化，本次没有打开任何程序。");
+            }
+
+            if (!InstalledApplicationCatalog.IsAllowedLaunchTarget(application))
+            {
+                throw new InstalledApplicationResolutionException(
+                    InstalledApplicationErrorCodes.TargetNotAllowed,
+                    "这个应用目标不符合安全启动要求，本次没有打开任何程序。");
             }
 
             var launch = launcher.OpenApplicationVisible(application.LaunchTarget);

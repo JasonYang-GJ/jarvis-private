@@ -31,6 +31,8 @@ internal static class VisibleBrowserWindowLauncher
 
         var appsFolderTarget = launchTarget.StartsWith(
             "shell:AppsFolder\\", StringComparison.OrdinalIgnoreCase);
+        var settingsTarget = launchTarget.StartsWith(
+            "ms-settings:", StringComparison.OrdinalIgnoreCase);
         var startInfo = appsFolderTarget
             ? new ProcessStartInfo("explorer.exe")
             {
@@ -40,7 +42,7 @@ internal static class VisibleBrowserWindowLauncher
             : new ProcessStartInfo(launchTarget) { UseShellExecute = true };
         return StartAndRaise(
             startInfo,
-            appsFolderTarget ? null : ProcessNameFromTarget(launchTarget),
+            appsFolderTarget ? null : settingsTarget ? "SystemSettings" : ProcessNameFromTarget(launchTarget),
             "应用",
             discoverAnyNewWindow: appsFolderTarget);
     }

@@ -10,18 +10,170 @@ public sealed class WindowsDesktopSkillAdapterTests
     {
         var launcher = new RecordingLauncher();
         var adapter = CreateAdapter(launcher);
+        var application = new FakeCatalog().FindById("test-app")!;
 
         var result = await adapter.StartAsync(Request(
             WindowsDesktopCapabilities.OpenApplication,
-            new WindowsDesktopActionInput("OpenApplication", "test-app")));
+            new WindowsDesktopActionInput(
+                "OpenApplication",
+                "test-app",
+                ApplicationTargetBinding: InstalledApplicationCatalog.CreateTargetBinding(application))));
         var denied = await Assert.ThrowsAsync<UnauthorizedAccessException>(() =>
             adapter.StartAsync(Request(
                 WindowsDesktopCapabilities.OpenApplication,
                 new WindowsDesktopActionInput("OpenApplication", "unknown"))));
 
         Assert.Equal(SkillExecutionStatus.Succeeded, result.Status);
-        Assert.Equal(["test.exe"], launcher.Targets);
+        Assert.Equal([Environment.ProcessPath!], launcher.Targets);
         Assert.Contains("清单", denied.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task FixedSafeSettingsTargetCanLaunchButArbitrarySettingsUriCannot()
+    {
+        var launcher = new RecordingLauncher();
+        var safe = new KnownDesktopApplication(
+            "windows-settings-display",
+            "显示设置",
+            "ms-settings:display");
+        var unsafeTarget = new KnownDesktopApplication(
+            "windows-settings-update",
+            "Windows 更新",
+            "ms-settings:windowsupdate");
+
+        var safeAdapter = new WindowsDesktopSkillAdapter(
+            launcher,
+            new SingleApplicationCatalog(safe),
+            new RecordingAutomation());
+        var unsafeAdapter = new WindowsDesktopSkillAdapter(
+            launcher,
+            new SingleApplicationCatalog(unsafeTarget),
+            new RecordingAutomation());
+
+        var result = await safeAdapter.StartAsync(Request(
+            WindowsDesktopCapabilities.OpenApplication,
+            new WindowsDesktopActionInput(
+                "OpenApplication",
+                safe.Id,
+                ApplicationTargetBinding: InstalledApplicationCatalog.CreateTargetBinding(safe))));
+        var unsafeError = await Assert.ThrowsAsync<InstalledApplicationResolutionException>(() =>
+            unsafeAdapter.StartAsync(Request(
+            WindowsDesktopCapabilities.OpenApplication,
+            new WindowsDesktopActionInput(
+                "OpenApplication",
+                unsafeTarget.Id,
+                ApplicationTargetBinding: InstalledApplicationCatalog.CreateTargetBinding(unsafeTarget)))));
+
+        Assert.Equal(SkillExecutionStatus.Succeeded, result.Status);
+        Assert.Equal(InstalledApplicationErrorCodes.TargetNotAllowed, unsafeError.Code);
+        Assert.Equal(["ms-settings:display"], launcher.Targets);
+    }
+
+    [Fact]
+    public async Task UnsafeOrChangedCatalogTargetNeverReachesLauncher()
+    {
+        var launcher = new RecordingLauncher();
+        var original = new KnownDesktopApplication("bound-app", "绑定应用", Environment.ProcessPath!);
+        var changedPath = Path.Combine(Path.GetTempPath(), $"changed-{Guid.NewGuid():N}.exe");
+        await File.WriteAllBytesAsync(changedPath, []);
+        try
+        {
+            var changed = original with { LaunchTarget = changedPath };
+            var adapter = new WindowsDesktopSkillAdapter(
+                launcher,
+                new ChangedApplicationCatalog(original, changed),
+                new RecordingAutomation());
+
+            var error = await Assert.ThrowsAsync<InstalledApplicationResolutionException>(() =>
+                adapter.StartAsync(Request(
+                WindowsDesktopCapabilities.OpenApplication,
+                new WindowsDesktopActionInput(
+                    "OpenApplication",
+                    original.Id,
+                    ApplicationTargetBinding: InstalledApplicationCatalog.CreateTargetBinding(original)))));
+
+            Assert.Equal(InstalledApplicationErrorCodes.TargetChanged, error.Code);
+            Assert.Empty(launcher.Targets);
+        }
+        finally
+        {
+            File.Delete(changedPath);
+        }
+    }
+
+    [Fact]
+    public async Task CatalogCannotSubstituteDifferentApplicationIdAfterAuthorization()
+    {
+        var launcher = new RecordingLauncher();
+        var listed = new KnownDesktopApplication(
+            "expected-app",
+            "期望应用",
+            Environment.ProcessPath!);
+        var substituted = listed with { Id = "different-app" };
+        var adapter = new WindowsDesktopSkillAdapter(
+            launcher,
+            new ChangedApplicationCatalog(listed, substituted),
+            new RecordingAutomation());
+
+        var error = await Assert.ThrowsAsync<InstalledApplicationResolutionException>(() =>
+            adapter.StartAsync(Request(
+                WindowsDesktopCapabilities.OpenApplication,
+                new WindowsDesktopActionInput(
+                    "OpenApplication",
+                    listed.Id,
+                    ApplicationTargetBinding:
+                    InstalledApplicationCatalog.CreateTargetBinding(listed)))));
+
+        Assert.Equal(InstalledApplicationErrorCodes.TargetChanged, error.Code);
+        Assert.Empty(launcher.Targets);
+    }
+
+    [Theory]
+    [InlineData("relative.exe")]
+    [InlineData(@"\\server\share\network.exe")]
+    [InlineData("shell:Downloads")]
+    [InlineData("ms-settings:windowsupdate")]
+    public async Task UnsafeCatalogTargetsAreRejectedBeforeLaunch(string launchTarget)
+    {
+        var launcher = new RecordingLauncher();
+        var application = new KnownDesktopApplication("unsafe-app", "不安全应用", launchTarget);
+        var adapter = new WindowsDesktopSkillAdapter(
+            launcher,
+            new SingleApplicationCatalog(application),
+            new RecordingAutomation());
+
+        var error = await Assert.ThrowsAsync<InstalledApplicationResolutionException>(() =>
+            adapter.StartAsync(Request(
+            WindowsDesktopCapabilities.OpenApplication,
+            new WindowsDesktopActionInput(
+                "OpenApplication",
+                application.Id,
+                ApplicationTargetBinding: InstalledApplicationCatalog.CreateTargetBinding(application)))));
+
+        Assert.Equal(InstalledApplicationErrorCodes.TargetNotAllowed, error.Code);
+        Assert.Empty(launcher.Targets);
+    }
+
+    [Fact]
+    public async Task MissingVisibleWindowVerificationFailsInsteadOfReportingSuccess()
+    {
+        var application = new KnownDesktopApplication(
+            "visible-app",
+            "可见应用",
+            Environment.ProcessPath!);
+        var adapter = new WindowsDesktopSkillAdapter(
+            new FailingVisibleLauncher(),
+            new SingleApplicationCatalog(application),
+            new RecordingAutomation());
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => adapter.StartAsync(Request(
+            WindowsDesktopCapabilities.OpenApplication,
+            new WindowsDesktopActionInput(
+                "OpenApplication",
+                application.Id,
+                ApplicationTargetBinding: InstalledApplicationCatalog.CreateTargetBinding(application)))));
+
+        Assert.Contains("窗口", error.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -103,7 +255,7 @@ public sealed class WindowsDesktopSkillAdapterTests
                 Argument: "https://www.douyin.com/")));
 
         Assert.Equal(SkillExecutionStatus.Succeeded, result.Status);
-        Assert.Equal("chrome.exe", launcher.VisibleBrowserTarget);
+        Assert.Equal(Environment.ProcessPath, launcher.VisibleBrowserTarget);
         Assert.Equal("https://www.douyin.com/", launcher.VisibleWebsite?.AbsoluteUri);
     }
 
@@ -128,9 +280,9 @@ public sealed class WindowsDesktopSkillAdapterTests
     private sealed class FakeCatalog : IInstalledApplicationCatalog
     {
         private static readonly KnownDesktopApplication Application =
-            new("test-app", "测试应用", "test.exe");
+            new("test-app", "测试应用", Environment.ProcessPath!);
         private static readonly KnownDesktopApplication Chrome =
-            new("chrome-app", "Google Chrome", "chrome.exe");
+            new("chrome-app", "Google Chrome", Environment.ProcessPath!);
 
         public IReadOnlyList<KnownDesktopApplication> GetApplications() => [Application, Chrome];
 
@@ -142,6 +294,33 @@ public sealed class WindowsDesktopSkillAdapterTests
 
         public KnownDesktopApplication? FindBrowser(string browserName) =>
             browserName.Contains("Chrome", StringComparison.OrdinalIgnoreCase) ? Chrome : null;
+    }
+
+    private sealed class SingleApplicationCatalog(KnownDesktopApplication application)
+        : IInstalledApplicationCatalog
+    {
+        public IReadOnlyList<KnownDesktopApplication> GetApplications() => [application];
+
+        public KnownDesktopApplication? FindById(string id) =>
+            id == application.Id ? application : null;
+
+        public KnownDesktopApplication? FindByDisplayName(string displayName) => application;
+
+        public KnownDesktopApplication? FindBrowser(string browserName) => null;
+    }
+
+    private sealed class ChangedApplicationCatalog(
+        KnownDesktopApplication listed,
+        KnownDesktopApplication resolved) : IInstalledApplicationCatalog
+    {
+        public IReadOnlyList<KnownDesktopApplication> GetApplications() => [listed];
+
+        public KnownDesktopApplication? FindById(string id) =>
+            id == listed.Id ? resolved : null;
+
+        public KnownDesktopApplication? FindByDisplayName(string displayName) => listed;
+
+        public KnownDesktopApplication? FindBrowser(string browserName) => null;
     }
 
     private sealed class RecordingLauncher : IDesktopProcessLauncher
@@ -190,5 +369,17 @@ public sealed class WindowsDesktopSkillAdapterTests
 
         public DesktopAutomationResult Describe(ForegroundWindowSnapshot expectedWindow) =>
             new(true, "已读取");
+    }
+
+    private sealed class FailingVisibleLauncher : IDesktopProcessLauncher
+    {
+        public int? Start(string target) => throw new InvalidOperationException("不应调用普通启动。");
+
+        public VisibleDesktopLaunchResult OpenApplicationVisible(string applicationLaunchTarget) =>
+            throw new InvalidOperationException("应用启动后没有验证到可见窗口。");
+
+        public VisibleDesktopLaunchResult OpenWebsiteVisible(
+            string? browserLaunchTarget,
+            Uri website) => throw new InvalidOperationException("不应调用浏览器启动。");
     }
 }

@@ -107,6 +107,20 @@ public sealed class AssistantCommandService(
                     context with { ExplicitUserIntent = explicitIntent });
             }
         }
+
+        KnownDesktopApplication? plannedApplication = null;
+        if (plan.Readiness == IntentPlanReadiness.Ready
+            && plan.Kind == UniversalIntentKind.OpenApplication)
+        {
+            plannedApplication = applications.ResolveByDisplayName(plan.Target ?? string.Empty);
+            if (!InstalledApplicationCatalog.IsAllowedLaunchTarget(plannedApplication))
+            {
+                throw new InstalledApplicationResolutionException(
+                    InstalledApplicationErrorCodes.TargetNotAllowed,
+                    "这个应用目标不符合安全启动要求，本次没有打开任何程序。");
+            }
+        }
+
         RemoveExpired();
         if (plan.Readiness == IntentPlanReadiness.Ready)
         {
@@ -114,10 +128,14 @@ public sealed class AssistantCommandService(
                 plan,
                 foreground,
                 request.ForegroundObservationConsent,
-                inputModality);
+                inputModality,
+                plannedApplication?.Id,
+                plannedApplication is null
+                    ? null
+                    : InstalledApplicationCatalog.CreateTargetBinding(plannedApplication));
         }
 
-        return Map(plan, foreground);
+        return Map(plan, foreground, plannedApplication?.Id);
     }
 
     public async Task<AssistantCommandResultDto> ExecuteAsync(
@@ -171,7 +189,12 @@ public sealed class AssistantCommandService(
                 .ConfigureAwait(false),
             UniversalIntentKind.CodingTask => await ExecuteCodingTaskAsync(plan, effectiveRequest, cancellationToken)
                 .ConfigureAwait(false),
-            UniversalIntentKind.OpenApplication => await ExecuteApplicationAsync(plan, effectiveRequest, cancellationToken)
+            UniversalIntentKind.OpenApplication => await ExecuteApplicationAsync(
+                    plan,
+                    pending.ApplicationId,
+                    pending.ApplicationTargetBinding,
+                    effectiveRequest,
+                    cancellationToken)
                 .ConfigureAwait(false),
             UniversalIntentKind.OpenWebsite => await ExecuteWebsiteAsync(
                 plan, effectiveRequest, cancellationToken).ConfigureAwait(false),
@@ -263,15 +286,27 @@ public sealed class AssistantCommandService(
 
     private Task<AssistantCommandResultDto> ExecuteApplicationAsync(
         IntentPlan plan,
+        string? applicationId,
+        string? applicationTargetBinding,
         ExecuteAssistantCommandRequestDto request,
         CancellationToken cancellationToken)
     {
-        var application = applications.FindByDisplayName(plan.Target ?? string.Empty)
-            ?? applications.FindBrowser(plan.Target ?? string.Empty)
-            ?? throw new InvalidOperationException(
-                $"没有唯一识别到已安装的“{plan.Target}”，因此没有打开任何程序。 ");
+        if (string.IsNullOrWhiteSpace(applicationId)
+            || string.IsNullOrWhiteSpace(applicationTargetBinding))
+        {
+            throw new InstalledApplicationResolutionException(
+                InstalledApplicationErrorCodes.TargetChanged,
+                "已确认的应用目标已经失效，请重新说出应用名称并确认。");
+        }
+
         return ExecuteDesktopAsync(
-            plan, request, "OpenApplication", application.Id, null, cancellationToken);
+            plan,
+            request,
+            "OpenApplication",
+            applicationId,
+            null,
+            cancellationToken,
+            applicationTargetBinding: applicationTargetBinding);
     }
 
     private Task<AssistantCommandResultDto> ExecuteWebsiteAsync(
@@ -305,7 +340,8 @@ public sealed class AssistantCommandService(
         string target,
         ForegroundWindowSnapshot? foreground,
         CancellationToken cancellationToken,
-        string? applicationId = null)
+        string? applicationId = null,
+        string? applicationTargetBinding = null)
     {
         if (actionKind is "SearchForeground" or "DescribeForeground" && foreground is null)
         {
@@ -322,7 +358,12 @@ public sealed class AssistantCommandService(
             applicationId,
             request.AuthorizationSource);
         var result = foreground is null
-            ? await desktopActions.ExecuteAsync(desktopRequest, cancellationToken).ConfigureAwait(false)
+            ? actionKind == "OpenApplication" && applicationTargetBinding is not null
+                ? await desktopActions.ExecuteBoundApplicationAsync(
+                    desktopRequest,
+                    applicationTargetBinding,
+                    cancellationToken).ConfigureAwait(false)
+                : await desktopActions.ExecuteAsync(desktopRequest, cancellationToken).ConfigureAwait(false)
             : await desktopActions.ExecuteTrustedWindowAsync(
                 desktopRequest,
                 foreground,
@@ -470,13 +511,12 @@ public sealed class AssistantCommandService(
 
     private AssistantIntentPlanDto Map(
         IntentPlan plan,
-        ForegroundWindowSnapshot? foreground)
+        ForegroundWindowSnapshot? foreground,
+        string? plannedApplicationId = null)
     {
         var canonicalTarget = plan.Kind switch
         {
-            UniversalIntentKind.OpenApplication =>
-                (applications.FindByDisplayName(plan.Target ?? string.Empty)
-                 ?? applications.FindBrowser(plan.Target ?? string.Empty))?.Id,
+            UniversalIntentKind.OpenApplication => plannedApplicationId,
             UniversalIntentKind.OpenWebsite when Uri.TryCreate(
                 plan.Target,
                 UriKind.Absolute,
@@ -519,5 +559,7 @@ public sealed class AssistantCommandService(
         IntentPlan Plan,
         ForegroundWindowSnapshot? Foreground,
         bool ObservationConsent,
-        string InputModality);
+        string InputModality,
+        string? ApplicationId,
+        string? ApplicationTargetBinding);
 }

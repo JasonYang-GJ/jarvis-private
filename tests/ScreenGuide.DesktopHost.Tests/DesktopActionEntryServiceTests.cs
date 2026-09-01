@@ -38,7 +38,9 @@ public sealed class DesktopActionEntryServiceTests
         Assert.False(first.WasDuplicate);
         Assert.True(repeated.WasDuplicate);
         Assert.Single(launcher.Targets);
-        Assert.Equal("notepad.exe", launcher.Targets[0]);
+        Assert.Equal(
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "notepad.exe"),
+            launcher.Targets[0]);
         Assert.Contains(audits, item =>
             item.Action == "DesktopActionAuthorizationAllowed"
             && item.Outcome == AuditOutcome.Success);

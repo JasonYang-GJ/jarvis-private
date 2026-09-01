@@ -8,6 +8,107 @@ namespace ScreenGuide.DesktopHost.Tests;
 public sealed class AssistantCommandServiceTests
 {
     [Fact]
+    public async Task SafeSettingsUsesBoundOneShotVisibleApplicationPath()
+    {
+        await using var environment = DesktopHostTestEnvironment.Create();
+        var launcher = new RecordingLauncher();
+        var settings = new KnownDesktopApplication(
+            "windows-settings-display",
+            "显示设置",
+            "ms-settings:display",
+            ["显示设置", "显示"]);
+        using var host = environment.BuildHost(services =>
+        {
+            services.AddSingleton<IDesktopProcessLauncher>(launcher);
+            services.AddSingleton<IInstalledApplicationCatalog>(
+                new StaticApplicationCatalog(settings));
+        });
+        await host.StartAsync();
+        IDesktopApiClient client = new DesktopApiClient(environment.Options.PipeName);
+
+        var plan = await client.PlanAssistantCommandAsync(
+            new PlanAssistantCommandRequestDto("打开显示设置"));
+        var completed = await client.ExecuteAssistantCommandAsync(
+            new ExecuteAssistantCommandRequestDto(plan.PlanId, true, "settings-display-once"));
+        var repeated = await Assert.ThrowsAsync<DesktopApiException>(() =>
+            client.ExecuteAssistantCommandAsync(
+                new ExecuteAssistantCommandRequestDto(plan.PlanId, true, "settings-display-once")));
+        await host.StopAsync();
+
+        Assert.Equal(settings.Id, plan.CanonicalTarget);
+        Assert.Equal("Completed", completed.Status);
+        Assert.Equal("ExecutionVerified", completed.VerificationStatus);
+        Assert.Equal([settings.LaunchTarget], launcher.Targets);
+        Assert.Equal("action_plan_expired", repeated.Error.Code);
+    }
+
+    [Theory]
+    [InlineData("打开同名工具", "application_ambiguous")]
+    [InlineData("打开 Windows 更新", "application_target_not_allowed")]
+    public async Task UnsafeApplicationResolutionFailsClosedWithStableError(
+        string command,
+        string expectedCode)
+    {
+        await using var environment = DesktopHostTestEnvironment.Create();
+        var launcher = new RecordingLauncher();
+        using var host = environment.BuildHost(services =>
+        {
+            services.AddSingleton<IDesktopProcessLauncher>(launcher);
+            services.AddSingleton<IInstalledApplicationCatalog>(
+                new RejectingApplicationCatalog(expectedCode));
+        });
+        await host.StartAsync();
+        IDesktopApiClient client = new DesktopApiClient(environment.Options.PipeName);
+
+        var failure = await Assert.ThrowsAsync<DesktopApiException>(() =>
+            client.PlanAssistantCommandAsync(new PlanAssistantCommandRequestDto(command)));
+        await host.StopAsync();
+
+        Assert.Equal(expectedCode, failure.Error.Code);
+        Assert.Empty(launcher.Targets);
+    }
+
+    [Fact]
+    public async Task ApplicationTargetChangedAfterPlanFailsBeforeLaunch()
+    {
+        await using var environment = DesktopHostTestEnvironment.Create();
+        var launcher = new RecordingLauncher();
+        var changedPath = Path.Combine(Path.GetTempPath(), $"changed-host-{Guid.NewGuid():N}.exe");
+        File.Copy(Environment.ProcessPath!, changedPath);
+        try
+        {
+            var original = new KnownDesktopApplication(
+                "bound-app",
+                "绑定应用",
+                Environment.ProcessPath!);
+            var changed = original with { LaunchTarget = changedPath };
+            using var host = environment.BuildHost(services =>
+            {
+                services.AddSingleton<IDesktopProcessLauncher>(launcher);
+                services.AddSingleton<IInstalledApplicationCatalog>(
+                    new ChangingApplicationCatalog(original, changed));
+            });
+            await host.StartAsync();
+            IDesktopApiClient client = new DesktopApiClient(environment.Options.PipeName);
+
+            var plan = await client.PlanAssistantCommandAsync(
+                new PlanAssistantCommandRequestDto("打开绑定应用"));
+            var failure = await Assert.ThrowsAsync<DesktopApiException>(() =>
+                client.ExecuteAssistantCommandAsync(
+                    new ExecuteAssistantCommandRequestDto(plan.PlanId, true, "changed-target")));
+            await host.StopAsync();
+
+            Assert.Equal(original.Id, plan.CanonicalTarget);
+            Assert.Equal("application_target_changed", failure.Error.Code);
+            Assert.Empty(launcher.Targets);
+        }
+        finally
+        {
+            File.Delete(changedPath);
+        }
+    }
+
+    [Fact]
     public async Task ApplicationPlanRequiresVisibleConfirmationAndRunsOnlyOnce()
     {
         await using var environment = DesktopHostTestEnvironment.Create();
@@ -42,7 +143,9 @@ public sealed class AssistantCommandServiceTests
         Assert.Contains(completed.Evidence.UnverifiedFacts, fact =>
             fact.Contains("完全加载", StringComparison.Ordinal));
         Assert.Equal("action_plan_expired", repeated.Error.Code);
-        Assert.Equal(["notepad.exe"], launcher.Targets);
+        Assert.Equal(
+            [Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "notepad.exe")],
+            launcher.Targets);
     }
 
     [Fact]
@@ -85,7 +188,7 @@ public sealed class AssistantCommandServiceTests
         Assert.Contains("Google Chrome", plan.UserSummary, StringComparison.Ordinal);
         Assert.Equal("https://www.douyin.com/", plan.CanonicalTarget);
         Assert.Equal("ExecutionVerified", result.VerificationStatus);
-        Assert.Equal("chrome.exe", launcher.VisibleBrowserTarget);
+        Assert.Equal(Environment.ProcessPath, launcher.VisibleBrowserTarget);
         Assert.Equal("https://www.douyin.com/", launcher.VisibleWebsite?.AbsoluteUri);
         Assert.Contains(result.Evidence!.VerifiedFacts,
             fact => fact.Contains("前台", StringComparison.Ordinal));
@@ -118,7 +221,7 @@ public sealed class AssistantCommandServiceTests
 
         Assert.Equal("Completed", result.Status);
         Assert.Equal("ExecutionVerified", result.VerificationStatus);
-        Assert.Equal("chrome.exe", launcher.VisibleApplicationTarget);
+        Assert.Equal(Environment.ProcessPath, launcher.VisibleApplicationTarget);
     }
 
     [Fact]
@@ -242,7 +345,7 @@ public sealed class AssistantCommandServiceTests
     private sealed class BrowserCatalog : IInstalledApplicationCatalog
     {
         private static readonly KnownDesktopApplication Chrome =
-            new("chrome-app", "Google Chrome", "chrome.exe");
+            new("chrome-app", "Google Chrome", Environment.ProcessPath!);
 
         public IReadOnlyList<KnownDesktopApplication> GetApplications() => [Chrome];
 
@@ -254,11 +357,88 @@ public sealed class AssistantCommandServiceTests
                 ? Chrome
                 : null;
 
+        public KnownDesktopApplication ResolveByDisplayName(string displayName) =>
+            displayName.Contains("Chrome", StringComparison.OrdinalIgnoreCase)
+            || displayName.Contains("谷歌", StringComparison.Ordinal)
+                ? Chrome
+                : throw new InstalledApplicationResolutionException(
+                    InstalledApplicationErrorCodes.NotFound,
+                    "没有找到浏览器。");
+
         public KnownDesktopApplication? FindBrowser(string browserName) =>
             browserName.Contains("Chrome", StringComparison.OrdinalIgnoreCase)
             || browserName.Contains("谷歌", StringComparison.Ordinal)
                 ? Chrome
                 : null;
+    }
+
+    private sealed class StaticApplicationCatalog(KnownDesktopApplication application)
+        : IInstalledApplicationCatalog
+    {
+        public IReadOnlyList<KnownDesktopApplication> GetApplications() => [application];
+
+        public KnownDesktopApplication? FindById(string id) =>
+            id == application.Id ? application : null;
+
+        public KnownDesktopApplication? FindByDisplayName(string displayName) =>
+            application.RegisteredNames?.Contains(displayName, StringComparer.OrdinalIgnoreCase) == true
+                ? application
+                : null;
+
+        public KnownDesktopApplication ResolveByDisplayName(string displayName) =>
+            FindByDisplayName(displayName)
+            ?? throw new InstalledApplicationResolutionException(
+                InstalledApplicationErrorCodes.NotFound,
+                "没有找到应用。");
+
+        public KnownDesktopApplication? FindBrowser(string browserName) => null;
+    }
+
+    private sealed class RejectingApplicationCatalog(string code) : IInstalledApplicationCatalog
+    {
+        public IReadOnlyList<KnownDesktopApplication> GetApplications() => [];
+
+        public KnownDesktopApplication? FindById(string id) => null;
+
+        public KnownDesktopApplication? FindByDisplayName(string displayName) => null;
+
+        public KnownDesktopApplication ResolveByDisplayName(string displayName) =>
+            throw new InstalledApplicationResolutionException(
+                code,
+                code == InstalledApplicationErrorCodes.Ambiguous
+                    ? "识别到多个不同程序。"
+                    : "这个设置页面不允许直接打开。");
+
+        public KnownDesktopApplication? FindBrowser(string browserName) => null;
+    }
+
+    private sealed class ChangingApplicationCatalog(
+        KnownDesktopApplication original,
+        KnownDesktopApplication changed) : IInstalledApplicationCatalog
+    {
+        private int _resolutionCount;
+
+        public IReadOnlyList<KnownDesktopApplication> GetApplications() =>
+            _resolutionCount == 0 ? [original] : [changed];
+
+        public KnownDesktopApplication? FindById(string id) =>
+            id == original.Id ? (_resolutionCount == 0 ? original : changed) : null;
+
+        public KnownDesktopApplication? FindByDisplayName(string displayName)
+        {
+            var application = _resolutionCount++ == 0 ? original : changed;
+            return string.Equals(displayName, original.DisplayName, StringComparison.Ordinal)
+                ? application
+                : null;
+        }
+
+        public KnownDesktopApplication ResolveByDisplayName(string displayName)
+        {
+            var application = _resolutionCount++ == 0 ? original : changed;
+            return application;
+        }
+
+        public KnownDesktopApplication? FindBrowser(string browserName) => null;
     }
 
     private sealed class FixedForegroundProvider : IForegroundWindowContextProvider

@@ -23,6 +23,31 @@ public sealed class IntentPlannerTests
         Assert.True(result.RequiresConfirmation);
     }
 
+    [Theory]
+    [InlineData("打开 Google Chrome", "Google Chrome")]
+    [InlineData("打开谷歌浏览器", "谷歌浏览器")]
+    [InlineData("打开夸克", "夸克")]
+    [InlineData("打开剪映", "剪映")]
+    [InlineData("打开网易云", "网易云")]
+    [InlineData("打开设置", "设置")]
+    [InlineData("打开显示设置", "显示设置")]
+    [InlineData("打开声音设置", "声音设置")]
+    [InlineData("打开蓝牙和设备", "蓝牙和设备")]
+    [InlineData("打开网络状态", "网络状态")]
+    [InlineData("打开已安装的应用", "已安装的应用")]
+    [InlineData("打开存储设置", "存储设置")]
+    [InlineData("打开系统信息", "系统信息")]
+    public void InstalledApplicationAndSettingsNamesStayInTheApplicationPlan(
+        string request,
+        string expectedTarget)
+    {
+        var result = _planner.Plan(request, new IntentPlanningContext());
+
+        Assert.Equal(UniversalIntentKind.OpenApplication, result.Kind);
+        Assert.Equal(expectedTarget, result.Target);
+        Assert.True(result.RequiresConfirmation);
+    }
+
     [Fact]
     public void SearchRequiresForegroundContext()
     {

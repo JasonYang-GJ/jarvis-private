@@ -25,7 +25,25 @@ public sealed class DesktopActionEntryService(
     public async Task<DesktopActionResultDto> ExecuteAsync(
         ExecuteDesktopActionRequestDto request,
         CancellationToken cancellationToken = default) =>
-        await ExecuteCoreAsync(request, null, cancellationToken).ConfigureAwait(false);
+        await ExecuteCoreAsync(request, null, null, cancellationToken).ConfigureAwait(false);
+
+    internal async Task<DesktopActionResultDto> ExecuteBoundApplicationAsync(
+        ExecuteDesktopActionRequestDto request,
+        string expectedTargetBinding,
+        CancellationToken cancellationToken = default)
+    {
+        if (!string.Equals(request.ActionKind, "OpenApplication", StringComparison.Ordinal)
+            || string.IsNullOrWhiteSpace(expectedTargetBinding))
+        {
+            throw new ArgumentException("绑定应用入口缺少有效的应用目标。", nameof(request));
+        }
+
+        return await ExecuteCoreAsync(
+            request,
+            null,
+            expectedTargetBinding,
+            cancellationToken).ConfigureAwait(false);
+    }
 
     internal async Task<DesktopActionResultDto> ExecuteTrustedWindowAsync(
         ExecuteDesktopActionRequestDto request,
@@ -38,12 +56,13 @@ public sealed class DesktopActionEntryService(
             throw new ArgumentException("可信窗口入口只接受窗口范围操作。", nameof(request));
         }
 
-        return await ExecuteCoreAsync(request, trustedWindow, cancellationToken).ConfigureAwait(false);
+        return await ExecuteCoreAsync(request, trustedWindow, null, cancellationToken).ConfigureAwait(false);
     }
 
     private async Task<DesktopActionResultDto> ExecuteCoreAsync(
         ExecuteDesktopActionRequestDto request,
         ForegroundWindowSnapshot? trustedWindow,
+        string? expectedApplicationTargetBinding,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -53,7 +72,7 @@ public sealed class DesktopActionEntryService(
         }
 
         var device = RequireStartedHost().LocalDevice!;
-        var normalized = Normalize(request, trustedWindow);
+        var normalized = Normalize(request, trustedWindow, expectedApplicationTargetBinding);
         var now = timeProvider.GetUtcNow();
         var command = new CommandRecord
         {
@@ -100,7 +119,8 @@ public sealed class DesktopActionEntryService(
                 normalized.WindowHandle,
                 normalized.WindowTitle,
                 normalized.Argument,
-                normalized.WindowIdentity)),
+                normalized.WindowIdentity,
+                normalized.ApplicationTargetBinding)),
             [new SkillResourceScope(
                 normalized.ScopeType,
                 null,
@@ -228,7 +248,8 @@ public sealed class DesktopActionEntryService(
 
     private NormalizedDesktopAction Normalize(
         ExecuteDesktopActionRequestDto request,
-        ForegroundWindowSnapshot? trustedWindow)
+        ForegroundWindowSnapshot? trustedWindow,
+        string? expectedApplicationTargetBinding)
     {
         if (string.Equals(request.ActionKind, "OpenApplication", StringComparison.Ordinal))
         {
@@ -239,13 +260,32 @@ public sealed class DesktopActionEntryService(
                 throw new UnauthorizedAccessException("这个应用不在当前允许打开的清单中。");
             }
 
+            var currentBinding = InstalledApplicationCatalog.CreateTargetBinding(application);
+            if (expectedApplicationTargetBinding is not null
+                && !InstalledApplicationCatalog.TargetBindingMatches(
+                    application,
+                    expectedApplicationTargetBinding))
+            {
+                throw new InstalledApplicationResolutionException(
+                    InstalledApplicationErrorCodes.TargetChanged,
+                    "应用目标在确认后发生变化，本次没有打开任何程序；请重新确认。");
+            }
+
+            if (!InstalledApplicationCatalog.IsAllowedLaunchTarget(application))
+            {
+                throw new InstalledApplicationResolutionException(
+                    InstalledApplicationErrorCodes.TargetNotAllowed,
+                    "这个应用目标不符合安全启动要求，本次没有打开任何程序。");
+            }
+
             return new NormalizedDesktopAction(
                 request.ActionKind,
                 WindowsDesktopCapabilities.OpenApplication,
                 "Application",
                 application.Id,
                 application.Id,
-                application.Id);
+                application.Id,
+                ApplicationTargetBinding: currentBinding);
         }
 
         if (string.Equals(request.ActionKind, "OpenWebsite", StringComparison.Ordinal))
@@ -392,5 +432,6 @@ public sealed class DesktopActionEntryService(
         long? WindowHandle = null,
         string? WindowTitle = null,
         string? Argument = null,
-        ForegroundWindowSnapshot? WindowIdentity = null);
+        ForegroundWindowSnapshot? WindowIdentity = null,
+        string? ApplicationTargetBinding = null);
 }

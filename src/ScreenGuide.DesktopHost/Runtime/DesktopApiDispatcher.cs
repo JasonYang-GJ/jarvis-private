@@ -1070,6 +1070,8 @@ internal static class DesktopApiErrors
                 (memoryException.Code, memoryException.Message),
             MemoryValidationException =>
                 (MemoryServiceErrorCodes.InvalidRequest, "长期记忆请求不符合要求。"),
+            InstalledApplicationResolutionException applicationException =>
+                (applicationException.Code, applicationException.Message),
             ChatModelException chatModelException =>
                 ($"ai_{SensitiveDataSanitizer.DiagnosticCode(chatModelException.Error.Code, "provider_error")}",
                     SafeAiMessage(chatModelException.Error.UserMessage)),
