@@ -6,6 +6,45 @@ namespace ScreenGuide.DesktopHost.Tests;
 public sealed class PointerRegionUnderstandingServiceTests
 {
     [Fact]
+    public async Task AnchorAgeMustRemainStrictlyLessThanTenSeconds()
+    {
+        var startedAt = new DateTimeOffset(2026, 9, 1, 8, 0, 0, TimeSpan.Zero);
+        var allowedTime = new FixedTimeProvider(startedAt);
+        var allowedCapture = new FakeRegionCapture();
+        var allowedOcr = new FixedOcr("allowed");
+        using var allowedService = new PointerRegionUnderstandingService(
+            new FakeProbe(Snapshot()),
+            allowedCapture,
+            allowedOcr,
+            allowedTime);
+        var allowedAnchor = allowedService.Prepare(true, "VisibleConfirmation");
+        allowedTime.UtcNow = startedAt.AddSeconds(10).AddTicks(-1);
+
+        _ = await allowedService.ReadAsync(allowedAnchor.AnchorId);
+
+        Assert.Equal(1, allowedCapture.Count);
+        Assert.Equal(1, allowedOcr.Count);
+
+        var expiredTime = new FixedTimeProvider(startedAt);
+        var expiredCapture = new FakeRegionCapture();
+        var expiredOcr = new FixedOcr("must not run");
+        using var expiredService = new PointerRegionUnderstandingService(
+            new FakeProbe(Snapshot()),
+            expiredCapture,
+            expiredOcr,
+            expiredTime);
+        var expiredAnchor = expiredService.Prepare(true, "VisibleConfirmation");
+        expiredTime.UtcNow = startedAt.AddSeconds(10);
+
+        var error = await Assert.ThrowsAsync<PointerRegionException>(() =>
+            expiredService.ReadAsync(expiredAnchor.AnchorId));
+
+        Assert.Equal(PointerRegionErrorCodes.AnchorStale, error.Code);
+        Assert.Equal(0, expiredCapture.Count);
+        Assert.Equal(0, expiredOcr.Count);
+    }
+
+    [Fact]
     public async Task ConsentIsExplicitOneUseAndExactTargetBound()
     {
         var time = new FixedTimeProvider(new DateTimeOffset(2026, 9, 1, 8, 0, 0, TimeSpan.Zero));
@@ -173,8 +212,13 @@ public sealed class PointerRegionUnderstandingServiceTests
 
     private sealed class FixedOcr(string text) : ILocalOcrTextExtractor
     {
-        public Task<string> ExtractAsync(ReadOnlyMemory<byte> pngBytes, CancellationToken cancellationToken = default) =>
-            Task.FromResult(text);
+        public int Count { get; private set; }
+
+        public Task<string> ExtractAsync(ReadOnlyMemory<byte> pngBytes, CancellationToken cancellationToken = default)
+        {
+            Count++;
+            return Task.FromResult(text);
+        }
     }
 
     private sealed class BlockingOcr : ILocalOcrTextExtractor
@@ -202,6 +246,8 @@ public sealed class PointerRegionUnderstandingServiceTests
 
     private sealed class FixedTimeProvider(DateTimeOffset now) : TimeProvider
     {
-        public override DateTimeOffset GetUtcNow() => now;
+        public DateTimeOffset UtcNow { get; set; } = now;
+
+        public override DateTimeOffset GetUtcNow() => UtcNow;
     }
 }

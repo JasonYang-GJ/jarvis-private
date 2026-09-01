@@ -17,7 +17,7 @@ public sealed class PointerRegionFoundationTests
 
         Assert.Equal(0.5, anchor.NormalizedX, 6);
         Assert.Equal(0.5, anchor.NormalizedY, 6);
-        PointerAnchorPolicy.RequireCurrent(anchor, valid, now.AddSeconds(10));
+        PointerAnchorPolicy.RequireCurrent(anchor, valid, now.AddSeconds(10).AddTicks(-1));
 
         var overlay = Snapshot(pointWindowHandle: 99, pointProcessId: 8, sameProcessChild: false);
         var error = Assert.Throws<PointerRegionException>(() =>
@@ -32,7 +32,7 @@ public sealed class PointerRegionFoundationTests
         var anchor = PointerAnchorPolicy.Create(Snapshot(), Guid.NewGuid(), now);
 
         Assert.Equal(PointerRegionErrorCodes.AnchorStale, Assert.Throws<PointerRegionException>(() =>
-            PointerAnchorPolicy.RequireCurrent(anchor, Snapshot(), now.AddSeconds(10).AddTicks(1))).Code);
+            PointerAnchorPolicy.RequireCurrent(anchor, Snapshot(), now.AddSeconds(10))).Code);
         Assert.Equal(PointerRegionErrorCodes.TargetChanged, Assert.Throws<PointerRegionException>(() =>
             PointerAnchorPolicy.RequireCurrent(anchor, Snapshot(bounds: new PixelBounds(101, 100, 800, 600)), now)).Code);
         Assert.Equal(PointerRegionErrorCodes.TargetChanged, Assert.Throws<PointerRegionException>(() =>

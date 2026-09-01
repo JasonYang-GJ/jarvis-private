@@ -108,7 +108,7 @@ public static class PointerAnchorPolicy
     {
         ArgumentNullException.ThrowIfNull(anchor);
         ArgumentNullException.ThrowIfNull(current);
-        if (nowUtc < anchor.CapturedAtUtc || nowUtc - anchor.CapturedAtUtc > MaximumAge)
+        if (nowUtc < anchor.CapturedAtUtc || nowUtc - anchor.CapturedAtUtc >= MaximumAge)
         {
             throw new PointerRegionException(
                 PointerRegionErrorCodes.AnchorStale,

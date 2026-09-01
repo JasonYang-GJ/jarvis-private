@@ -228,7 +228,7 @@ public sealed class PointerRegionUnderstandingService : IDisposable
         foreach (var item in _prepared)
         {
             if (now < item.Value.CapturedAtUtc
-                || now - item.Value.CapturedAtUtc > PointerAnchorPolicy.MaximumAge)
+                || now - item.Value.CapturedAtUtc >= PointerAnchorPolicy.MaximumAge)
             {
                 _prepared.TryRemove(item.Key, out _);
             }
