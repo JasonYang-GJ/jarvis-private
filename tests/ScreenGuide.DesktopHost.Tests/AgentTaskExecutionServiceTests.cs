@@ -12,6 +12,26 @@ namespace ScreenGuide.DesktopHost.Tests;
 public sealed class AgentTaskExecutionServiceTests
 {
     [Fact]
+    public async Task CodexAdapterStartFailureUsesTypedHostBoundary()
+    {
+        await using var environment = DesktopHostTestEnvironment.Create();
+        var (_, _, task) = await environment.SeedTaskAsync("TEST_TYPED_START_FAILURE");
+        using var host = environment.BuildHost(services =>
+        {
+            services.RemoveAll<ISkillAdapter>();
+            services.AddSingleton<ISkillAdapter>(new ThrowingStartSkillAdapter());
+        });
+        await host.StartAsync();
+        var service = host.Services.GetRequiredService<AgentTaskExecutionService>();
+
+        var error = await Assert.ThrowsAsync<CodexTaskStartException>(
+            () => service.StartTaskAsync(task.Id));
+        await host.StopAsync();
+
+        Assert.IsType<InvalidOperationException>(error.InnerException);
+    }
+
+    [Fact]
     public async Task SuccessfulTurnPersistsThreadAndAuthoritativeCompletion()
     {
         await using var environment = DesktopHostTestEnvironment.Create();
@@ -453,5 +473,41 @@ public sealed class AgentTaskExecutionServiceTests
             CancellationToken cancellationToken = default) => Task.FromResult<SkillFinalResult?>(null);
 
         public void EndFeed() => _release.TrySetResult();
+    }
+
+    private sealed class ThrowingStartSkillAdapter : ISkillAdapter
+    {
+        public SkillDescriptor Descriptor { get; } = new(
+            "codex.project-task",
+            "test",
+            "Bounded failing test adapter",
+            IsBuiltIn: true,
+            new HashSet<string>(StringComparer.Ordinal) { "coding.execute" });
+
+        public Task<SkillStartResult> StartAsync(
+            SkillInvocationRequest request,
+            CancellationToken cancellationToken = default) =>
+            throw new InvalidOperationException("synthetic process failure without start keywords");
+
+        public Task<SkillStatusSnapshot> GetStatusAsync(
+            SkillRunReference run,
+            CancellationToken cancellationToken = default) => throw new NotSupportedException();
+
+        public IAsyncEnumerable<SkillEvent> GetEventsAsync(
+            SkillRunReference run,
+            long afterSequence,
+            CancellationToken cancellationToken = default) => throw new NotSupportedException();
+
+        public Task CancelAsync(
+            SkillRunReference run,
+            CancellationToken cancellationToken = default) => throw new NotSupportedException();
+
+        public Task<SkillStartResult> RespondAsync(
+            SkillDecisionResponse response,
+            CancellationToken cancellationToken = default) => throw new NotSupportedException();
+
+        public Task<SkillFinalResult?> GetFinalResultAsync(
+            SkillRunReference run,
+            CancellationToken cancellationToken = default) => throw new NotSupportedException();
     }
 }

@@ -13,6 +13,9 @@ using AgentTaskStatus = ScreenGuide.Core.Tasking.TaskStatus;
 
 namespace ScreenGuide.DesktopHost.Runtime;
 
+internal sealed class CodexTaskStartException(Exception innerException)
+    : InvalidOperationException("Codex project task process failed to start.", innerException);
+
 public sealed class AgentTaskExecutionService(
     ILocalTaskStore store,
     AgentConnectorRegistry connectorRegistry,
@@ -149,10 +152,23 @@ public sealed class AgentTaskExecutionService(
             await store.UpsertSkillInvocationAsync(invocation, cancellationToken).ConfigureAwait(false);
             _ = cancellationRegistry.GetOrCreateToken(task.Id);
 
-            var start = await route.Adapter.StartAsync(
-                    skillRequest with { AttemptId = attempt.Id },
-                    cancellationToken)
-                .ConfigureAwait(false);
+            SkillStartResult start;
+            try
+            {
+                start = await route.Adapter.StartAsync(
+                        skillRequest with { AttemptId = attempt.Id },
+                        cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            catch (Exception exception) when (
+                exception is not OperationCanceledException
+                && string.Equals(
+                    route.Adapter.Descriptor.Id,
+                    "codex.project-task",
+                    StringComparison.Ordinal))
+            {
+                throw new CodexTaskStartException(exception);
+            }
             if (start.Status == SkillExecutionStatus.Running)
             {
                 await RecordStartedAsync(task.Id, run.Id, attempt.Id, start, cancellationToken)

@@ -265,8 +265,15 @@ internal static class VisibleBrowserWindowLauncher
 
 public static class VisibleWindowActivation
 {
-    public static bool TryActivate(IntPtr handle, TimeSpan timeout)
+    public static bool TryActivate(IntPtr handle, TimeSpan timeout) =>
+        TryActivate(handle, timeout, CancellationToken.None);
+
+    internal static bool TryActivate(
+        IntPtr handle,
+        TimeSpan timeout,
+        CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         if (handle == IntPtr.Zero || !IsWindow(handle) || !IsWindowVisible(handle))
         {
             return false;
@@ -276,9 +283,10 @@ public static class VisibleWindowActivation
         var restoreWatch = Stopwatch.StartNew();
         while (IsIconic(handle) && restoreWatch.Elapsed < TimeSpan.FromSeconds(1))
         {
-            Thread.Sleep(25);
+            WaitOrCancel(TimeSpan.FromMilliseconds(25), cancellationToken);
         }
 
+        cancellationToken.ThrowIfCancellationRequested();
         var foreground = GetForegroundWindow();
         if (foreground == handle)
         {
@@ -322,18 +330,28 @@ public static class VisibleWindowActivation
         var stopwatch = Stopwatch.StartNew();
         while (stopwatch.Elapsed < timeout)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             if (GetForegroundWindow() == handle)
             {
                 return true;
             }
 
-            Thread.Sleep(50);
+            WaitOrCancel(TimeSpan.FromMilliseconds(50), cancellationToken);
         }
 
+        cancellationToken.ThrowIfCancellationRequested();
         // Windows may legally reject keyboard focus for a background process. A successful
         // temporary topmost raise plus a restored visible window is still directly visible
         // to the user, and we immediately remove topmost so the browser is not pinned forever.
         return visiblyRaised && IsWindowVisible(handle) && !IsIconic(handle);
+    }
+
+    private static void WaitOrCancel(TimeSpan delay, CancellationToken cancellationToken)
+    {
+        if (cancellationToken.WaitHandle.WaitOne(delay))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+        }
     }
 
     private static readonly IntPtr HwndTopMost = new(-1);

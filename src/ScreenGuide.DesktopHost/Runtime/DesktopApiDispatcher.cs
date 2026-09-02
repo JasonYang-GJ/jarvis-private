@@ -1167,6 +1167,8 @@ internal static class DesktopApiErrors
             ProviderCredentialStoreException credentialStoreException =>
                 ($"ai_{SensitiveDataSanitizer.DiagnosticCode(credentialStoreException.Code, "credential_error")}",
                     "AI Provider 密钥无法安全处理，请重新设置后再试。"),
+            CodexTaskStartException =>
+                ("codex_start_failed", "Codex 没有成功启动。"),
             UnauthorizedAccessException when ContainsAny(
                 exception.Message,
                 "桌面", "应用", "操作", "确认", "清单") =>
@@ -1189,8 +1191,6 @@ internal static class DesktopApiErrors
                 ("desktop_target_unavailable", "没有找到可安全操作的目标窗口或输入框。"),
             InvalidOperationException when ContainsAny(exception.Message, "操作计划", "操作确认", "超时", "失效") =>
                 ("action_plan_expired", "这次确认已经失效，请重新说出或输入指令。"),
-            InvalidOperationException when exception.Message.Contains("启动", StringComparison.OrdinalIgnoreCase) =>
-                ("codex_start_failed", "Codex 没有成功启动。"),
             InvalidDataException => ("data_invalid", "本地任务数据无法读取。"),
             InvalidOperationException => ("operation_invalid", FriendlyInvalidOperation(exception.Message)),
             ArgumentException => ("input_invalid", "输入内容不符合要求，请检查后重试。"),

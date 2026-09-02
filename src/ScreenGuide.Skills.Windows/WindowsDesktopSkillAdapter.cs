@@ -44,6 +44,15 @@ public interface IDesktopProcessLauncher
 
     VisibleDesktopLaunchResult OpenApplicationVisible(string applicationLaunchTarget);
 
+    VisibleDesktopLaunchResult OpenApplicationVisible(
+        KnownDesktopApplication application,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(application);
+        cancellationToken.ThrowIfCancellationRequested();
+        return OpenApplicationVisible(application.LaunchTarget);
+    }
+
     VisibleDesktopLaunchResult OpenWebsiteVisible(
         string? browserLaunchTarget,
         Uri website);
@@ -51,6 +60,29 @@ public interface IDesktopProcessLauncher
 
 public sealed class DesktopProcessLauncher : IDesktopProcessLauncher
 {
+    private static readonly TimeSpan DefaultWindowDiscoveryTimeout = TimeSpan.FromSeconds(8);
+    private readonly IApplicationActivationRuntime _activationRuntime;
+    private readonly TimeSpan _windowDiscoveryTimeout;
+
+    public DesktopProcessLauncher()
+        : this(new WindowsApplicationActivationRuntime(), DefaultWindowDiscoveryTimeout)
+    {
+    }
+
+    internal DesktopProcessLauncher(
+        IApplicationActivationRuntime activationRuntime,
+        TimeSpan windowDiscoveryTimeout)
+    {
+        ArgumentNullException.ThrowIfNull(activationRuntime);
+        if (windowDiscoveryTimeout <= TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(nameof(windowDiscoveryTimeout));
+        }
+
+        _activationRuntime = activationRuntime;
+        _windowDiscoveryTimeout = windowDiscoveryTimeout;
+    }
+
     public int? Start(string target)
     {
         var process = Process.Start(new ProcessStartInfo(target)
@@ -67,6 +99,15 @@ public sealed class DesktopProcessLauncher : IDesktopProcessLauncher
 
     public VisibleDesktopLaunchResult OpenApplicationVisible(string applicationLaunchTarget) =>
         VisibleBrowserWindowLauncher.OpenApplication(applicationLaunchTarget);
+
+    public VisibleDesktopLaunchResult OpenApplicationVisible(
+        KnownDesktopApplication application,
+        CancellationToken cancellationToken = default) =>
+        TrustedApplicationActivation.Open(
+            application,
+            _activationRuntime,
+            _windowDiscoveryTimeout,
+            cancellationToken);
 }
 
 public static class SafeWebsitePolicy
@@ -141,7 +182,7 @@ public sealed class WindowsDesktopSkillAdapter(
         var input = JsonSerializer.Deserialize<WindowsDesktopActionInput>(request.InputJson)
             ?? throw new InvalidDataException("桌面操作内容无效。");
         var now = DateTimeOffset.UtcNow;
-        var (processId, message) = Execute(request.Capability, input);
+        var (processId, message) = Execute(request.Capability, input, cancellationToken);
         var run = new SkillRunReference(request.TaskId, request.InvocationId, null, request.AttemptId);
         _runs[request.InvocationId] = new RunState(
             run,
@@ -245,7 +286,8 @@ public sealed class WindowsDesktopSkillAdapter(
 
     private (int? ProcessId, string Message) Execute(
         string capability,
-        WindowsDesktopActionInput input)
+        WindowsDesktopActionInput input,
+        CancellationToken cancellationToken)
     {
         if (string.Equals(capability, WindowsDesktopCapabilities.OpenApplication, StringComparison.Ordinal))
         {
@@ -272,7 +314,7 @@ public sealed class WindowsDesktopSkillAdapter(
                     "这个应用目标不符合安全启动要求，本次没有打开任何程序。");
             }
 
-            var launch = launcher.OpenApplicationVisible(application.LaunchTarget);
+            var launch = launcher.OpenApplicationVisible(application, cancellationToken);
             return (launch.ProcessId,
                 $"已确认“{application.DisplayName}”窗口已经显示在你眼前。");
         }
