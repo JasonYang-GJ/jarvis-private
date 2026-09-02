@@ -60,7 +60,7 @@ try {
     if ($ReleaseVersion -cne '0.7.0') {
         throw [InvalidOperationException]::new('release_candidate_version_mismatch')
     }
-    if ($ExpectedSourceSha -notmatch '^[0-9a-f]{40}$' -or $ExpectedParentSha -notmatch '^[0-9a-f]{40}$') {
+    if ($ExpectedSourceSha -cnotmatch '^[0-9a-f]{40}$' -or $ExpectedParentSha -cnotmatch '^[0-9a-f]{40}$') {
         throw [InvalidOperationException]::new('release_candidate_sha_invalid')
     }
 
@@ -111,7 +111,7 @@ try {
         [string]$contract.contractId -cne 'yuanshu-v0.7.0-candidate-attribution' -or
         [string]$contract.candidateStatus -cne 'INTERNAL_CANDIDATE_ONLY' -or
         [string]$contract.releaseVersion -cne $ReleaseVersion -or
-        [string]$contract.baselineParentSha -cne $ExpectedParentSha -or
+        [string]$contract.baselineParentSha -cnotmatch '^[0-9a-f]{40}$' -or
         [string]$contract.generationMode -cne 'PUBLISH_OUTPUT_EXACT_SOURCE_MAPPING_V1') {
         throw [InvalidOperationException]::new('release_candidate_contract_mismatch')
     }
@@ -147,6 +147,14 @@ try {
         }
         if ($actualParentSha -cne $ExpectedParentSha) {
             throw [InvalidOperationException]::new('release_candidate_parent_sha_mismatch')
+        }
+        $candidateBaselineSha = [string]$contract.baselineParentSha
+        if ($candidateBaselineSha -ceq $actualSourceSha) {
+            throw [InvalidOperationException]::new('release_candidate_baseline_not_ancestor')
+        }
+        & git -C $repoRoot merge-base --is-ancestor $candidateBaselineSha $actualSourceSha 2>$null
+        if ($LASTEXITCODE -ne 0) {
+            throw [InvalidOperationException]::new('release_candidate_baseline_not_ancestor')
         }
         $status = @(& git -C $repoRoot status --porcelain=v1 --untracked-files=all 2>$null)
         if ($LASTEXITCODE -ne 0 -or $status.Count -ne 0) {
