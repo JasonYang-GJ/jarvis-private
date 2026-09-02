@@ -19,5 +19,7 @@
     <ProjectReference Include="..\ScreenGuide.FakeBrowser\ScreenGuide.FakeBrowser.csproj" />
     <ProjectReference Include="..\..\src\ScreenGuide.Skills.Abstractions\ScreenGuide.Skills.Abstractions.csproj" />
     <ProjectReference Include="..\..\src\ScreenGuide.Skills.Windows\ScreenGuide.Skills.Windows.csproj" />
+    <ProjectReference Include="..\..\tools\ScreenGuide.Stage4.RealUsageRunner\ScreenGuide.Stage4.RealUsageRunner.csproj" />
+    <ProjectReference Include="..\..\tools\Yuanshu.Gate4ASearchFixture\Yuanshu.Gate4ASearchFixture.csproj" />
   </ItemGroup>
 </Project>
