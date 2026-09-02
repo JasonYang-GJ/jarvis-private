@@ -413,16 +413,15 @@ try {
 
     $includeLines = [Collections.Generic.List[string]]::new()
     $includeLines.Add('; Generated only after the distribution notice bundle passes validation.')
-    $includeLines.Add('Source: "..\distribution\licenses\bundle-manifest.json"; DestDir: "{app}\distribution"; Flags: ignoreversion')
-    $noticeRelative = ([string]$manifest.noticeIndex.path).Replace('/', '\')
-    $includeLines.Add(('Source: "..\distribution\licenses\' + $noticeRelative + '"; DestDir: "{app}\distribution"; Flags: ignoreversion'))
-    $rootNoticeRelative = ([string]$manifest.rootNotice.path).Replace('/', '\')
-    $includeLines.Add(('Source: "..\distribution\licenses\' + $rootNoticeRelative + '"; DestDir: "{app}"; Flags: ignoreversion'))
+    $includeLines.Add(('Source: "' + $resolvedManifestPath + '"; DestDir: "{app}\distribution"; Flags: ignoreversion'))
+    $includeLines.Add(('Source: "' + $noticeIndexPath + '"; DestDir: "{app}\distribution"; Flags: ignoreversion'))
+    $includeLines.Add(('Source: "' + $rootNoticePath + '"; DestDir: "{app}"; Flags: ignoreversion'))
     foreach ($licensePath in @($licensePaths | Sort-Object -Unique)) {
         $installedLicensePath = $licensePath.Substring('files\'.Length)
         $destination = [IO.Path]::GetDirectoryName($installedLicensePath)
         $destinationSuffix = if ([string]::IsNullOrWhiteSpace($destination)) { '' } else { '\' + $destination }
-        $includeLines.Add(('Source: "..\distribution\licenses\' + $licensePath + '"; DestDir: "{app}\licenses' + $destinationSuffix + '"; Flags: ignoreversion'))
+        $resolvedLicensePath = Resolve-BundleFile $resolvedBundleRoot $licensePath
+        $includeLines.Add(('Source: "' + $resolvedLicensePath + '"; DestDir: "{app}\licenses' + $destinationSuffix + '"; Flags: ignoreversion'))
     }
 
     $includeDirectory = [IO.Path]::GetDirectoryName($resolvedIncludePath)

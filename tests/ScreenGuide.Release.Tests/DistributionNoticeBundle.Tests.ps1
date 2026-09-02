@@ -218,6 +218,8 @@ try {
     Assert-True ($include.Contains('notice-index.json')) 'The include must collect the notice index.'
     Assert-True ($include.Contains('files\alpha\LICENSE.txt')) 'The include must collect the exact fake license.'
     Assert-True ($include.Contains('files\beta-installer\LICENSE.txt')) 'The include must collect the exact fake container license.'
+    Assert-True ($include.Contains([IO.Path]::GetFullPath($fixture.BundleRoot))) 'The include must source files from the validated bundle root.'
+    Assert-True (-not $include.Contains('..\distribution\licenses\')) 'The include must not silently fall back to the legacy source bundle.'
     Assert-True (-not $include.Contains('*')) 'The include must not use wildcards.'
     Assert-True (-not $include.Contains('skipifsourcedoesntexist')) 'The include must not make license files optional.'
 
@@ -349,13 +351,16 @@ try {
     Assert-True (-not $currentRun.Output.Contains($repoRoot)) 'Structured gate evidence must not contain an absolute repository path.'
 
     $releaseScript = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'scripts\build-desktop-release.ps1')
+    $attributionPosition = $releaseScript.IndexOf('$attributionOutput = @(& powershell.exe', [StringComparison]::Ordinal)
     $gatePosition = $releaseScript.IndexOf('$distributionGateOutput = @(& powershell.exe', [StringComparison]::Ordinal)
     $restorePosition = $releaseScript.IndexOf('dotnet restore $solution', [StringComparison]::Ordinal)
-    $resetPosition = $releaseScript.IndexOf('Reset-BuildDirectory $clientStage', [StringComparison]::Ordinal)
+    $publishPosition = $releaseScript.IndexOf("dotnet publish `$hostProject", [StringComparison]::Ordinal)
     $isccPosition = $releaseScript.IndexOf('& $iscc ', [StringComparison]::Ordinal)
+    Assert-True ($attributionPosition -ge 0) 'The release script must generate candidate attribution from the published payload.'
     Assert-True ($gatePosition -ge 0) 'The release script must invoke the bundle validator.'
-    Assert-True ($gatePosition -lt $restorePosition) 'The bundle gate must run before restore.'
-    Assert-True ($gatePosition -lt $resetPosition) 'The bundle gate must run before publish directory mutation.'
+    Assert-True ($restorePosition -lt $publishPosition) 'Offline locked restore must precede publish.'
+    Assert-True ($publishPosition -lt $attributionPosition) 'Candidate attribution must be generated from the completed publish tree.'
+    Assert-True ($attributionPosition -lt $gatePosition) 'The candidate attribution must exist before bundle validation.'
     Assert-True ($gatePosition -lt $isccPosition) 'The bundle gate must run before installer compilation.'
     Assert-True ($releaseScript.Contains("`$distributionStagingRoot = Join-Path `$artifactsRoot 'staging'")) 'The release script must bind generated evidence to artifacts/staging.'
     Assert-True ($releaseScript.Contains('-ApprovedStagingRoot $distributionStagingRoot')) 'The release script must pass the approved staging root to the validator.'

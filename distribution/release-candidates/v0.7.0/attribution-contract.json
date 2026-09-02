@@ -1,0 +1,47 @@
+{
+  "schemaVersion": 1,
+  "contractId": "yuanshu-v0.7.0-candidate-attribution",
+  "candidateStatus": "INTERNAL_CANDIDATE_ONLY",
+  "releaseVersion": "0.7.0",
+  "baselineParentSha": "02c158d210569b1ce5ab5e3182084f5bf6486236",
+  "generationMode": "PUBLISH_OUTPUT_EXACT_SOURCE_MAPPING_V1",
+  "baseBundleManifest": {
+    "path": "distribution/licenses/bundle-manifest.json",
+    "rawSha256": "1FC5BD118581AE935D06FDA52CED46EEEAD7257FFE1171DFB4A5E1E798ACF697"
+  },
+  "candidateNotice": {
+    "sourcePath": "distribution/release-candidates/v0.7.0/PROPRIETARY-NOTICE.txt",
+    "bundlePath": "files/yuanshu-v0.7.0-candidate/PROPRIETARY-NOTICE.txt",
+    "hashProfile": "UTF8_NO_BOM_LF_V1",
+    "sha256": "A7A0EA1A4E8BF34353EFCE43BEFEB0875587A3E9EADDAAD96AE8CCC69758CA76"
+  },
+  "forbiddenPayloadManifestPaths": [
+    "docs/baselines/V0.6.0_STAGE4_C0_PAYLOAD_ATTRIBUTION.json"
+  ],
+  "expectedProjectAndBuildComponentIds": [
+    "payload-build-ScreenGuide.DesktopClient",
+    "payload-build-ScreenGuide.DesktopHost",
+    "payload-project-ScreenGuide.AI.Core",
+    "payload-project-ScreenGuide.AI.DeepSeek",
+    "payload-project-ScreenGuide.AI.Qwen",
+    "payload-project-ScreenGuide.Agent.Abstractions",
+    "payload-project-ScreenGuide.Agent.Codex",
+    "payload-project-ScreenGuide.Core",
+    "payload-project-ScreenGuide.DesktopClient",
+    "payload-project-ScreenGuide.DesktopHost",
+    "payload-project-ScreenGuide.DesktopProtocol",
+    "payload-project-ScreenGuide.Evidence",
+    "payload-project-ScreenGuide.Persistence",
+    "payload-project-ScreenGuide.Skills.Abstractions",
+    "payload-project-ScreenGuide.Skills.Windows",
+    "payload-project-ScreenGuide.Vision.Abstractions",
+    "payload-project-ScreenGuide.Vision.Windows",
+    "payload-project-ScreenGuide.Voice.Windows",
+    "payload-project-runtime-prompts"
+  ],
+  "expectedPackageComponentCount": 45,
+  "expectedInstallerContainerComponentIds": [
+    "inno-chinese-simplified-translation",
+    "inno-installer-engine"
+  ]
+}
