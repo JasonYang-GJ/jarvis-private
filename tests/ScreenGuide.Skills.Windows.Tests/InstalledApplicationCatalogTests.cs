@@ -6,7 +6,9 @@ public sealed class InstalledApplicationCatalogTests
     [InlineData("谷歌浏览器", "Google Chrome")]
     [InlineData("夸克", "夸克浏览器")]
     [InlineData("剪映", "剪映专业版")]
+    [InlineData("剪映专业版", "剪映专业版")]
     [InlineData("网易云", "网易云音乐")]
+    [InlineData("网易云音乐", "网易云音乐")]
     public void ResolveByDisplayName_UsesFixedSafeAliases(
         string requestedName,
         string expectedDisplayName)
@@ -211,6 +213,117 @@ public sealed class InstalledApplicationCatalogTests
             catalog.ResolveByDisplayName(requestedName));
 
         Assert.Equal("application_target_not_allowed", error.Code);
+    }
+
+    [Theory]
+    [InlineData(@"以管理员身份运行C:\Gate4A\admin.exe")]
+    [InlineData(@"以管理员身份运行 C:\Gate4A\admin.exe")]
+    [InlineData(@"C:\Gate4A\admin.exe")]
+    [InlineData("admin.exe")]
+    [InlineData("cmd /c calc")]
+    [InlineData("powershell.exe")]
+    [InlineData("\"C:\\Gate4A\\admin.exe\" --unsafe")]
+    [InlineData("“admin.exe” --unsafe")]
+    [InlineData("执行命令时使用运行")]
+    public void ResolveByDisplayName_RejectsUnsafeRequestSyntaxBeforeFuzzyMatching(
+        string requestedName)
+    {
+        var root = CreateRoot("unsafe-request");
+        try
+        {
+            ApplicationRegistration[] registrations =
+            [
+                new ApplicationRegistration(
+                    "运行",
+                    "Microsoft.Windows.Shell.RunDialog",
+                    ApplicationRegistrationSource.AppsFolder),
+                Registration("admin.exe", root, "admin.exe"),
+                Registration("PowerShell", root, "powershell.exe")
+            ];
+            var catalog = new InstalledApplicationCatalog(() => registrations);
+
+            var error = Assert.Throws<InstalledApplicationResolutionException>(() =>
+                catalog.ResolveByDisplayName(requestedName));
+
+            Assert.Equal(InstalledApplicationErrorCodes.TargetNotAllowed, error.Code);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void ResolveByDisplayName_KeepsChromeAliasAmbiguousAcrossDifferentTargets()
+    {
+        var root = CreateRoot("chrome-ambiguous");
+        try
+        {
+            var catalog = new InstalledApplicationCatalog(() =>
+            [
+                Registration("Google Chrome", root, "chrome-user.exe"),
+                Registration("Google Chrome", root, "chrome-machine.exe")
+            ]);
+
+            var error = Assert.Throws<InstalledApplicationResolutionException>(() =>
+                catalog.ResolveByDisplayName("谷歌浏览器"));
+
+            Assert.Equal(InstalledApplicationErrorCodes.Ambiguous, error.Code);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void ResolveByDisplayName_AllowsExactRunDialogNameWithoutInferringItFromLongText()
+    {
+        var catalog = new InstalledApplicationCatalog(() =>
+        [
+            new ApplicationRegistration(
+                "运行",
+                "Microsoft.Windows.Shell.RunDialog",
+                ApplicationRegistrationSource.AppsFolder)
+        ]);
+
+        var application = catalog.ResolveByDisplayName("运行");
+
+        Assert.Equal("运行", application.DisplayName);
+        Assert.Equal(
+            "shell:AppsFolder\\Microsoft.Windows.Shell.RunDialog",
+            application.LaunchTarget);
+    }
+
+    [Fact]
+    public void ResolveByDisplayName_UnknownApplicationStillFailsClosed()
+    {
+        var catalog = new InstalledApplicationCatalog(() => []);
+
+        var error = Assert.Throws<InstalledApplicationResolutionException>(() =>
+            catalog.ResolveByDisplayName("海星工具987654321"));
+
+        Assert.Equal(InstalledApplicationErrorCodes.NotFound, error.Code);
+    }
+
+    [Fact]
+    public void ResolveByDisplayName_DoesNotExtractShortApplicationNameFromLongRequest()
+    {
+        var root = CreateRoot("long-request");
+        try
+        {
+            var registration = Registration("运行", root, "run-dialog.exe");
+            var catalog = new InstalledApplicationCatalog(() => [registration]);
+
+            var error = Assert.Throws<InstalledApplicationResolutionException>(() =>
+                catalog.ResolveByDisplayName("把运行作为附加说明的其他目标"));
+
+            Assert.Equal(InstalledApplicationErrorCodes.NotFound, error.Code);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
     }
 
     [Fact]

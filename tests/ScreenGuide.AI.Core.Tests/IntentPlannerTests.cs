@@ -48,6 +48,31 @@ public sealed class IntentPlannerTests
         Assert.True(result.RequiresConfirmation);
     }
 
+    [Theory]
+    [InlineData(@"打开以管理员身份运行C:\Gate4A\admin.exe")]
+    [InlineData(@"打开以管理员身份运行 C:\Gate4A\admin.exe")]
+    [InlineData(@"打开 C:\Gate4A\admin.exe")]
+    [InlineData("打开 admin.exe")]
+    [InlineData("打开 cmd /c calc")]
+    [InlineData("打开 powershell.exe")]
+    [InlineData("打开 \"C:\\Gate4A\\admin.exe\" --unsafe")]
+    [InlineData("打开“admin.exe” --unsafe")]
+    [InlineData("打开执行命令时使用运行")]
+    [InlineData("打开以管理员权限运行记事本")]
+    public void DangerousOrCompoundApplicationTargetsCreateNoActionPlan(string request)
+    {
+        var result = _planner.Plan(request, new IntentPlanningContext());
+        var plannedActionCount = result.Readiness == IntentPlanReadiness.Ready
+                                 && result.RequiresConfirmation
+            ? 1
+            : 0;
+
+        Assert.Equal(UniversalIntentKind.Unsupported, result.Kind);
+        Assert.Equal(IntentPlanReadiness.Unsupported, result.Readiness);
+        Assert.Equal(0, plannedActionCount);
+        Assert.Null(result.Target);
+    }
+
     [Fact]
     public void SearchRequiresForegroundContext()
     {

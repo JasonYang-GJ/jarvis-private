@@ -40,11 +40,6 @@ public static class ApplicationNameMatcher
             return 70;
         }
 
-        if (requested.Contains(candidate, StringComparison.OrdinalIgnoreCase))
-        {
-            return 55;
-        }
-
         return 0;
     }
 

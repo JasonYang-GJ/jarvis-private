@@ -60,6 +60,17 @@ public interface IIntentPlanner
 /// </summary>
 public sealed partial class DeterministicIntentPlanner(TimeProvider timeProvider) : IIntentPlanner
 {
+    private static readonly string[] UnsafeApplicationRequestTokens =
+    [
+        "以管理员身份",
+        "管理员权限",
+        "提升权限",
+        "runas",
+        "执行命令",
+        "运行命令",
+        "命令行"
+    ];
+
     private static readonly IReadOnlyDictionary<string, string> KnownWebsites =
         new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
@@ -164,6 +175,13 @@ public sealed partial class DeterministicIntentPlanner(TimeProvider timeProvider
 
         if (TryParseApplication(normalized, out var applicationName))
         {
+            if (ContainsUnsafeApplicationRequestSyntax(applicationName))
+            {
+                return Unsupported(
+                    normalized,
+                    "应用名称包含路径、命令或提权表达，因此没有创建操作计划。");
+            }
+
             return Ready(normalized, UniversalIntentKind.OpenApplication,
                 $"打开“{applicationName}”", applicationName, "desktop.application.open", true,
                 $"确认打开“{applicationName}”。");
@@ -358,6 +376,14 @@ public sealed partial class DeterministicIntentPlanner(TimeProvider timeProvider
         return false;
     }
 
+    private static bool ContainsUnsafeApplicationRequestSyntax(string applicationName) =>
+        applicationName.IndexOfAny(['\\', '/', ':']) >= 0
+        || applicationName.IndexOfAny(['|', '&', ';', '<', '>', '`']) >= 0
+        || UnsafeExecutableOrScriptReferenceRegex().IsMatch(applicationName)
+        || CommandArgumentRegex().IsMatch(applicationName)
+        || UnsafeApplicationRequestTokens.Any(token =>
+            applicationName.Contains(token, StringComparison.OrdinalIgnoreCase));
+
     private static bool TryParseForegroundSearch(string text, out string query)
     {
         query = string.Empty;
@@ -396,6 +422,14 @@ public sealed partial class DeterministicIntentPlanner(TimeProvider timeProvider
     [GeneratedRegex(@"^(?:请|帮我|请帮我)?(?:打开|启动|运行)(?:一下)?“?(.+?)”?$",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex OpenApplicationRegex();
+
+    [GeneratedRegex(@"(?:^|[\s\""'“”])[^\s\""'“”]*\.(?:exe|com|cmd|bat|ps1|psm1|vbs|vbe|js|jse|wsf|wsh|msc|msi|msix|scr|dll|cpl|lnk|url)(?:$|[\s\""'“”])",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex UnsafeExecutableOrScriptReferenceRegex();
+
+    [GeneratedRegex(@"(?:^|\s)(?:--?[A-Za-z0-9?]|/[A-Za-z0-9?])",
+        RegexOptions.CultureInvariant)]
+    private static partial Regex CommandArgumentRegex();
 
     [GeneratedRegex(@"^(?:请|帮我|请帮我|给我)?(?:在(?:(?:当前|这个|刚才的)?(?:窗口|软件|页面|浏览器)(?:的)?(?:(?:搜索|文字|地址|输入)栏)?|(?:搜索|文字|地址|输入)栏)(?:里|中|内|里面)?)?(?:搜索|查找|搜一下|搜)(?:一下)?“?(.+?)”?$",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]

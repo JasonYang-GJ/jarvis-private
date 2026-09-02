@@ -99,6 +99,24 @@ public sealed class InstalledApplicationCatalog : IInstalledApplicationCatalog
         "Developer settings", "Windows Update"
     ];
 
+    private static readonly string[] UnsafeApplicationRequestTokens =
+    [
+        "以管理员身份",
+        "管理员权限",
+        "提升权限",
+        "runas",
+        "执行命令",
+        "运行命令",
+        "命令行"
+    ];
+
+    private static readonly string[] UnsafeApplicationReferenceExtensions =
+    [
+        ".exe", ".com", ".cmd", ".bat", ".ps1", ".psm1", ".vbs", ".vbe",
+        ".js", ".jse", ".wsf", ".wsh", ".msc", ".msi", ".msix", ".scr",
+        ".dll", ".cpl", ".lnk", ".url"
+    ];
+
     private static readonly IReadOnlyDictionary<string, ApplicationAliasRule> SafeAliases =
         new Dictionary<string, ApplicationAliasRule>(StringComparer.OrdinalIgnoreCase)
         {
@@ -173,6 +191,13 @@ public sealed class InstalledApplicationCatalog : IInstalledApplicationCatalog
 
     public KnownDesktopApplication ResolveByDisplayName(string displayName)
     {
+        if (ContainsUnsafeApplicationRequestSyntax(displayName))
+        {
+            throw new InstalledApplicationResolutionException(
+                InstalledApplicationErrorCodes.TargetNotAllowed,
+                "应用名称包含路径、命令、可执行文件或提权表达，本次没有打开任何程序。");
+        }
+
         var requested = NormalizeDisplayName(displayName);
         if (requested.Length == 0)
         {
@@ -330,8 +355,7 @@ public sealed class InstalledApplicationCatalog : IInstalledApplicationCatalog
         if (requested.Length >= 2)
         {
             var contains = MatchByName(ordinaryApplications, requested, static (name, query) =>
-                name.Contains(query, StringComparison.OrdinalIgnoreCase)
-                || query.Contains(name, StringComparison.OrdinalIgnoreCase));
+                name.Contains(query, StringComparison.OrdinalIgnoreCase));
             if (contains.Length > 0)
             {
                 return RequireUnique(contains);
@@ -1084,6 +1108,27 @@ public sealed class InstalledApplicationCatalog : IInstalledApplicationCatalog
                || loweredName.Contains("卸载", StringComparison.Ordinal)
                || fileName.StartsWith("unins", StringComparison.Ordinal)
                || fileName.Contains("uninstall", StringComparison.Ordinal);
+    }
+
+    private static bool ContainsUnsafeApplicationRequestSyntax(string value)
+    {
+        var candidate = (value ?? string.Empty).Trim().Normalize(NormalizationForm.FormKC);
+        if (candidate.Length == 0)
+        {
+            return false;
+        }
+
+        return candidate.IndexOfAny(['\\', '/', ':']) >= 0
+               || candidate.IndexOfAny(['|', '&', ';', '<', '>', '`']) >= 0
+               || UnsafeApplicationReferenceExtensions.Any(extension =>
+                   candidate.Contains(extension, StringComparison.OrdinalIgnoreCase))
+               || UnsafeApplicationRequestTokens.Any(token =>
+                   candidate.Contains(token, StringComparison.OrdinalIgnoreCase))
+               || candidate.Split(' ', StringSplitOptions.RemoveEmptyEntries)
+                   .Any(part => part.StartsWith("--", StringComparison.Ordinal)
+                                || part.Length > 1
+                                && part[0] == '-'
+                                && char.IsLetterOrDigit(part[1]));
     }
 
     private static bool IsReparsePoint(string path)

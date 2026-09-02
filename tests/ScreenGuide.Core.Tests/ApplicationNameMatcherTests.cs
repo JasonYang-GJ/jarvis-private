@@ -18,6 +18,8 @@ public sealed class ApplicationNameMatcherTests
     [InlineData("微信", "卸载微信")]
     [InlineData("剪映", "卸载剪映专业版")]
     [InlineData("记事本", "计算器")]
+    [InlineData("记事本附加无关语义", "记事本")]
+    [InlineData("把运行作为附加说明的其他目标", "运行")]
     public void Score_RejectsUninstallersAndUnrelatedApps(string requested, string candidate)
     {
         Assert.Equal(0, ApplicationNameMatcher.Score(requested, candidate));

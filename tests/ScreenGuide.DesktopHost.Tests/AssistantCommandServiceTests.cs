@@ -68,6 +68,44 @@ public sealed class AssistantCommandServiceTests
         Assert.Empty(launcher.Targets);
     }
 
+    [Theory]
+    [InlineData(@"打开以管理员身份运行C:\Gate4A\admin.exe")]
+    [InlineData(@"打开以管理员身份运行 C:\Gate4A\admin.exe")]
+    [InlineData(@"打开 C:\Gate4A\admin.exe")]
+    [InlineData("打开 admin.exe")]
+    [InlineData("打开 cmd /c calc")]
+    [InlineData("打开 powershell.exe")]
+    [InlineData("打开 \"C:\\Gate4A\\admin.exe\" --unsafe")]
+    [InlineData("打开“admin.exe” --unsafe")]
+    [InlineData("打开执行命令时使用运行")]
+    public async Task DangerousCompoundApplicationPhraseCreatesNoActionPlanOrExecution(
+        string request)
+    {
+        await using var environment = DesktopHostTestEnvironment.Create();
+        var launcher = new RecordingLauncher();
+        var catalog = new RunDialogMisbindingCatalog();
+        using var host = environment.BuildHost(services =>
+        {
+            services.AddSingleton<IDesktopProcessLauncher>(launcher);
+            services.AddSingleton<IInstalledApplicationCatalog>(catalog);
+        });
+        await host.StartAsync();
+        IDesktopApiClient client = new DesktopApiClient(environment.Options.PipeName);
+
+        var plan = await client.PlanAssistantCommandAsync(
+            new PlanAssistantCommandRequestDto(request));
+        await host.StopAsync();
+
+        var plannedActionCount = plan.Readiness == "Ready" && plan.RequiresConfirmation ? 1 : 0;
+        Assert.Equal(
+            ("Unsupported", "Unsupported", (string?)null, 0, 0),
+            (plan.IntentKind,
+                plan.Readiness,
+                plan.CanonicalTarget,
+                plannedActionCount,
+                launcher.Targets.Count));
+    }
+
     [Fact]
     public async Task ApplicationTargetChangedAfterPlanFailsBeforeLaunch()
     {
@@ -408,6 +446,31 @@ public sealed class AssistantCommandServiceTests
             || browserName.Contains("谷歌", StringComparison.Ordinal)
                 ? Chrome
                 : null;
+    }
+
+    private sealed class RunDialogMisbindingCatalog : IInstalledApplicationCatalog
+    {
+        private static readonly KnownDesktopApplication RunDialog = new(
+            "windows-run-dialog",
+            "运行",
+            "shell:AppsFolder\\Microsoft.Windows.Shell.RunDialog",
+            ["运行"]);
+
+        public IReadOnlyList<KnownDesktopApplication> GetApplications() => [RunDialog];
+
+        public KnownDesktopApplication? FindById(string id) =>
+            string.Equals(id, RunDialog.Id, StringComparison.Ordinal) ? RunDialog : null;
+
+        public KnownDesktopApplication? FindByDisplayName(string displayName) =>
+            displayName.Contains("运行", StringComparison.Ordinal) ? RunDialog : null;
+
+        public KnownDesktopApplication ResolveByDisplayName(string displayName) =>
+            FindByDisplayName(displayName)
+            ?? throw new InstalledApplicationResolutionException(
+                InstalledApplicationErrorCodes.NotFound,
+                "没有找到应用。");
+
+        public KnownDesktopApplication? FindBrowser(string browserName) => null;
     }
 
     private sealed class StaticApplicationCatalog(KnownDesktopApplication application)
