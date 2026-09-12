@@ -495,7 +495,7 @@
                                              Background="White" BorderBrush="{StaticResource LineBrush}" />
                                     <TextBlock x:Name="PointerAnswerShapeText" Margin="0,7,0,0"
                                                TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" />
-                                    <TextBlock Text="不会发送图片、整页文字、窗口标题或文件路径。确认只对当前 Turn、锚点、路由、Prompt 和以上精确文本有效。"
+                                    <TextBlock Text="这是刚才识别的冻结文字，不是实时画面；不会发送图片、整页文字、窗口标题或文件路径。请在识别后 120 秒内阅读并确认；然后切回同一目标窗口，按 Ctrl+Alt+F8 发送这一次。不会再次读取图片。"
                                                Margin="0,6,0,0" TextWrapping="Wrap" Foreground="#285A8A" />
                                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,10,0,0">
                                         <Button Content="不发送并取消" Style="{StaticResource SecondaryButton}"
@@ -519,6 +519,14 @@
                                         <RowDefinition Height="Auto" />
                                     </Grid.RowDefinitions>
                                     <StackPanel>
+                                        <Border x:Name="PointerGesturePanel" Visibility="Collapsed" Background="#E7F1FF" Padding="10" Margin="0,0,0,8"
+                                                AutomationProperties.AutomationId="PointerGesturePanel">
+                                            <StackPanel>
+                                                <TextBlock x:Name="PointerGestureInstruction" TextWrapping="Wrap" />
+                                                <Button Content="取消这次指针操作" HorizontalAlignment="Right" Click="CancelPointerGestureButton_Click"
+                                                        AutomationProperties.AutomationId="CancelPointerGesture" />
+                                            </StackPanel>
+                                        </Border>
                                         <TextBlock Text="本 Turn 可选记忆（默认 0 条，不会自动发送；按 Ctrl 可多选，最多 8 条）"
                                                    FontSize="11" Foreground="{StaticResource MutedBrush}" />
                                         <ListBox x:Name="ConversationMemorySelectionList" Margin="0,6,0,0" MaxHeight="92"

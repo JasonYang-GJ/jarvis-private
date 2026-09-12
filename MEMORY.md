@@ -4,9 +4,9 @@
 
 ## 当前状态
 
-- 2026-09-12 候选核对：产品源码 `19081d39e443a465770fc9e402d9a30c3d1d0ae0`、V0.7.0 安装 Client/Host 配对与 EXE 哈希匹配；最近正式标签仍为 `v0.6.0-stage4`。本轮仅测试诊断/文档变化，不改历史安装包或已安装产品。
+- 2026-09-12 候选核对：产品源码 `19081d39e443a465770fc9e402d9a30c3d1d0ae0`、V0.7.0 安装 Client/Host 配对与 EXE 哈希匹配；最近正式标签仍为 `v0.6.0-stage4`。前次仅测试诊断/文档变化；后续用户已批准Gate4C交互修复和项目数据迁移，旧安装身份仍保留。
 - 2026-09-08 交接报告已记录 Gate4A/B PASS；旧 R2/canary 的失败记录不能覆盖较新交接结论，本轮未重测。Gate4C 尚未完成：使用真实 MainWindow 点击逻辑、fake API 在捕获前停止的诊断证明 Prepare 时前台为元枢而非外部测试窗口；出站确认还有相同前台约束，阅读预览沿用原锚点 10 秒期限。
-- 当前下一步是确认 Gate4C 交互/时限变更，之后修复与重新验收。分离 10 秒捕获寿命与 120 秒冻结文字预览的方案只是待审提案，不能当成已实现或已授权；见 `docs/V0.7.0_GATE4C_INTERACTION_PROPOSAL.md`。当前证据账见 `docs/V0.7.0_CANDIDATE_CLOSEOUT.md`。
+- 用户已明确同意 Gate4C 交互/时限方案：临时Ctrl+Alt+F8两次手势，首次准备30秒、捕获严格少于10秒、冻结文字阅读/单次发送120秒，已在本地候选实现；真实OCR/Provider闭环仍待用户可见同意。详见修复记录 `docs/V0.7.0_GATE4C_REPAIR.md` 和 `docs/V0.7.0_GATE4C_INTERACTION_PROPOSAL.md`。当前证据账见 `docs/V0.7.0_CANDIDATE_CLOSEOUT.md`。
 
 - V0.6.0 / Stage 4 已完成 Final Freeze，S4-R1/R2/R3/R4 均为 `INTEGRATED_PASS`。正式标签 `v0.6.0-stage4` 指向 C0 `3a591a7b6af7da7d97e07093d4c33a3f44553b82`，annotated tag object 为 `20045c7960c182a052a5e0b2552ce0ed14a3863f`；C1 只记录冻结证据，不改变标签源码或二进制身份。Stage 4 到此结束，不新增 S4-R5。
 - Stage 5 的唯一方向是 Safe Distribution & Upgrade Readiness。S5-R1 许可/NOTICE 与 S5-R2 真实 Windows Sandbox 生命周期均已 PASS；S5-R2 状态为 `S5-R2_REAL_SANDBOX_LIFECYCLE_PASS`，证据绑定 exact SHA `2dc99dda8ef31cad0fdd6ed0ccf74b34e8b59867`。S5-R3 签名/release identity 与 S5-R4 最终分发验收仍为 `NOT_STARTED / NOT_AUTHORIZED`；Stage 5 尚未完成，也不授权下载、未来安装、签名、采购、联网、上传或发布。
@@ -26,7 +26,7 @@
 2. DesktopClient 不直接访问 SQLite、Codex 或 Windows 动作；DesktopHost 是唯一编排和审计边界。
 3. 电脑操作采用确定性意图 + 权限白名单；模型、网页、屏幕、文档和 SessionCoordinator 都不能自行扩大权限。
 4. 只捕获用户确认的单个前台窗口，绝不回退为全桌面；授权只对显示的单个窗口和当前 Turn 生效。
-5. 运行数据存放在用户本地应用数据目录，不进入仓库；卸载默认保留。
+5. 运行数据不进入仓库；默认使用用户本地应用数据目录，也可通过SCREEN_GUIDE_DATA_DIRECTORY指定外置目录。2026-09-12用户要求本项目数据全部放E盘，运行数据、语音模型、临时文件和验证记录已迁移并设置E盘路径，旧路径保留兼容跳转；卸载默认保留数据。
 6. 模型供应商必须位于可替换接口后。阶段 1 的 Codex 真实证据是历史冻结事实；阶段 2 普通聊天发布目标改为 DeepSeek + 千问，不与 Codex 编程 Agent 绑定。
 7. Conversation/Provider Thread、Session/Turn、编程 Task 和未来长期记忆是四种不同状态，不能混用。
 8. 安装产物不提交 Git，以版本标签、哈希、测试记录和外部快照关联。

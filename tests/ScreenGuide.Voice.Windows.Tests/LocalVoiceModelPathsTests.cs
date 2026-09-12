@@ -14,9 +14,15 @@ public sealed class LocalVoiceModelPathsTests
     }
 
     [Fact]
-    public void ModelRootIsOutsideRepositoryAndUnderLocalAppData()
+    public void ModelRootUsesExplicitConfigurationOrTheLocalAppDataDefault()
     {
         var root = Path.GetFullPath(LocalVoiceModelPaths.ModelRoot);
+        var configured = Environment.GetEnvironmentVariable(LocalVoiceModelPaths.ModelDirectoryEnvironmentVariable);
+        if (!string.IsNullOrEmpty(configured))
+        {
+            Assert.Equal(Path.GetFullPath(configured), root);
+            return;
+        }
         var localAppData = Path.GetFullPath(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData));
 

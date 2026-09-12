@@ -609,7 +609,11 @@ public sealed class SessionCoordinatorConflictTests
             await Task.Delay(20);
         }
 
-        throw new TimeoutException($"统一会话请求没有进入 {expectedPhase}。");
+        var last = await client.GetCurrentSessionAsync();
+        var lastTurn = last?.Turns.SingleOrDefault(turn => turn.Id == turnId);
+        if (lastTurn?.Phase == expectedPhase) return last!;
+        var task = lastTurn?.TaskId is { } taskId ? await client.GetTaskAsync(taskId) : null;
+        throw new TimeoutException($"统一会话请求没有进入 {expectedPhase}；Turn={lastTurn?.Phase}; Task={task?.Summary.Status}; cancelled={lastTurn?.CancellationRequested}。");
     }
 
     private static async Task<TaskDetailsDto> WaitForTaskStatusAsync(

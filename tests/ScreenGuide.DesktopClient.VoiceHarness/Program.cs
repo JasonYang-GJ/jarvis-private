@@ -34,7 +34,7 @@ internal static class Program
             Path.GetTempPath(),
             $"screen-guide-voice-harness-{Guid.NewGuid():N}");
         var dataRoot = Path.Combine(testRoot, "user-data");
-        App? application = null;
+        Application? application = null;
         IHost? host = null;
         TrayIconService? tray = null;
         ControlledVoiceListener? voice = null;
@@ -51,7 +51,7 @@ internal static class Program
         {
             Require(args.Length == 1 && File.Exists(args[0]), "fake_codex_missing");
             Directory.CreateDirectory(dataRoot);
-            application = new App
+            application = new Application
             {
                 ShutdownMode = ShutdownMode.OnExplicitShutdown
             };
@@ -60,7 +60,16 @@ internal static class Program
             resourceAssemblyConfirmed = ReferenceEquals(Application.ResourceAssembly, harnessAssembly);
             Require(entryAssemblyConfirmed, "entry_assembly_invalid");
             Require(resourceAssemblyConfirmed, "resource_assembly_invalid");
-            application.InitializeComponent();
+            // Load the real resource definitions without invoking App's production startup.
+            using (var resource = harnessAssembly.GetManifestResourceStream("VoiceHarness.ActualApp.xaml")!)
+            {
+                var document = System.Xml.Linq.XDocument.Load(resource);
+                System.Xml.Linq.XNamespace wpf = "http://schemas.microsoft.com/winfx/2006/xaml/presentation";
+                var dictionary = new System.Xml.Linq.XElement(wpf + "ResourceDictionary",
+                    new System.Xml.Linq.XAttribute(System.Xml.Linq.XNamespace.Xmlns + "x", "http://schemas.microsoft.com/winfx/2006/xaml"),
+                    document.Root!.Element(wpf + "Application.Resources")!.Elements());
+                application.Resources = (ResourceDictionary)System.Windows.Markup.XamlReader.Parse(dictionary.ToString());
+            }
 
             var settingsStore = new DesktopClientSettingsStore(dataRoot);
             var clientSettings = new DesktopClientSettings
@@ -75,6 +84,10 @@ internal static class Program
 
             var provider = RecordingChatProvider.Create();
             var pipeName = $"ScreenGuide.VoiceHarness.{Guid.NewGuid():N}";
+            // The test uses its controlled provider, independent of the product's current default route.
+            var route = new AiSettings(new ChatModelRoute("codex", "codex-default"));
+            using (var routeStore = new FileAiSettingsStore(Path.Combine(dataRoot, "settings", "ai-settings.json"), route))
+                routeStore.SaveAsync(route).GetAwaiter().GetResult();
             host = DesktopHostFactory.Build(
                 [],
                 new DesktopHostOptions(dataRoot, args[0], pipeName),

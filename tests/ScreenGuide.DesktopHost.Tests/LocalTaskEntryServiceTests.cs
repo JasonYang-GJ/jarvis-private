@@ -46,7 +46,7 @@ public sealed class LocalTaskEntryServiceTests
     {
         await using var environment = DesktopHostTestEnvironment.Create();
         var (_, project, _) = await environment.SeedProjectsAsync();
-        var marker = Path.Combine(environment.RootDirectory, "local-entry-cancel-child.txt");
+        using var processes = new ReadyProcessTree(environment.RootDirectory);
         using var host = environment.BuildHost();
         await host.StartAsync();
         var entry = host.Services.GetRequiredService<LocalTaskEntryService>();
@@ -54,18 +54,18 @@ public sealed class LocalTaskEntryServiceTests
 
         var created = await entry.CreateTaskAsync(new CreateLocalTaskRequest(
             project.Id,
-            $"TEST_LONG_RUNNING\nMARKER={marker}",
+            processes.Prompt,
             "取消验收"));
-        await Task.Delay(500);
+        await processes.WaitUntilReadyAsync();
         var cancelled = await entry.CancelTaskAsync(created.TaskId, "local-entry-cancel");
         await execution.WaitForTaskAsync(created.TaskId);
+        await processes.AssertStoppedAsync();
         var details = await entry.GetTaskDetailsAsync(created.TaskId);
         await host.StopAsync();
 
         Assert.False(cancelled.WasDuplicate);
         Assert.Equal(AgentTaskStatus.Cancelled, details?.Task.Status);
         Assert.Equal(EvidenceVerificationStatus.Cancelled, details?.Evidence?.VerificationStatus);
-        Assert.False(File.Exists(marker));
     }
 
     [Fact]

@@ -3,6 +3,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 using System.Windows.Automation;
+using ScreenGuide.AI.Core;
 using ScreenGuide.DesktopProtocol;
 using ScreenGuide.FakeCodexCli;
 using ScreenGuide.Persistence.Sqlite;
@@ -24,6 +25,9 @@ public sealed class DesktopSessionUiAutomationTests
         var markerPath = Path.Combine(testRoot, "cancelled-provider-child.txt");
         Directory.CreateDirectory(dataRoot);
         await WriteCompletedOnboardingSettingsAsync(dataRoot);
+        var legacyRoute = new AiSettings(new ChatModelRoute("codex", "codex-default"));
+        using (var routeStore = new FileAiSettingsStore(Path.Combine(dataRoot, "settings", "ai-settings.json"), legacyRoute))
+            await routeStore.SaveAsync(legacyRoute);
 
         Process? clientProcess = null;
         Process? syntheticWindowProcess = null;

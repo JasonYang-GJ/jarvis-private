@@ -86,6 +86,15 @@ function Find-OfflinePackageCache {
         $candidate = $candidate.Parent
     }
 
+    # A repository relocated to another drive no longer has the user's cache among its ancestors.
+    # Read an existing cache only; this does not authorize an online restore or a different Stage1 source.
+    $sharedCaches = @($env:NUGET_PACKAGES, (Join-Path $env:USERPROFILE '.nuget\packages'))
+    foreach ($sharedCache in $sharedCaches) {
+        if (-not [string]::IsNullOrWhiteSpace($sharedCache) -and
+            (Test-Path -LiteralPath (Join-Path $sharedCache 'microsoft.data.sqlite\10.0.11') -PathType Container)) {
+            return [IO.Path]::GetFullPath($sharedCache)
+        }
+    }
     $script:failureCode = 'offline_package_cache_missing'
     throw [InvalidOperationException]::new('offline_package_cache_missing')
 }

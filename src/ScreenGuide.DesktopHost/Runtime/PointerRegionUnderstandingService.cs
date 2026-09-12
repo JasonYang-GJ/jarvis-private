@@ -215,6 +215,22 @@ public sealed class PointerRegionUnderstandingService : IDisposable
             _timeProvider.GetUtcNow());
     }
 
+    public void RequireFrozenTextTargetCurrent(PointerAnchor anchor)
+    {
+        ThrowIfDisposed();
+        ArgumentNullException.ThrowIfNull(anchor);
+        if (anchor.AppRunId != _appRunId)
+        {
+            throw new PointerRegionException(
+                PointerRegionErrorCodes.AnchorUnavailable,
+                "这份文字快照不属于当前应用运行，请重新提问。");
+        }
+
+        PointerAnchorPolicy.RequireFrozenTextTargetCurrent(
+            anchor,
+            _probe.ObserveAt(anchor.PhysicalScreenX, anchor.PhysicalScreenY));
+    }
+
     public void Dispose()
     {
         if (Interlocked.Exchange(ref _disposed, 1) != 0)

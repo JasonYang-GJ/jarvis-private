@@ -2282,6 +2282,7 @@ public sealed class SessionCoordinator
                 || required.Turn.Version != prepared.TurnVersion + 1
                 || required.Turn.Phase != SessionTurnPhase.WaitingForPointerAnswerConsent
                 || !PointerAnswerRouteAndPromptMatch(required.Turn, prepared)
+                || timeProvider.GetUtcNow() < prepared.PreparedAtUtc
                 || timeProvider.GetUtcNow() >= prepared.ExpiresAtUtc)
             {
                 await InvalidatePointerAnswerAsync(turnId, PointerAnswerErrorCodes.ConsentStale)
@@ -2291,7 +2292,7 @@ public sealed class SessionCoordinator
 
             try
             {
-                pointerRegions.RequireCurrent(prepared.Anchor);
+                if (confirmed) pointerRegions.RequireFrozenTextTargetCurrent(prepared.Anchor);
             }
             catch (PointerRegionException)
             {
@@ -2380,6 +2381,7 @@ public sealed class SessionCoordinator
                 || latest.CancellationRequested
                 || !latest.ConfirmationGranted
                 || !PointerAnswerRouteAndPromptMatch(latest, prepared)
+                || timeProvider.GetUtcNow() < prepared.PreparedAtUtc
                 || timeProvider.GetUtcNow() >= prepared.ExpiresAtUtc)
             {
                 throw new PointerAnswerException(
@@ -2387,7 +2389,7 @@ public sealed class SessionCoordinator
                     "指针区域出站确认已失效，没有发送。");
             }
 
-            pointerRegions.RequireCurrent(prepared.Anchor);
+            pointerRegions.RequireFrozenTextTargetCurrent(prepared.Anchor);
             var envelope = prepared.CreateEnvelope(timeProvider.GetUtcNow());
             await RunConversationTurnAsync(
                     session,

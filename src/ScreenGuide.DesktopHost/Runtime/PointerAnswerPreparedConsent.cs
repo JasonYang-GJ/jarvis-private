@@ -38,6 +38,8 @@ public sealed record PointerAnswerPreparedConsent(
     int RegionHeight,
     string RegionSource)
 {
+    public static readonly TimeSpan MaximumReadingAge = TimeSpan.FromSeconds(120);
+
     public static PointerAnswerPreparedConsent Create(
         SessionTurnRecord turn,
         PointerRegionOcrResult result,
@@ -71,7 +73,7 @@ public sealed record PointerAnswerPreparedConsent(
         var contextHash = PointerAnswerOutboundContract.HashText(context);
         var targetBindingHash = HashTarget(result.Anchor);
         var consentId = Guid.NewGuid();
-        var expiresAtUtc = result.Anchor.CapturedAtUtc + PointerAnchorPolicy.MaximumAge;
+        var expiresAtUtc = preparedAtUtc + MaximumReadingAge;
         var previewHash = PointerAnswerOutboundContract.HashText(string.Join(
             "\n",
             consentId.ToString("D"),
@@ -87,7 +89,9 @@ public sealed record PointerAnswerPreparedConsent(
             questionHash,
             ocrHash,
             contextHash,
-            targetBindingHash));
+            targetBindingHash,
+            preparedAtUtc.ToString("O", CultureInfo.InvariantCulture),
+            expiresAtUtc.ToString("O", CultureInfo.InvariantCulture)));
 
         return new PointerAnswerPreparedConsent(
             consentId,

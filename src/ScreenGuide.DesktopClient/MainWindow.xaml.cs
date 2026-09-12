@@ -102,6 +102,8 @@ public partial class MainWindow : Window
 
     private async void MainWindow_Closed(object? sender, EventArgs e)
     {
+        CancelPendingPointerGesture();
+        _pointerGesture.Dispose();
         _refreshTimer.Stop();
         _activeVoiceCommandCancellation?.Cancel();
         _activeVoiceCommandCancellation?.Dispose();
@@ -125,8 +127,17 @@ public partial class MainWindow : Window
         _lifetime.Dispose();
     }
 
-    private void MainWindow_Closing(object? sender, CancelEventArgs e)
+    private async void MainWindow_Closing(object? sender, CancelEventArgs e)
     {
+        CancelPendingPointerGesture();
+        if (!_pointerCancellationCompletion.IsCompletedSuccessfully)
+        {
+            e.Cancel = true;
+            try { await _pointerCancellationCompletion; }
+            catch { return; } // Keep the visible window available for a retry if Host did not acknowledge.
+            Close();
+            return;
+        }
         if (_forceClose)
         {
             _ = _voice.StopAsync();
@@ -143,7 +154,7 @@ public partial class MainWindow : Window
 
         _forceClose = true;
         _ = _voice.StopAsync();
-        Dispatcher.BeginInvoke(() => System.Windows.Application.Current.Shutdown());
+        _ = Dispatcher.BeginInvoke(() => System.Windows.Application.Current.Shutdown());
     }
 
     private async void RefreshTimer_Tick(object? sender, EventArgs e) =>
@@ -328,6 +339,7 @@ public partial class MainWindow : Window
         snapshot = _sessionProjectionCache.Snapshot ?? snapshot;
 
         _currentSession = snapshot;
+        if (_pointerGesture.IsArmed && _pointerGestureStillValid?.Invoke() != true) CancelPendingPointerGesture();
         _selectedConversationId = snapshot?.ConversationId;
         RenderConversationMemoryChoices();
         var presentation = SessionUiPresenter.Present(snapshot);
@@ -901,6 +913,7 @@ public partial class MainWindow : Window
 
     private async Task CreateTaskAsync(ProjectDto? project, string instruction, string? title)
     {
+        CancelPendingPointerGesture();
         if (project is null)
         {
             ShowError("请先选择一个已授权项目。", null);
@@ -1012,6 +1025,7 @@ public partial class MainWindow : Window
         string text,
         CancellationToken cancellationToken)
     {
+        CancelPendingPointerGesture();
         await RunCommandAsync(async () =>
         {
             var submitted = await _api.SubmitSessionInputAsync(
@@ -1123,6 +1137,7 @@ public partial class MainWindow : Window
 
     private async Task CancelCurrentSessionTurnAsync()
     {
+        CancelPendingPointerGesture();
         var session = _currentSession;
         var turn = session?.ForegroundTurn;
         if (session is null || turn is null)
@@ -1143,6 +1158,7 @@ public partial class MainWindow : Window
 
     private async void NewTopicButton_Click(object sender, RoutedEventArgs e)
     {
+        CancelPendingPointerGesture();
         await RunCommandAsync(async () =>
         {
             var snapshot = await _api.StartNewSessionAsync(
@@ -1517,6 +1533,7 @@ public partial class MainWindow : Window
 
     private async void NewConversationButton_Click(object sender, RoutedEventArgs e)
     {
+        CancelPendingPointerGesture();
         await RunCommandAsync(async () =>
         {
             var session = await _api.StartNewSessionAsync("新话题", _lifetime.Token);
@@ -1532,6 +1549,7 @@ public partial class MainWindow : Window
 
     private async void SendConversationButton_Click(object sender, RoutedEventArgs e)
     {
+        CancelPendingPointerGesture();
         var session = _currentSession;
         if (session is null)
         {
@@ -1588,6 +1606,7 @@ public partial class MainWindow : Window
 
     private async void AskPointerQuestionButton_Click(object sender, RoutedEventArgs e)
     {
+        CancelPendingPointerGesture();
         var session = _currentSession;
         var question = ConversationInputTextBox.Text.Trim();
         if (session is null || question.Length == 0)
@@ -1595,46 +1614,55 @@ public partial class MainWindow : Window
             ShowError("请先输入要询问当前指针位置的问题。", null);
             return;
         }
-
         if (ConversationMemorySelectionList.SelectedItems.Count > 0)
         {
             ShowError("指针区域提问不能同时携带长期记忆，请先清除记忆选择。", null);
             return;
         }
-
         if (MessageBox.Show(
-                "只授权这一次：读取当前指针所在前台窗口的一小块区域，并在本机做 OCR。\n\n此时不会发送给 AI；识别完成后会显示完整出站预览，由你再次确认。",
-                "确认本机区域读取",
-                MessageBoxButton.YesNo,
-                MessageBoxImage.Question) != MessageBoxResult.Yes)
-        {
+                "只授权这一次本机读取：确认后，请在 30 秒内切到目标应用，把指针放到要问的位置，按 Ctrl+Alt+F8。\n\n只读取该前台窗口的一小块区域并在本机识别文字。此时不会发送给 AI；之后会显示完整文字预览，由你再次确认。",
+                "确认本机区域读取", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
             return;
-        }
 
-        await RunCommandAsync(async () =>
+        await RunCommandAsync(() =>
         {
-            var anchor = await _api.PreparePointerRegionAsync(
-                new PreparePointerRegionRequestDto(true),
-                _lifetime.Token);
-            await _api.SubmitSessionInputAsync(
-                new SessionInputRequestDto(
-                    question,
-                    "Text",
-                    $"desktop-pointer-answer-{Guid.NewGuid():N}",
-                    session.SessionId,
-                    PointerAnchorId: anchor.AnchorId),
-                _lifetime.Token);
-            _isRenderingMemoryConsent = true;
-            try
-            {
-                ConversationInputTextBox.Clear();
-            }
-            finally
-            {
-                _isRenderingMemoryConsent = false;
-            }
-
-            await RefreshSessionAsync();
+            ArmPointerGesture(DateTimeOffset.UtcNow.AddSeconds(30),
+                "请在 30 秒内切到目标应用，把指针放到要问的位置，按 Ctrl+Alt+F8。现在尚未读取屏幕。",
+                () => _currentSession?.SessionId == session.SessionId
+                    && _currentSession?.ForegroundTurn?.Id == session.ForegroundTurn?.Id
+                    && ConversationInputTextBox.Text.Trim() == question
+                    && ConversationMemorySelectionList.SelectedItems.Count == 0,
+                async token =>
+                {
+                    var anchor = await _api.PreparePointerRegionAsync(new PreparePointerRegionRequestDto(true), token);
+                    await _pointerRequestCancellation.BindAsync(
+                        cancellation => _api.CancelPointerRegionAsync(anchor.AnchorId, cancellation), token);
+                    var submitted = false;
+                    try
+                    {
+                        token.ThrowIfCancellationRequested();
+                        var result = await _api.SubmitSessionInputAsync(new SessionInputRequestDto(
+                            question, "Text", $"desktop-pointer-answer-{Guid.NewGuid():N}",
+                            session.SessionId, PointerAnchorId: anchor.AnchorId), token);
+                        submitted = true;
+                        await _pointerRequestCancellation.BindAsync(
+                            cancellation => _api.CancelSessionTurnAsync(session.SessionId, result.TurnId, cancellation), token);
+                        token.ThrowIfCancellationRequested();
+                        _isRenderingMemoryConsent = true;
+                        try { ConversationInputTextBox.Clear(); }
+                        finally { _isRenderingMemoryConsent = false; }
+                        await RefreshSessionAsync();
+                    }
+                    finally
+                    {
+                        if (!submitted)
+                        {
+                            using var cleanup = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+                            await _api.CancelPointerRegionAsync(anchor.AnchorId, cleanup.Token).WaitAsync(cleanup.Token);
+                        }
+                    }
+                });
+            return Task.CompletedTask;
         });
     }
 
@@ -1646,27 +1674,37 @@ public partial class MainWindow : Window
 
     private async Task RespondPointerAnswerConsentAsync(bool confirmed)
     {
+        CancelPendingPointerGesture(cancelRequest: false);
         var session = _currentSession;
         var consent = session?.PointerAnswerConsents?
             .SingleOrDefault(item => item.TurnId == session.ForegroundTurn?.Id);
-        if (session is null || consent is null)
-        {
-            return;
-        }
+        if (session is null || consent is null) return;
 
         await RunCommandAsync(async () =>
         {
-            var snapshot = await _api.ConfirmPointerAnswerAsync(
-                session.SessionId,
-                consent.TurnId,
-                consent.ConsentId,
-                consent.PreviewHash,
-                confirmed,
-                _lifetime.Token);
-            RenderSession(snapshot);
+            if (!confirmed)
+            {
+                RenderSession(await _api.CancelSessionTurnAsync(session.SessionId, consent.TurnId, _lifetime.Token));
+                return;
+            }
+            ArmPointerGesture(consent.ExpiresAtUtc,
+                "已确认这份文字预览。请在预览过期前切回原目标窗口，按 Ctrl+Alt+F8 发送这一次；不会重新读取图片。",
+                () => _currentSession?.SessionId == session.SessionId
+                    && _currentSession?.ForegroundTurn?.Id == consent.TurnId
+                    && _currentSession?.PointerAnswerConsents?.Any(item => item.ConsentId == consent.ConsentId
+                        && item.PreviewHash == consent.PreviewHash) == true,
+                async token =>
+                {
+                    await _pointerRequestCancellation.BindAsync(
+                        cancellation => _api.CancelSessionTurnAsync(session.SessionId, consent.TurnId, cancellation), token);
+                    token.ThrowIfCancellationRequested();
+                    var snapshot = await _api.ConfirmPointerAnswerAsync(session.SessionId,
+                        consent.TurnId, consent.ConsentId, consent.PreviewHash, true, token);
+                    token.ThrowIfCancellationRequested();
+                    RenderSession(snapshot);
+                });
         });
     }
-
     private async Task RespondMemoryOutboundConsentAsync(bool confirmed)
     {
         var session = _currentSession;
@@ -1691,8 +1729,11 @@ public partial class MainWindow : Window
 
     private async void ConversationMemorySelectionList_SelectionChanged(
         object sender,
-        SelectionChangedEventArgs e) =>
+        SelectionChangedEventArgs e)
+    {
+        await InvalidateDisplayedPointerConsentAsync();
         await InvalidateDisplayedMemoryConsentAsync();
+    }
 
     private async void ConversationInputTextBox_TextChanged(object sender, TextChangedEventArgs e)
     {
@@ -1746,6 +1787,8 @@ public partial class MainWindow : Window
             return;
         }
 
+        CancelPendingPointerGesture();
+
         var session = _currentSession;
         var consent = session?.PointerAnswerConsents?
             .SingleOrDefault(item => item.TurnId == session.ForegroundTurn?.Id);
@@ -1757,12 +1800,9 @@ public partial class MainWindow : Window
         _isInvalidatingPointerConsent = true;
         try
         {
-            var snapshot = await _api.ConfirmPointerAnswerAsync(
+            var snapshot = await _api.CancelSessionTurnAsync(
                 session.SessionId,
                 consent.TurnId,
-                consent.ConsentId,
-                consent.PreviewHash,
-                confirmed: false,
                 _lifetime.Token);
             RenderSession(snapshot);
         }
@@ -1827,6 +1867,7 @@ public partial class MainWindow : Window
         string expectedIntentKind,
         string expectedTarget)
     {
+        CancelPendingPointerGesture();
         await RunCommandAsync(async () =>
         {
             var submitted = await _api.SubmitSessionInputAsync(
@@ -1896,6 +1937,8 @@ public partial class MainWindow : Window
     {
         if (!_isRenderingAiSettings)
         {
+            CancelPendingPointerGesture();
+            _ = InvalidateDisplayedPointerConsentAsync();
             AiCredentialPasswordBox.Clear();
             RenderSelectedAiProvider();
         }
@@ -1905,6 +1948,8 @@ public partial class MainWindow : Window
     {
         if (!_isRenderingAiSettings)
         {
+            CancelPendingPointerGesture();
+            _ = InvalidateDisplayedPointerConsentAsync();
             UpdateAiSettingsButtons();
         }
     }

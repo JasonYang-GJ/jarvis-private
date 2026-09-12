@@ -973,6 +973,10 @@ public sealed class Stage2AiSettingsUiAutomationTests
             var binaries = LocateReleaseBinaries();
             var pipeName = $"ScreenGuide.Stage2ProgrammingUi.{Guid.NewGuid():N}";
             var options = new DesktopHostOptions(dataRoot, binaries.FakeCodexPath, pipeName);
+            // Exercise a persisted legacy Codex route; the current default is intentionally different.
+            var legacyRoute = new AiSettings(new ChatModelRoute("codex", "codex-default"));
+            using (var routeStore = new FileAiSettingsStore(options.AiSettingsPath, legacyRoute))
+                await routeStore.SaveAsync(legacyRoute);
             host = DesktopHostFactory.Build([], options);
             await host.StartAsync();
 

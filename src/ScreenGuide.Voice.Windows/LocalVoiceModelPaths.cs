@@ -9,10 +9,13 @@ public sealed record LocalVoiceModelPaths(
     private const string RecognitionModelName =
         "sherpa-onnx-streaming-zipformer-zh-int8-2025-06-30";
 
-    public static string ModelRoot => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "ScreenGuideTeacher",
-        "models");
+    public const string ModelDirectoryEnvironmentVariable = "SCREEN_GUIDE_VOICE_MODEL_DIRECTORY";
+
+    public static string ModelRoot =>
+        Environment.GetEnvironmentVariable(ModelDirectoryEnvironmentVariable) is { Length: > 0 } configured
+            ? Path.GetFullPath(configured)
+            : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "ScreenGuideTeacher", "models");
 
     public static LocalVoiceModelPaths Create(string? modelRoot = null)
     {

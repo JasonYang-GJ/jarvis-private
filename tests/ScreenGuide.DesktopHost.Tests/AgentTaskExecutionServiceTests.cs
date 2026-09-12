@@ -279,17 +279,17 @@ public sealed class AgentTaskExecutionServiceTests
     public async Task CancellationKillsChildAndPersistsCancelled()
     {
         await using var environment = DesktopHostTestEnvironment.Create();
-        var marker = Path.Combine(environment.RootDirectory, "cancelled-child-marker.txt");
+        using var processes = new ReadyProcessTree(environment.RootDirectory);
         var (device, _, task) = await environment.SeedTaskAsync(
-            $"TEST_LONG_RUNNING\nMARKER={marker}");
+            processes.Prompt);
         using var host = environment.BuildHost();
         await host.StartAsync();
         var service = host.Services.GetRequiredService<AgentTaskExecutionService>();
 
         await service.StartTaskAsync(task.Id);
-        await Task.Delay(500);
+        await processes.WaitUntilReadyAsync();
         Assert.True(await service.CancelTaskAsync(task.Id, device.Id));
-        await Task.Delay(TimeSpan.FromSeconds(5));
+        await processes.AssertStoppedAsync();
 
         var store = host.Services.GetRequiredService<ILocalTaskStore>();
         var persistedTask = await store.GetTaskAsync(task.Id);
@@ -301,7 +301,6 @@ public sealed class AgentTaskExecutionServiceTests
         Assert.NotNull(Assert.Single(attempts).CancellationConfirmedAtUtc);
         Assert.Equal(SkillInvocationStatus.Cancelled, invocation.Status);
         Assert.Equal(TaskPhase.Verifying, persistedTask?.Phase);
-        Assert.False(File.Exists(marker));
     }
 
     [Fact]

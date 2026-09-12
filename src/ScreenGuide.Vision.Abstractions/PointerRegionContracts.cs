@@ -115,6 +115,15 @@ public static class PointerAnchorPolicy
                 "这次指针位置已经过期，请重新确认。 ");
         }
 
+        RequireFrozenTextTargetCurrent(anchor, current);
+    }
+
+    // Identity-only validation for an already captured immutable text snapshot. This
+    // never authorizes another pixel read; all capture paths must use RequireCurrent.
+    public static void RequireFrozenTextTargetCurrent(PointerAnchor anchor, PointerDesktopSnapshot current)
+    {
+        ArgumentNullException.ThrowIfNull(anchor);
+        ArgumentNullException.ThrowIfNull(current);
         var expected = anchor.Window;
         var actual = current.Window;
         if (current.ForegroundWindowHandle != expected.Target.WindowHandle

@@ -1,6 +1,6 @@
 # ScreenGuide Desktop（开发代号）
 
-> 当前进度（2026-09-12）：V0.6.0 是最近正式冻结版，V0.7.0 是内部候选。指针问答的真实 Client 交互仍有焦点问题，Gate4C 和正式分发尚未完成。见 [候选收尾检查](docs/V0.7.0_CANDIDATE_CLOSEOUT.md) 与 [路线图](ROADMAP.md)。
+> 当前进度（2026-09-12）：V0.6.0 是最近正式冻结版，V0.7.0 是内部候选。Gate4C 指针交互修复已按用户批准的方案实现，仍待真实 OCR 与模型回答闭环，正式分发尚未完成。见 [修复记录](docs/V0.7.0_GATE4C_REPAIR.md)。见 [候选收尾检查](docs/V0.7.0_CANDIDATE_CLOSEOUT.md) 与 [路线图](ROADMAP.md)。
 
 ScreenGuide Desktop 是运行在 Windows 上的个人 AI 中枢。用户打开元枢后，首页会自动进入可见的本机语音监听状态，不需要按键或输入文字；明确的低风险语音指令本身就是本次一次性授权。读取画面、打开文件和编程任务仍保留单独确认。Codex 只是可选的编程技能，不是产品中心。
 

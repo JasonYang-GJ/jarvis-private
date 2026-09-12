@@ -19,6 +19,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <EmbeddedResource Include="..\..\src\ScreenGuide.DesktopClient\App.xaml" LogicalName="VoiceHarness.ActualApp.xaml" />
     <Resource Include="..\..\assets\branding\yuanshu-icon.ico">
       <Link>Assets\yuanshu-icon.ico</Link>
     </Resource>

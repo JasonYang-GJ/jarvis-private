@@ -110,7 +110,10 @@ public sealed class SessionCoordinatorIpcTests
             await Task.Delay(20);
         }
 
-        throw new TimeoutException("统一会话 Turn 未在预期时间内结束。");
+        var last = await client.GetCurrentSessionAsync();
+        var lastTurn = last?.Turns.SingleOrDefault(item => item.Id == turnId);
+        if (lastTurn?.Phase is "Completed" or "Failed" or "Cancelled" or "Interrupted") return last!;
+        throw new TimeoutException($"统一会话 Turn 未在预期时间内结束；阶段={lastTurn?.Phase}; cancelled={lastTurn?.CancellationRequested}。");
     }
 
     private sealed class StatefulSessionProvider : IConversationProvider

@@ -187,10 +187,14 @@ public sealed class SessionFrozenRouteTests
         Assert.Equal(0, provider.CompleteCount);
     }
 
-    [Fact]
-    public async Task PointerAnswerWaitsForExactPreviewAndOneConfirmationAllowsOnlyOneTextOnlyRequest()
+    [Theory]
+    [InlineData(0)]
+    [InlineData(30)]
+    [InlineData(119)]
+    public async Task PointerAnswerWaitsForExactPreviewAndOneConfirmationAllowsOnlyOneTextOnlyRequest(int readingSeconds)
     {
         await using var environment = DesktopHostTestEnvironment.Create();
+        var capture = new FixedPointerCapture();
         const string question = "这个按钮是什么意思？";
         const string ocr = "保存并继续";
         var provider = new SwitchingRecordingProvider(
@@ -204,7 +208,7 @@ public sealed class SessionFrozenRouteTests
                 new MutableSettingsStore(Route("qwen", "qwen3.7-plus")));
             services.AddSingleton(new ChatProviderRegistry([provider]));
             services.AddSingleton<IPointerDesktopProbe>(new FixedPointerProbe(PointerSnapshot()));
-            services.AddSingleton<IPointerRegionCaptureService>(new FixedPointerCapture());
+            services.AddSingleton<IPointerRegionCaptureService>(capture);
             services.AddSingleton<ILocalOcrTextExtractor>(new FixedPointerOcr(ocr));
         });
         await host.StartAsync();
@@ -243,6 +247,9 @@ public sealed class SessionFrozenRouteTests
         Assert.Empty(provider.Requests);
         Assert.Empty(await invocations.GetForSessionTurnAsync(submitted.TurnId));
 
+        Assert.Equal(environment.TimeProvider.GetUtcNow().AddSeconds(120), preview.ExpiresAtUtc);
+        environment.TimeProvider.UtcNow = environment.TimeProvider.GetUtcNow().AddSeconds(readingSeconds);
+
         var confirmationResults = await Task.WhenAll(
             TryConfirmPointerAnswerAsync(
                 client,
@@ -261,6 +268,7 @@ public sealed class SessionFrozenRouteTests
             confirmationResults,
             code => code == PointerAnswerErrorCodes.ConsentStale);
         var completed = await WaitForPhaseAsync(store, submitted.TurnId, SessionTurnPhase.Completed);
+        Assert.Equal(1, capture.Count); // Reading/confirming never captures pixels again.
         var providerRequest = Assert.Single(provider.Requests);
         Assert.Equal("window.pointer.answer", providerRequest.Prompt?.PromptId);
         Assert.Equal(2, providerRequest.Messages.Count);
@@ -300,6 +308,7 @@ public sealed class SessionFrozenRouteTests
     public async Task PointerAnswerTamperedDeclinedOrStoppedPreviewFailsBeforeInvocationOrProvider()
     {
         await using var environment = DesktopHostTestEnvironment.Create();
+        var probe = new FixedPointerProbe(PointerSnapshot());
         var provider = new SwitchingRecordingProvider(
             "deepseek",
             "deepseek-chat",
@@ -310,7 +319,7 @@ public sealed class SessionFrozenRouteTests
             services.AddSingleton<IAiSettingsStore>(
                 new MutableSettingsStore(Route("deepseek", "deepseek-chat")));
             services.AddSingleton(new ChatProviderRegistry([provider]));
-            services.AddSingleton<IPointerDesktopProbe>(new FixedPointerProbe(PointerSnapshot()));
+            services.AddSingleton<IPointerDesktopProbe>(probe);
             services.AddSingleton<IPointerRegionCaptureService>(new FixedPointerCapture());
             services.AddSingleton<ILocalOcrTextExtractor>(new FixedPointerOcr("PRIVATE_OCR_SENTINEL"));
         });
@@ -345,6 +354,7 @@ public sealed class SessionFrozenRouteTests
             PointerAnchorId: secondAnchor.AnchorId));
         _ = await WaitForPhaseAsync(store, second.TurnId, SessionTurnPhase.WaitingForPointerAnswerConsent);
         var secondPreview = Assert.Single((await client.GetCurrentSessionAsync())!.PointerAnswerConsents!);
+        probe.Snapshot = probe.Snapshot with { ForegroundWindowHandle = 99 }; // Refusal from Client needs no capture authority.
         _ = await client.ConfirmPointerAnswerAsync(
             session.Session.Id,
             second.TurnId,
@@ -353,6 +363,7 @@ public sealed class SessionFrozenRouteTests
             confirmed: false);
         _ = await WaitForPhaseAsync(store, second.TurnId, SessionTurnPhase.Cancelled);
 
+        probe.Snapshot = PointerSnapshot();
         var thirdAnchor = await client.PreparePointerRegionAsync(new PreparePointerRegionRequestDto(true));
         var third = await client.SubmitSessionInputAsync(new SessionInputRequestDto(
             "第三个问题",
@@ -372,10 +383,15 @@ public sealed class SessionFrozenRouteTests
         await host.StopAsync();
     }
 
-    [Fact]
-    public async Task PointerAnswerAtExactTenSecondAnchorExpiryFailsBeforeInvocationOrProvider()
+    [Theory]
+    [InlineData("expiry")]
+    [InlineData("clock-rollback")]
+    [InlineData("target-change")]
+    public async Task PointerAnswerInvalidSnapshotFailsBeforeInvocationOrProvider(string invalidation)
     {
         await using var environment = DesktopHostTestEnvironment.Create();
+        var probe = new FixedPointerProbe(PointerSnapshot());
+        var capture = new FixedPointerCapture();
         var provider = new SwitchingRecordingProvider(
             "provider-a",
             "model-a",
@@ -385,8 +401,8 @@ public sealed class SessionFrozenRouteTests
         {
             services.AddSingleton<IAiSettingsStore>(new MutableSettingsStore(Route("provider-a", "model-a")));
             services.AddSingleton(new ChatProviderRegistry([provider]));
-            services.AddSingleton<IPointerDesktopProbe>(new FixedPointerProbe(PointerSnapshot()));
-            services.AddSingleton<IPointerRegionCaptureService>(new FixedPointerCapture());
+            services.AddSingleton<IPointerDesktopProbe>(probe);
+            services.AddSingleton<IPointerRegionCaptureService>(capture);
             services.AddSingleton<ILocalOcrTextExtractor>(new FixedPointerOcr("OCR"));
         });
         await host.StartAsync();
@@ -404,7 +420,14 @@ public sealed class SessionFrozenRouteTests
         _ = await WaitForPhaseAsync(store, submitted.TurnId, SessionTurnPhase.WaitingForPointerAnswerConsent);
         var preview = Assert.Single((await client.GetCurrentSessionAsync())!.PointerAnswerConsents!);
 
-        environment.TimeProvider.UtcNow = preview.ExpiresAtUtc;
+        var preparedAt = environment.TimeProvider.UtcNow;
+        environment.TimeProvider.UtcNow = invalidation switch
+        {
+            "expiry" => preview.ExpiresAtUtc,
+            "clock-rollback" => preparedAt.AddSeconds(-1),
+            _ => preparedAt.AddSeconds(30)
+        };
+        if (invalidation == "target-change") probe.Snapshot = probe.Snapshot with { ForegroundWindowHandle = 99 };
         _ = await client.ConfirmPointerAnswerAsync(
             session.Session.Id,
             submitted.TurnId,
@@ -414,6 +437,7 @@ public sealed class SessionFrozenRouteTests
         var failed = await WaitForPhaseAsync(store, submitted.TurnId, SessionTurnPhase.Failed);
 
         Assert.Equal(PointerAnswerErrorCodes.ConsentStale, failed.FailureCode);
+        Assert.Equal(1, capture.Count);
         Assert.Empty(provider.Requests);
         Assert.Empty(await invocations.GetForSessionTurnAsync(submitted.TurnId));
         await host.StopAsync();
@@ -1216,14 +1240,16 @@ public sealed class SessionFrozenRouteTests
         var store = host.Services.GetRequiredService<ISessionStore>();
         var session = await coordinator.StartNewAsync("并发幂等冻结");
 
+        // A fixed website keeps this idempotency test independent of real Start Menu/registry scans.
+        // The Turn is cancelled before confirmation; no browser or network request is executed.
         var submissions = await Task.WhenAll(Enumerable.Range(0, 16).Select(_ =>
             coordinator.SubmitAsync(
                 session.Session.Id,
-                "启动“记事本”",
+                "打开https://example.com/",
                 "Text",
                 "concurrent-frozen-route",
-                expectedIntentKind: "OpenApplication",
-                expectedTarget: "notepad")));
+                expectedIntentKind: "OpenWebsite",
+                expectedTarget: "https://example.com/")));
         var turnId = submissions.Select(result => result.TurnId).Distinct().Single();
         var turn = await WaitForPhaseAsync(
             store,
@@ -1238,6 +1264,59 @@ public sealed class SessionFrozenRouteTests
         Assert.Equal(SessionTurnRouteStatus.Ready, turn.FrozenRoute?.Status);
         Assert.Equal(1, settings.LoadCount);
         Assert.Equal(0, provider.CompleteCount);
+    }
+
+    [Fact]
+    public async Task ExplicitPointerTurnCancellationStopsAcceptedProviderBeforeDelayedConfirmResponseIsObserved()
+    {
+        await using var environment = DesktopHostTestEnvironment.Create();
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var cancelled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseResponse = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var provider = new SwitchingRecordingProvider("provider-a", "model-a", _ => Task.FromResult("unused"),
+            "https://provider-a.example/v1/chat", async (_, token) =>
+            {
+                using var registration = token.Register(() => cancelled.TrySetResult());
+                entered.TrySetResult();
+                await Task.Delay(Timeout.Infinite, token);
+                return "late result must never appear";
+            });
+        using var host = environment.BuildHost(services =>
+        {
+            services.AddSingleton<IAiSettingsStore>(new MutableSettingsStore(Route("provider-a", "model-a")));
+            services.AddSingleton(new ChatProviderRegistry([provider]));
+            services.AddSingleton<IPointerDesktopProbe>(new FixedPointerProbe(PointerSnapshot()));
+            services.AddSingleton<IPointerRegionCaptureService>(new FixedPointerCapture());
+            services.AddSingleton<ILocalOcrTextExtractor>(new FixedPointerOcr("synthetic"));
+        });
+        await host.StartAsync();
+        IDesktopApiClient api = new DesktopApiClient(environment.Options.PipeName);
+        var coordinator = host.Services.GetRequiredService<SessionCoordinator>();
+        var store = host.Services.GetRequiredService<ISessionStore>();
+        var session = await coordinator.StartNewAsync("取消已接受的指针回答");
+        var anchor = await api.PreparePointerRegionAsync(new PreparePointerRegionRequestDto(true));
+        var submitted = await api.SubmitSessionInputAsync(new SessionInputRequestDto("合成问题",
+            SessionId: session.Session.Id, PointerAnchorId: anchor.AnchorId));
+        await WaitForPhaseAsync(store, submitted.TurnId, SessionTurnPhase.WaitingForPointerAnswerConsent);
+        var preview = Assert.Single((await api.GetCurrentSessionAsync())!.PointerAnswerConsents!);
+        async Task<SessionSnapshotDto> DelayedResponse()
+        {
+            var response = await api.ConfirmPointerAnswerAsync(session.Session.Id, submitted.TurnId,
+                preview.ConsentId, preview.PreviewHash, true);
+            await releaseResponse.Task;
+            return response;
+        }
+        var pendingResponse = DelayedResponse();
+        try
+        {
+            await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.False(pendingResponse.IsCompleted);
+            await api.CancelSessionTurnAsync(session.Session.Id, submitted.TurnId);
+            await cancelled.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await WaitForPhaseAsync(store, submitted.TurnId, SessionTurnPhase.Cancelled);
+            Assert.Single(provider.Requests);
+        }
+        finally { releaseResponse.TrySetResult(); await pendingResponse; await host.StopAsync(); }
     }
 
     private static AiSettings Route(string providerId, string modelId) =>
@@ -1287,6 +1366,7 @@ public sealed class SessionFrozenRouteTests
         }
 
         var lastTurn = await store.GetTurnAsync(turnId);
+        if (lastTurn?.Phase == phase) return lastTurn;
         throw new TimeoutException(
             $"Turn 未在预期时间内进入 {phase}；实际阶段：{lastTurn?.Phase}；错误码：{lastTurn?.FailureCode}。");
     }
@@ -1339,9 +1419,10 @@ public sealed class SessionFrozenRouteTests
 
     private sealed class FixedPointerProbe(PointerDesktopSnapshot snapshot) : IPointerDesktopProbe
     {
-        public PointerDesktopSnapshot CaptureCurrent() => snapshot;
+        public PointerDesktopSnapshot Snapshot { get; set; } = snapshot;
+        public PointerDesktopSnapshot CaptureCurrent() => Snapshot;
 
-        public PointerDesktopSnapshot ObserveAt(int screenX, int screenY) => snapshot with
+        public PointerDesktopSnapshot ObserveAt(int screenX, int screenY) => Snapshot with
         {
             ScreenX = screenX,
             ScreenY = screenY
@@ -1350,12 +1431,16 @@ public sealed class SessionFrozenRouteTests
 
     private sealed class FixedPointerCapture : IPointerRegionCaptureService
     {
+        public int Count;
         public Task<CapturedPointerRegion> CaptureAsync(
             WindowCaptureTarget target,
             PixelBounds windowBounds,
             PixelBounds regionBounds,
-            CancellationToken cancellationToken = default) =>
-            Task.FromResult(new CapturedPointerRegion([1], 320, 120, "fake"));
+            CancellationToken cancellationToken = default)
+        {
+            Interlocked.Increment(ref Count);
+            return Task.FromResult(new CapturedPointerRegion([1], 320, 120, "fake"));
+        }
     }
 
     private sealed class FixedPointerOcr(string text) : ILocalOcrTextExtractor
@@ -1472,7 +1557,8 @@ public sealed class SessionFrozenRouteTests
         string providerId,
         string modelId,
         Func<ChatModelRequest, Task<string>> response,
-        string? dataDestination = null) : IChatModelProvider
+        string? dataDestination = null,
+        Func<ChatModelRequest, CancellationToken, Task<string>>? cancellableResponse = null) : IChatModelProvider
     {
         public ChatProviderDescriptor Descriptor { get; } = new(
             providerId,
@@ -1489,7 +1575,9 @@ public sealed class SessionFrozenRouteTests
             CancellationToken cancellationToken = default)
         {
             Requests.Add(request);
-            var text = await response(request);
+            var text = cancellableResponse is null
+                ? await response(request)
+                : await cancellableResponse(request, cancellationToken);
             return new ChatModelResponse(
                 text,
                 ChatFinishReason.Stop,
