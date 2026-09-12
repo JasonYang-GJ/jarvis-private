@@ -1,4 +1,6 @@
-# 元枢产品事实（V0.6.0 / Stage 4 Final Freeze）
+# 元枢产品事实（V0.6.0 冻结版与 V0.7.0 内部候选）
+
+> 2026-09-12 当前候选补充：V0.7.0 产品源码为 `19081d39e443a465770fc9e402d9a30c3d1d0ae0`，安装版 Client/Host 版本与 EXE 哈希已经只读核对。IPC v12、SQLite v11。最近正式冻结仍为 V0.6.0。2026-09-08 交接报告记载 Gate4A/B 真实 PASS，本轮不重测；Gate4C 发现真实 Client 点击确认后准备读取元枢自身的焦点问题，尚未完成实机闭环。详见 [候选收尾检查](docs/V0.7.0_CANDIDATE_CLOSEOUT.md)。以下阶段记录保留其历史版本含义，不能把 V0.7.0 候选视为已正式发布。
 
 > 当前产品事实的唯一入口。更新时间：2026-09-01。V0.6.0 / Stage 4 已完成 Final Freeze，S4-R1 Window Identity v2、S4-R2 本机真实使用评测、S4-R3 有界 Session 投影与 S4-R4 runtime gate 有界化均为 `INTEGRATED_PASS`。正式标签 `v0.6.0-stage4` 指向 C0 源码提交 `3a591a7b6af7da7d97e07093d4c33a3f44553b82`；Stage 5 的 S5-R1 与 S5-R2 已分别完成许可/NOTICE 合同和真实隔离生命周期证据，但不改变标签或 Stage 4 二进制身份。安装包仍未获对外分发放行，不新增 S4-R5。
 

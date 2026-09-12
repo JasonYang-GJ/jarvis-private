@@ -1,6 +1,8 @@
-# 元枢当前架构（V0.6.0 / Stage 4 Final Freeze As-Built）
+# 元枢当前架构（V0.7.0 候选及 V0.6.0 冻结背景）
 
-> 本文描述 V0.6.0 / Stage 4 Final Freeze 的当前结构；S4-R1/R2/R3/R4 均为 `INTEGRATED_PASS`，正式标签、独立标签源码产物与 C1 证据均已形成。该冻结状态不等于已获对外分发批准。更新时间：2026-08-30。
+> 2026-09-12：当前产品源码 `19081d3` 已含只读 Bridge、应用发现/搜索和指针文字回答候选；Desktop IPC v12、SQLite schema v11。以下旧阶段段落仍描述对应阶段的历史合同。当前 Client 指针入口存在已诊断的焦点缺口，不能据接口实现认定真实使用链路完成。详见 [候选收尾检查](docs/V0.7.0_CANDIDATE_CLOSEOUT.md)；[交互修复方案](docs/V0.7.0_GATE4C_INTERACTION_PROPOSAL.md)仍为提案，不属于已实现架构。
+
+> 冻结背景（2026-08-30）：V0.6.0 / Stage 4 的 S4-R1/R2/R3/R4 均为 `INTEGRATED_PASS`，正式标签、独立标签源码产物与 C1 证据均已形成。该历史冻结状态不等于当前候选已获对外分发批准。
 
 ## 1. 运行结构
 
@@ -15,7 +17,7 @@ DesktopClient（WPF）
   ├─ 设置页：普通聊天 Provider/Model、数据去向、凭据和健康状态
   ├─ 设置页：用户显式管理的本机长期记忆及主动本地预览（不自动发给模型）
   └─ 编程 Agent 独立显示为 Codex
-  ↓ 当前用户 Named Pipe，protocol v10
+  ↓ 当前用户 Named Pipe，protocol v12（当前候选）
 DesktopHost
   ├─ SessionCoordinator（唯一会话与前台 Turn 协调入口）
   │    ├─ ConversationService → RoutedConversationProvider
@@ -37,6 +39,8 @@ DesktopHost
 ```
 
 DesktopHost 仍是唯一业务编排和审计边界。SessionCoordinator 协调“当前在聊什么、当前在做什么、缺什么信息以及如何取消”，但不拥有任何项目、文件、窗口或动作授权。Model Router 只选择普通聊天供应商，也不拥有权限。
+
+当前 Core 还提供 `bridge.handshake` 与 `bridge.snapshot.get`，能力为 `bridge_snapshot_v1`。Bridge 仅投影现有 Session/Task 状态，不拥有任务、权限或命令执行能力；Core 实现不证明灵动岛联合验收完成。
 
 ## 2. 正式源码范围
 

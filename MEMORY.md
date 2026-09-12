@@ -1,8 +1,12 @@
 # 元枢项目记忆
 
-> 本文件记录稳定项目事实和历史决策，不是产品运行时的用户记忆账本。更新时间：2026-09-01。
+> 本文件记录稳定项目事实和历史决策，不是产品运行时的用户记忆账本。更新时间：2026-09-12。
 
 ## 当前状态
+
+- 2026-09-12 候选核对：产品源码 `19081d39e443a465770fc9e402d9a30c3d1d0ae0`、V0.7.0 安装 Client/Host 配对与 EXE 哈希匹配；最近正式标签仍为 `v0.6.0-stage4`。本轮仅测试诊断/文档变化，不改历史安装包或已安装产品。
+- 2026-09-08 交接报告已记录 Gate4A/B PASS；旧 R2/canary 的失败记录不能覆盖较新交接结论，本轮未重测。Gate4C 尚未完成：使用真实 MainWindow 点击逻辑、fake API 在捕获前停止的诊断证明 Prepare 时前台为元枢而非外部测试窗口；出站确认还有相同前台约束，阅读预览沿用原锚点 10 秒期限。
+- 当前下一步是确认 Gate4C 交互/时限变更，之后修复与重新验收。分离 10 秒捕获寿命与 120 秒冻结文字预览的方案只是待审提案，不能当成已实现或已授权；见 `docs/V0.7.0_GATE4C_INTERACTION_PROPOSAL.md`。当前证据账见 `docs/V0.7.0_CANDIDATE_CLOSEOUT.md`。
 
 - V0.6.0 / Stage 4 已完成 Final Freeze，S4-R1/R2/R3/R4 均为 `INTEGRATED_PASS`。正式标签 `v0.6.0-stage4` 指向 C0 `3a591a7b6af7da7d97e07093d4c33a3f44553b82`，annotated tag object 为 `20045c7960c182a052a5e0b2552ce0ed14a3863f`；C1 只记录冻结证据，不改变标签源码或二进制身份。Stage 4 到此结束，不新增 S4-R5。
 - Stage 5 的唯一方向是 Safe Distribution & Upgrade Readiness。S5-R1 许可/NOTICE 与 S5-R2 真实 Windows Sandbox 生命周期均已 PASS；S5-R2 状态为 `S5-R2_REAL_SANDBOX_LIFECYCLE_PASS`，证据绑定 exact SHA `2dc99dda8ef31cad0fdd6ed0ccf74b34e8b59867`。S5-R3 签名/release identity 与 S5-R4 最终分发验收仍为 `NOT_STARTED / NOT_AUTHORIZED`；Stage 5 尚未完成，也不授权下载、未来安装、签名、采购、联网、上传或发布。

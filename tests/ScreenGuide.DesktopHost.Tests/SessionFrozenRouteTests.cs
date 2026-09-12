@@ -1286,7 +1286,9 @@ public sealed class SessionFrozenRouteTests
             await Task.Delay(20);
         }
 
-        throw new TimeoutException($"Turn 未在预期时间内进入 {phase}。");
+        var lastTurn = await store.GetTurnAsync(turnId);
+        throw new TimeoutException(
+            $"Turn 未在预期时间内进入 {phase}；实际阶段：{lastTurn?.Phase}；错误码：{lastTurn?.FailureCode}。");
     }
 
     private static async Task<string?> TryConfirmPointerAnswerAsync(
