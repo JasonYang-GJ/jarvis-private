@@ -1,12 +1,14 @@
-<p align="center"><img src="assets/branding/yuanshu-icon.png" width="104" alt="元枢图标"></p>
+<p align="center"><img src="assets/branding/yuanshu-icon.png" width="104" alt="元素图标"></p>
 
-# 元枢 Yuanshu
+# 元素 Yuansu
 
 **Windows 本机 AI 学习与操作助手：用中文交流，理解你授权查看的窗口，完成少量明确、可控的电脑操作。**
 
 A Windows desktop AI assistant for Chinese conversation, local window understanding, and explicitly authorized desktop actions.
 
-元枢把文字/语音聊天、单窗口文字识别、应用与网站启动、受控搜索和授权项目中的编程任务放在一个桌面入口。适合探索“AI 怎样安全地协助日常电脑使用”的开发者和使用者。
+元素把文字/语音聊天、单窗口文字识别、应用与网站启动、受控搜索和授权项目中的编程任务放在一个桌面入口。适合探索“AI 怎样安全地协助日常电脑使用”的开发者和使用者。
+
+GitHub 展示名称现为“元素 Yuansu”。现有桌面程序及历史文档仍使用“元枢 Yuanshu / ScreenGuide”名称；本次仓库更名没有改变已安装程序或历史版本身份。
 
 **当前状态：开发中的公开源码项目。最近冻结版为 V0.6.0；V0.7.0 修复候选尚未完成真实指针问答闭环与正式分发验收。源码公开不等于正式安装版发布。**
 
@@ -43,8 +45,8 @@ A Windows desktop AI assistant for Chinese conversation, local window understand
 
 需要 Windows x64、Git，以及符合 [global.json](global.json) 的 .NET SDK（当前锁定 10.0.400，允许同功能带补丁更新）。窗口、语音和桌面界面验收需要可交互的 Windows 会话。
 
-    git clone https://github.com/JasonYang-GJ/jarvis-private.git yuanshu
-    cd yuanshu
+    git clone https://github.com/JasonYang-GJ/yuansu.git yuansu
+    cd yuansu
     dotnet restore ScreenGuide.slnx --locked-mode --disable-parallel
     dotnet build ScreenGuide.slnx -c Release --no-restore --maxcpucount:1
 
